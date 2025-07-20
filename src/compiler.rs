@@ -1,8 +1,10 @@
+use birds::birds;
 use codegen::codegen;
 use lexer::lex;
 use parser::parse;
 use std::{error::Error, fs};
 
+pub mod birds;
 pub mod codegen;
 pub mod lexer;
 pub mod parser;
@@ -15,6 +17,7 @@ pub fn compile(
     asm_filename: &str,
     only_lex: bool,
     only_parse: bool,
+    only_birds: bool,
     only_codegen: bool,
     add_comments: bool,
 ) -> Result<(), Box<dyn Error>> {
@@ -26,13 +29,20 @@ pub fn compile(
     }
 
     let parsed = parse(lexed)?;
-    // println!("{}", parsed);
     if only_parse {
+        println!("{}", parsed);
+        return Ok(());
+    }
+
+    let birds_output = birds(parsed.clone());
+    if only_birds {
+        println!("{:?}", birds_output?);
         return Ok(());
     }
 
     let code = codegen(parsed, add_comments, IS_LINUX, IS_MAC)?;
     if only_codegen {
+        println!("{}", code.to_string());
         return Ok(());
     }
 

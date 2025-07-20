@@ -4,29 +4,30 @@ use super::{
 };
 use std::{collections::VecDeque, error::Error, fmt::Display, mem::discriminant};
 
+#[derive(Clone)]
 pub struct ProgramNode {
     pub function: FunctionNode,
     has_comments: bool,
 }
 
+#[derive(Clone)]
 pub struct FunctionNode {
-    pub name: IdentifierNode,
+    pub name: String,
     pub body: StatementNode,
 }
 
-pub struct IdentifierNode {
-    pub value: String,
-}
-
+#[derive(Clone)]
 pub enum StatementNode {
     Return(ExpressionNode),
 }
 
+#[derive(Clone)]
 pub enum ExpressionNode {
     Constant(Type),
     Unary(UnaryOperatorNode, Box<ExpressionNode>),
 }
 
+#[derive(Clone)]
 pub enum UnaryOperatorNode {
     Complement,
     Negate,
@@ -102,6 +103,19 @@ fn steal_until_paren(tokens: &mut VecDeque<Token>) -> Result<VecDeque<Token>, Bo
     Err(format!("Could not find expected token: {:?}", Token::CloseParen).into())
 }
 
+fn parse_string(token: Token) -> Result<String, Box<dyn Error>> {
+    if let Token::Identifier(string) = token {
+        Ok(string)
+    } else {
+        Err(format!(
+            "Wrong token received, expected: {:?} got: {:?}",
+            Token::Identifier(String::new()),
+            token
+        )
+        .into())
+    }
+}
+
 fn steal_last(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
     let token = tokens
         .pop_front()
@@ -150,7 +164,7 @@ impl IndentDisplay for FunctionNode {
             "{:indent$}Function (\n{:indent$}    name: {},\n{:indent$}    body: {}\n{:indent$})",
             "",
             "",
-            self.name.fmt_indent(indent + 4, comments),
+            self.name,
             "",
             self.body.fmt_indent(indent + 4, comments),
             "",
@@ -162,7 +176,7 @@ impl IndentDisplay for FunctionNode {
 impl Parse for FunctionNode {
     fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
         expect(Token::Keyword(Keyword::Int), steal(tokens)?)?;
-        let name = IdentifierNode::parse(&mut vec![steal(tokens)?].into())?;
+        let name = parse_string(steal(tokens)?)?;
         expect(Token::OpenParen, steal(tokens)?)?;
         expect(Token::Keyword(Keyword::Void), steal(tokens)?)?;
         expect(Token::CloseParen, steal(tokens)?)?;
@@ -175,39 +189,6 @@ impl Parse for FunctionNode {
         expect(Token::CloseBrace, steal_last(tokens)?)?;
 
         Ok(FunctionNode { name, body })
-    }
-}
-
-impl IndentDisplay for IdentifierNode {
-    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
-        format!("Identifier(\"{}\")", self.value,)
-    }
-}
-
-impl Parse for IdentifierNode {
-    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
-        let first_token = tokens
-            .pop_front()
-            .ok_or::<Box<dyn Error>>("Too few tokens in identifier node".into())?;
-        if !tokens.is_empty() {
-            return Err(format!(
-                "Unexpected extra tokens in identifier definition, got: {:?}",
-                tokens
-            )
-            .into());
-        };
-
-        if let Token::Identifier(value) = first_token {
-            Ok(IdentifierNode {
-                value: value.to_string(),
-            })
-        } else {
-            Err(format!(
-                "Unexpected token, got: {:?}, expecting an identifier token",
-                tokens[0],
-            )
-            .into())
-        }
     }
 }
 

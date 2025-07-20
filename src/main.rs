@@ -8,6 +8,7 @@ fn main() {
     let mut filename = "".to_string();
     let mut only_lex = false;
     let mut only_parse = false;
+    let mut only_birds = false;
     let mut only_codegen = false;
     let mut assembly_out = false;
     let mut add_comments = false;
@@ -15,6 +16,7 @@ fn main() {
         match arg.as_str() {
             "--lex" => only_lex = true,
             "--parse" => only_parse = true,
+            "--tacky" => only_birds = true,
             "--codegen" => only_codegen = true,
             "-S" => assembly_out = true,
             "--comments" => add_comments = true,
@@ -47,6 +49,7 @@ fn main() {
         &asm_filename,
         only_lex,
         only_parse,
+        only_birds,
         only_codegen,
         add_comments,
     );
@@ -56,7 +59,7 @@ fn main() {
 
     let _ = fs::remove_file(&preprocessed_filename);
 
-    if only_lex || only_parse || only_codegen || assembly_out {
+    if only_lex || only_parse || only_codegen || assembly_out || only_birds {
         // a flag signalling an early exit was passed, so exit here without an error
         return;
     }

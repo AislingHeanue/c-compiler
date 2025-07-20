@@ -62,12 +62,12 @@ impl AssemblyProgramNode {
                 header: if comments {
                     ExtraStrings(vec![
                         "# make the function name accessible globally".to_string(),
-                        format!(".globl {}", parsed.function.name.value),
+                        format!(".globl {}", parsed.function.name),
                     ])
                 } else {
-                    ExtraStrings(vec![format!(".globl {}", parsed.function.name.value)])
+                    ExtraStrings(vec![format!(".globl {}", parsed.function.name)])
                 },
-                name: parsed.function.name.value,
+                name: parsed.function.name,
                 instructions: Instructions(vec![
                     InstructionNode::Mov(return_value, OperandNode::Register),
                     InstructionNode::Ret,
