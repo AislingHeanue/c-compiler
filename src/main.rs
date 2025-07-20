@@ -38,8 +38,9 @@ fn main() {
     println!("Preprocessing...");
     let res = Command::new("gcc")
         .args(["-E", "-P", &filename, "-o", &preprocessed_filename])
-        .output();
-    if res.is_err() {
+        .output()
+        .unwrap();
+    if res.status.code() != Some(0) {
         panic!("Preprocessor failed: {:?}", res);
     }
 
@@ -61,14 +62,18 @@ fn main() {
 
     if only_lex || only_parse || only_codegen || assembly_out || only_birds {
         // a flag signalling an early exit was passed, so exit here without an error
+        if assembly_out {
+            println!("{}", fs::read_to_string(asm_filename).unwrap());
+        }
         return;
     }
 
-    println!("Assembling and Linking...");
+    println!("Outputting to {}", stripped_filename);
     let res = Command::new("gcc")
         .args([&asm_filename, "-o", &stripped_filename])
-        .output();
-    if res.is_err() {
+        .output()
+        .unwrap();
+    if res.status.code() != Some(0) {
         panic!("Linker failed: {:?}", res);
     }
 

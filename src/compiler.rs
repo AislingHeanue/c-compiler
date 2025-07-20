@@ -34,15 +34,15 @@ pub fn compile(
         return Ok(());
     }
 
-    let birds_output = birds(parsed.clone());
+    let birds_output = birds(parsed.clone())?;
     if only_birds {
-        println!("{:?}", birds_output?);
+        println!("{:?}", birds_output);
         return Ok(());
     }
 
-    let code = codegen(parsed, add_comments, IS_LINUX, IS_MAC)?;
+    let code = codegen(birds_output, add_comments, IS_LINUX, IS_MAC)?;
     if only_codegen {
-        println!("{}", code.to_string());
+        println!("{}", code);
         return Ok(());
     }
 
