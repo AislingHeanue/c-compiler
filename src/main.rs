@@ -10,12 +10,14 @@ fn main() {
     let mut only_parse = false;
     let mut only_codegen = false;
     let mut assembly_out = false;
+    let mut add_comments = false;
     for arg in &args[1..] {
         match arg.as_str() {
             "--lex" => only_lex = true,
             "--parse" => only_parse = true,
             "--codegen" => only_codegen = true,
             "-S" => assembly_out = true,
+            "--comments" => add_comments = true,
             _ => {
                 if !filename.is_empty() {
                     panic!("Unrecognised flag, or more than one filename set")
@@ -46,6 +48,7 @@ fn main() {
         only_lex,
         only_parse,
         only_codegen,
+        add_comments,
     );
     if res.is_err() {
         panic!("Compiler failed: {:?}", res);

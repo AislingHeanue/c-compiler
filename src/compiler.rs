@@ -7,29 +7,8 @@ pub mod codegen;
 pub mod lexer;
 pub mod parser;
 
-#[derive(Clone, Debug)]
-pub enum Token {
-    OpenParen,
-    CloseParen,
-    OpenBrace,
-    CloseBrace,
-    SemiColon,
-    Keyword(Keyword),
-    Identifier(String),
-    Constant(Type),
-}
-
-#[derive(Clone, Debug)]
-pub enum Type {
-    Integer(i32),
-}
-
-#[derive(Clone, Debug)]
-pub enum Keyword {
-    Int,
-    Void,
-    Return,
-}
+static IS_LINUX: bool = true;
+static IS_MAC: bool = false;
 
 pub fn compile(
     filename: &str,
@@ -37,6 +16,7 @@ pub fn compile(
     only_lex: bool,
     only_parse: bool,
     only_codegen: bool,
+    add_comments: bool,
 ) -> Result<(), Box<dyn Error>> {
     let contents = fs::read_to_string(filename)?;
 
@@ -46,16 +26,22 @@ pub fn compile(
     }
 
     let parsed = parse(lexed)?;
+    // println!("{}", parsed);
     if only_parse {
         return Ok(());
     }
 
-    let code = codegen(parsed)?;
+    let code = codegen(parsed, add_comments, IS_LINUX, IS_MAC)?;
     if only_codegen {
         return Ok(());
     }
 
-    fs::write(asm_filename, code)?;
+    // println!("writing to {}", asm_filename);
+    fs::write(asm_filename, code.to_string())?;
 
     Ok(())
+}
+
+trait IndentDisplay {
+    fn fmt_indent(&self, indent: usize, comments: bool) -> String;
 }

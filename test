@@ -3,7 +3,12 @@
 chapter=$1
 stage=$2
 test_path=~/dev/nlsandler/writing-a-c-compiler-tests/tests/chapter_"$chapter"
-results=$(~/dev/nlsandler/writing-a-c-compiler-tests/test_compiler ~/dev/AislingHeanue/c-compiler/target/debug/c-compiler --chapter "$chapter" --stage "$stage" 2>&1)
+if [[ -n $stage ]]; then
+	results=$(~/dev/nlsandler/writing-a-c-compiler-tests/test_compiler ~/dev/AislingHeanue/c-compiler/target/debug/c-compiler --chapter "$chapter" --stage "$stage" 2>&1)
+else
+	results=$(~/dev/nlsandler/writing-a-c-compiler-tests/test_compiler ~/dev/AislingHeanue/c-compiler/target/debug/c-compiler --chapter "$chapter" 2>&1)
+fi
+
 	passing=1
 for i in $test_path/*
 do
