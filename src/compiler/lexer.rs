@@ -1,6 +1,9 @@
 use lazy_static::lazy_static;
 use regex::{Match, Regex};
-use std::error::Error;
+use std::{
+    collections::{HashMap, VecDeque},
+    error::Error,
+};
 
 use super::IndentDisplay;
 
@@ -11,6 +14,9 @@ pub enum Token {
     OpenBrace,
     CloseBrace,
     SemiColon,
+    Tilde,
+    Hyphen,
+    Decrement,
     Keyword(Keyword),
     Identifier(String),
     Constant(Type),
@@ -35,6 +41,9 @@ lazy_static! {
         (Token::OpenBrace, Regex::new(r"^\{").unwrap()),
         (Token::CloseBrace, Regex::new(r"^\}").unwrap()),
         (Token::SemiColon, Regex::new(r"^;").unwrap()),
+        (Token::Tilde, Regex::new(r"^~").unwrap()),
+        (Token::Hyphen, Regex::new(r"^-").unwrap()),
+        (Token::Decrement, Regex::new(r"^--").unwrap()),
         (
             Token::Identifier(String::new()),
             Regex::new(r"^[a-zA-Z_]\w*\b").unwrap(),
@@ -46,22 +55,23 @@ lazy_static! {
         // keyword tokens omitted, they are only checked against tokens which match the
         // identifier regex.
     ];
-    static ref KEYWORD_TOKENS: Vec<(Token,String)> = vec![
-        (Token::Keyword(Keyword::Int), "int".to_string()),
-        (Token::Keyword(Keyword::Void), "void".to_string()),
-        (Token::Keyword(Keyword::Return), "return".to_string()),
-    ];
+    static ref KEYWORD_TOKENS: HashMap<String, Token> = {
+        let mut m = HashMap::new();
+        m.insert("int".to_string(), Token::Keyword(Keyword::Int));
+        m.insert("void".to_string(), Token::Keyword(Keyword::Void));
+        m.insert("return".to_string(), Token::Keyword(Keyword::Return));
+        m
+    };
 }
 
 impl Token {
     fn instantiate(&self, text: &str) -> Token {
         match self {
             Token::Identifier(_) => KEYWORD_TOKENS
-                .iter()
-                .filter(|(_, string)| text == string)
-                .map(|(possible_token, _)| possible_token.clone())
-                .next()
-                .unwrap_or(Token::Identifier(text.to_string())),
+                .get(text)
+                .unwrap_or(&Token::Identifier(text.to_string()))
+                .clone(),
+
             Token::Constant(_) => Token::Constant(Type::Integer(text.parse::<i32>().unwrap())),
             _ => self.clone(),
         }
@@ -80,8 +90,8 @@ impl Token {
     }
 }
 
-pub fn lex(mut contents: &str) -> Result<Vec<Token>, Box<dyn Error>> {
-    let mut tokens: Vec<Token> = Vec::new();
+pub fn lex(mut contents: &str) -> Result<VecDeque<Token>, Box<dyn Error>> {
+    let mut tokens: VecDeque<Token> = VecDeque::new();
 
     contents = contents.trim_start();
     while !contents.is_empty() {
@@ -89,7 +99,7 @@ pub fn lex(mut contents: &str) -> Result<Vec<Token>, Box<dyn Error>> {
         let (substring, remainder) = contents.split_at(matched.end());
         contents = remainder;
 
-        tokens.push(possible_token.instantiate(substring));
+        tokens.push_back(possible_token.instantiate(substring));
         contents = contents.trim_start();
     }
     // println!("{:?}", tokens);

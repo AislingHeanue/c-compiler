@@ -52,8 +52,10 @@ impl AssemblyProgramNode {
         mac: bool,
     ) -> Result<AssemblyProgramNode, Box<dyn Error>> {
         let StatementNode::Return(value) = parsed.function.body;
-        let ExpressionNode::Constant(Type::Integer(int_value)) = value;
-        let return_value = OperandNode::Imm(int_value);
+        let return_value = match value {
+            ExpressionNode::Constant(Type::Integer(int_value)) => OperandNode::Imm(int_value),
+            _ => panic!("not implemented"),
+        };
 
         Ok(AssemblyProgramNode {
             function: AssemblyFunctionNode {

@@ -2,7 +2,7 @@ use super::{
     lexer::{Keyword, Token, Type},
     IndentDisplay,
 };
-use std::{error::Error, fmt::Display, mem::discriminant};
+use std::{collections::VecDeque, error::Error, fmt::Display, mem::discriminant};
 
 pub struct ProgramNode {
     pub function: FunctionNode,
@@ -24,14 +24,20 @@ pub enum StatementNode {
 
 pub enum ExpressionNode {
     Constant(Type),
+    Unary(UnaryOperatorNode, Box<ExpressionNode>),
 }
 
-pub fn parse(lexed: Vec<Token>) -> Result<ProgramNode, Box<dyn Error>> {
-    ProgramNode::parse(lexed)
+pub enum UnaryOperatorNode {
+    Complement,
+    Negate,
 }
 
-fn expect(expected: &Token, input: &Token) -> Result<(), Box<dyn Error>> {
-    if discriminant(expected) != discriminant(input) {
+pub fn parse(mut lexed: VecDeque<Token>) -> Result<ProgramNode, Box<dyn Error>> {
+    ProgramNode::parse(&mut lexed)
+}
+
+fn expect(expected: Token, input: Token) -> Result<(), Box<dyn Error>> {
+    if discriminant(&expected) != discriminant(&input) {
         return Err(format!(
             "Unexpected token, got: {:?}, expecting {:?}",
             input, expected
@@ -41,11 +47,80 @@ fn expect(expected: &Token, input: &Token) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn steal(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
+    tokens
+        .pop_front()
+        .ok_or::<Box<dyn Error>>("Too few tokens in identifier node".into())
+}
+
+fn steal_until(
+    tokens: &mut VecDeque<Token>,
+    expected: Token,
+) -> Result<VecDeque<Token>, Box<dyn Error>> {
+    let mut output = VecDeque::new();
+    while !tokens.is_empty() {
+        if discriminant(&expected) == discriminant(&tokens[0]) {
+            if output.is_empty() {
+                return Err(format!(
+                    "Didn't find any tokens between current token and {:?}",
+                    expected
+                )
+                .into());
+            } else {
+                return Ok(output);
+            }
+        }
+
+        output.push_back(tokens.pop_front().unwrap());
+    }
+    Err(format!("Could not find expected token: {:?}", expected).into())
+}
+
+fn steal_until_paren(tokens: &mut VecDeque<Token>) -> Result<VecDeque<Token>, Box<dyn Error>> {
+    let mut output = VecDeque::new();
+    let mut nesting_level = 0;
+    while !tokens.is_empty() {
+        let d = discriminant(&tokens[0]);
+        if d == discriminant(&Token::CloseParen) {
+            if output.is_empty() {
+                return Err(format!(
+                    "Didn't find any tokens between current token and {:?}",
+                    &Token::CloseParen
+                )
+                .into());
+            } else if nesting_level == 0 {
+                return Ok(output);
+            } else {
+                nesting_level -= 1;
+            }
+        } else if d == discriminant(&Token::OpenParen) {
+            nesting_level += 1;
+        }
+
+        output.push_back(tokens.pop_front().unwrap());
+    }
+    Err(format!("Could not find expected token: {:?}", Token::CloseParen).into())
+}
+
+fn steal_last(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
+    let token = tokens
+        .pop_front()
+        .ok_or::<Box<dyn Error>>("Too few tokens in identifier node".into())?;
+    if !tokens.is_empty() {
+        return Err(format!(
+            "Unexpected extra tokens in identifier definition, got: {:?}",
+            tokens
+        )
+        .into());
+    };
+    Ok(token)
+}
+
 trait Parse
 where
     Self: Sized,
 {
-    fn parse(tokens: Vec<Token>) -> Result<Self, Box<dyn Error>>;
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>>;
 }
 
 impl Display for ProgramNode {
@@ -59,7 +134,7 @@ impl Display for ProgramNode {
 }
 
 impl Parse for ProgramNode {
-    fn parse(tokens: Vec<Token>) -> Result<Self, Box<dyn Error>> {
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
         let function = FunctionNode::parse(tokens)?;
 
         Ok(ProgramNode {
@@ -85,28 +160,19 @@ impl IndentDisplay for FunctionNode {
 }
 
 impl Parse for FunctionNode {
-    fn parse(tokens: Vec<Token>) -> Result<Self, Box<dyn Error>> {
-        expect(&Token::Keyword(Keyword::Int), &tokens[0])?;
-        let name = IdentifierNode::parse(vec![tokens[1].clone()])?;
-        expect(&Token::OpenParen, &tokens[2])?;
-        expect(&Token::Keyword(Keyword::Void), &tokens[3])?;
-        expect(&Token::CloseParen, &tokens[4])?;
-        expect(&Token::OpenBrace, &tokens[5])?;
-        let mut i = 6;
-        let mut body_tokens: Vec<Token> = Vec::new();
-        while i < tokens.len() && tokens[i] != Token::CloseBrace {
-            body_tokens.push(tokens[i].clone());
-            i += 1;
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        expect(Token::Keyword(Keyword::Int), steal(tokens)?)?;
+        let name = IdentifierNode::parse(&mut vec![steal(tokens)?].into())?;
+        expect(Token::OpenParen, steal(tokens)?)?;
+        expect(Token::Keyword(Keyword::Void), steal(tokens)?)?;
+        expect(Token::CloseParen, steal(tokens)?)?;
+        expect(Token::OpenBrace, steal(tokens)?)?;
+        let mut body_tokens: VecDeque<Token> = VecDeque::new();
+        while !tokens.is_empty() && tokens[0] != Token::CloseBrace {
+            body_tokens.push_back(steal(tokens)?);
         }
-        let body = StatementNode::parse(body_tokens)?;
-        expect(&Token::CloseBrace, &tokens[i])?;
-        if i != tokens.len() - 1 {
-            return Err(format!(
-                "Unexpected extra tokens in function definition, got: {:?}",
-                tokens[i..].to_vec()
-            )
-            .into());
-        }
+        let body = StatementNode::parse(&mut body_tokens)?;
+        expect(Token::CloseBrace, steal_last(tokens)?)?;
 
         Ok(FunctionNode { name, body })
     }
@@ -119,14 +185,19 @@ impl IndentDisplay for IdentifierNode {
 }
 
 impl Parse for IdentifierNode {
-    fn parse(tokens: Vec<Token>) -> Result<Self, Box<dyn Error>> {
-        if tokens.len() > 1 {
-            Err(format!(
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        let first_token = tokens
+            .pop_front()
+            .ok_or::<Box<dyn Error>>("Too few tokens in identifier node".into())?;
+        if !tokens.is_empty() {
+            return Err(format!(
                 "Unexpected extra tokens in identifier definition, got: {:?}",
-                tokens[1..].to_vec()
+                tokens
             )
-            .into())
-        } else if let Token::Identifier(value) = &tokens[0] {
+            .into());
+        };
+
+        if let Token::Identifier(value) = first_token {
             Ok(IdentifierNode {
                 value: value.to_string(),
             })
@@ -157,10 +228,10 @@ impl IndentDisplay for StatementNode {
 }
 
 impl Parse for StatementNode {
-    fn parse(tokens: Vec<Token>) -> Result<Self, Box<dyn Error>> {
-        expect(&Token::Keyword(Keyword::Return), &tokens[0])?;
-        let expression = ExpressionNode::parse(vec![tokens[1].clone()])?;
-        expect(&Token::SemiColon, &tokens[2])?;
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        expect(Token::Keyword(Keyword::Return), steal(tokens)?)?;
+        let expression = ExpressionNode::parse(&mut steal_until(tokens, Token::SemiColon)?)?;
+        expect(Token::SemiColon, steal_last(tokens)?)?;
 
         Ok(StatementNode::Return(expression))
     }
@@ -172,26 +243,66 @@ impl IndentDisplay for ExpressionNode {
             Self::Constant(value) => {
                 format!("Constant({})", value.fmt_indent(indent + 4, comments),)
             }
+            Self::Unary(operator, exp) => {
+                format!(
+                    "Operation({}, {})",
+                    operator.fmt_indent(indent + 4, comments),
+                    exp.fmt_indent(indent + 4, comments),
+                )
+            }
         }
     }
 }
 
 impl Parse for ExpressionNode {
-    fn parse(tokens: Vec<Token>) -> Result<Self, Box<dyn Error>> {
-        if tokens.len() > 1 {
-            Err(format!(
-                "Unexpected extra tokens in expression definition, got: {:?}",
-                tokens[1..].to_vec()
-            )
-            .into())
-        } else if let Token::Constant(value) = &tokens[0] {
-            Ok(ExpressionNode::Constant(value.clone()))
-        } else {
-            Err(format!(
-                "Unexpected token, got: {:?}, expecting an identifier token",
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        let token = steal(tokens)?;
+        match token {
+            Token::Constant(value) => {
+                if !tokens.is_empty() {
+                    Err(format!(
+                        "Extra characters found in expression after constant: {:?}",
+                        tokens
+                    )
+                    .into())
+                } else {
+                    Ok(ExpressionNode::Constant(value))
+                }
+            }
+            Token::OpenParen => {
+                // TODO: fix the fact that this doesn't match closing and opening parens properly
+                let expression = ExpressionNode::parse(&mut steal_until_paren(tokens)?)?;
+                expect(Token::CloseParen, steal_last(tokens)?)?;
+                Ok(expression)
+            }
+            _ => {
+                let operator = UnaryOperatorNode::parse(&mut vec![token].into())?;
+                let expression = ExpressionNode::parse(tokens)?;
+                Ok(ExpressionNode::Unary(operator, Box::new(expression)))
+            }
+        }
+    }
+}
+
+impl IndentDisplay for UnaryOperatorNode {
+    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
+        match self {
+            Self::Complement => "complement".to_string(),
+            Self::Negate => "negate".to_string(),
+        }
+    }
+}
+
+impl Parse for UnaryOperatorNode {
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        match steal_last(tokens)? {
+            Token::Hyphen => Ok(UnaryOperatorNode::Negate),
+            Token::Tilde => Ok(UnaryOperatorNode::Complement),
+            _ => Err(format!(
+                "Unexpected token, got: {:?}, expecting identifier or operator token",
                 tokens[0],
             )
-            .into())
+            .into()),
         }
     }
 }
