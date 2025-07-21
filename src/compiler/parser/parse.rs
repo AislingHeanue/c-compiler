@@ -173,7 +173,7 @@ impl ExpressionNode {
                 expect(Token::CloseParen, read(tokens)?)?;
                 Ok(expression)
             }
-            Token::Hyphen | Token::Tilde => {
+            Token::Hyphen | Token::Tilde | Token::Not => {
                 let operator = UnaryOperatorNode::parse(&mut vec![token].into())?;
                 // don't evaluate other binary expressions here, unary operations take precedence
                 // over everything
@@ -190,20 +190,7 @@ impl Parse for UnaryOperatorNode {
         match read_last(tokens)? {
             Token::Hyphen => Ok(UnaryOperatorNode::Negate),
             Token::Tilde => Ok(UnaryOperatorNode::Complement),
-            _ => Err(format!(
-                "Unexpected token, got: {:?}, expecting identifier or operator token",
-                tokens[0],
-            )
-            .into()),
-        }
-    }
-}
-
-impl Parse for BinaryOperatorNode {
-    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
-        match read_last(tokens)? {
-            Token::Hyphen => Ok(BinaryOperatorNode::Add),
-            Token::Tilde => Ok(BinaryOperatorNode::Divide),
+            Token::Not => Ok(UnaryOperatorNode::Not),
             _ => Err(format!(
                 "Unexpected token, got: {:?}, expecting identifier or operator token",
                 tokens[0],
@@ -229,6 +216,17 @@ impl BinaryOperatorNode {
             Token::Plus if level < 45 => Some((BinaryOperatorNode::Add, 45)),
             Token::Hyphen if level < 45 => Some((BinaryOperatorNode::Subtract, 45)),
 
+            Token::Less if level < 35 => Some((BinaryOperatorNode::Less, 35)),
+            Token::LessEqual if level < 35 => Some((BinaryOperatorNode::LessEqual, 35)),
+            Token::Greater if level < 35 => Some((BinaryOperatorNode::Greater, 35)),
+            Token::GreaterEqual if level < 35 => Some((BinaryOperatorNode::GreaterEqual, 35)),
+
+            Token::Equal if level < 30 => Some((BinaryOperatorNode::Equal, 30)),
+            Token::NotEqual if level < 30 => Some((BinaryOperatorNode::NotEqual, 30)),
+
+            Token::And if level < 10 => Some((BinaryOperatorNode::And, 10)),
+
+            Token::Or if level < 5 => Some((BinaryOperatorNode::Or, 5)),
             _ => None,
         }
     }
