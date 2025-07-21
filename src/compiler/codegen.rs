@@ -165,6 +165,7 @@ impl InstructionNode {
                 ),
             ]
             .into()),
+            BirdsInstructionNode::Binary(_, _, _, _) => todo!(),
         }
     }
 

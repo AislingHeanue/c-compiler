@@ -2,7 +2,10 @@ use std::error::Error;
 
 use super::{
     lexer::Type,
-    parser::{ExpressionNode, FunctionNode, ProgramNode, StatementNode, UnaryOperatorNode},
+    parser::{
+        BinaryOperatorNode, ExpressionNode, FunctionNode, ProgramNode, StatementNode,
+        UnaryOperatorNode,
+    },
 };
 
 // BIRDS: Bodacious Intermediate Representation Design Spec
@@ -25,6 +28,13 @@ pub enum BirdsInstructionNode {
     Return(BirdsValueNode),
     // op, src, dst
     Unary(BirdsUnaryOperatorNode, BirdsValueNode, BirdsValueNode),
+    // op, left, right, dst
+    Binary(
+        BirdsBinaryOperatorNode,
+        BirdsValueNode,
+        BirdsValueNode,
+        BirdsValueNode,
+    ),
 }
 
 #[derive(Clone, Debug)]
@@ -37,6 +47,15 @@ pub enum BirdsValueNode {
 pub enum BirdsUnaryOperatorNode {
     Complement,
     Negate,
+}
+
+#[derive(Debug)]
+pub enum BirdsBinaryOperatorNode {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Mod,
 }
 
 pub fn birds(parsed: ProgramNode) -> Result<BirdsProgramNode, Box<dyn Error>> {
@@ -93,7 +112,32 @@ impl BirdsInstructions {
                 ));
                 Ok((instructions, new_dst))
             }
-            ExpressionNode::Binary(_, _, _) => todo!(),
+            ExpressionNode::Binary(op, left, right) => {
+                let bird_op = match op {
+                    BinaryOperatorNode::Add => BirdsBinaryOperatorNode::Add,
+                    BinaryOperatorNode::Subtract => BirdsBinaryOperatorNode::Subtract,
+                    BinaryOperatorNode::Multiply => BirdsBinaryOperatorNode::Multiply,
+                    BinaryOperatorNode::Divide => BirdsBinaryOperatorNode::Divide,
+                    BinaryOperatorNode::Mod => BirdsBinaryOperatorNode::Mod,
+                };
+
+                let (mut instructions, new_left) =
+                    BirdsInstructions::convert(*left, last_tmp_number)?;
+                let (mut instructions_from_right, new_right) =
+                    BirdsInstructions::convert(*right, last_tmp_number)?;
+
+                instructions.0.append(&mut instructions_from_right.0);
+
+                *last_tmp_number += 1;
+                let new_dst = BirdsValueNode::Var(format!("tmp.{}", last_tmp_number));
+                instructions.0.push(BirdsInstructionNode::Binary(
+                    bird_op,
+                    new_left,
+                    new_right,
+                    new_dst.clone(),
+                ));
+                Ok((instructions, new_dst))
+            }
         }
     }
 }
