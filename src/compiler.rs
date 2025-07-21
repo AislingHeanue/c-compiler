@@ -25,6 +25,7 @@ pub fn compile(
 
     let lexed = lex(&contents)?;
     if only_lex {
+        println!("{:?}", lexed);
         return Ok(());
     }
 
@@ -34,7 +35,7 @@ pub fn compile(
         return Ok(());
     }
 
-    let birds_output = birds(parsed.clone())?;
+    let birds_output = birds(parsed)?;
     if only_birds {
         println!("{:?}", birds_output);
         return Ok(());

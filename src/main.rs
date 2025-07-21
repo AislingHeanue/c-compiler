@@ -35,7 +35,7 @@ fn main() {
     let preprocessed_filename = stripped_filename.clone() + ".i";
     let asm_filename = stripped_filename.clone() + ".s";
 
-    println!("Preprocessing...");
+    // println!("Preprocessing...");
     let res = Command::new("gcc")
         .args(["-E", "-P", &filename, "-o", &preprocessed_filename])
         .output()
@@ -44,7 +44,7 @@ fn main() {
         panic!("Preprocessor failed: {:?}", res);
     }
 
-    println!("Compiling...");
+    // println!("Compiling...");
     let res = compile(
         &preprocessed_filename,
         &asm_filename,
@@ -68,7 +68,7 @@ fn main() {
         return;
     }
 
-    println!("Outputting to {}", stripped_filename);
+    // println!("Outputting to {}", stripped_filename);
     let res = Command::new("gcc")
         .args([&asm_filename, "-o", &stripped_filename])
         .output()

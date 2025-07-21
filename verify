@@ -1,0 +1,33 @@
+#!/bin/bash
+
+### May change for other devices/languages being used ###
+root_test_path="../../nlsandler/writing-a-c-compiler-tests"
+binary="cargo run --"
+###
+
+chapter=$1
+stage=$2
+name=$(echo $3 | cut -d. -f1)
+
+file=$(find "$root_test_path/tests/chapter_$chapter" -mindepth 2 -maxdepth 2 -name "$name.c")
+
+if [ -z $file ]; then
+	echo file not found
+	exit 1
+fi
+bat $file
+
+case $stage in
+lex)
+	bash -c "$binary $file --lex"
+	;;
+parse)
+	bash -c "$binary $file --parse"
+	;;
+tacky)
+	bash -c "$binary $file --tacky"
+	;;
+all)
+	bash -c "$binary $file -S"
+	;;
+esac

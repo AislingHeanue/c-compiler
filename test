@@ -1,30 +1,55 @@
 #!/bin/bash
 
+### May change for other devices/languages being used ###
+root_test_path=../../nlsandler/writing-a-c-compiler-tests
+binary_path=target/debug/c-compiler
+###
+
+### REBUILD BINARY HERE ###
+if [[ -n $VERBOSE ]]; then
+	cargo build
+else
+	cargo build --quiet
+fi
+###
+
 chapter=$1
 stage=$2
-test_path=~/dev/nlsandler/writing-a-c-compiler-tests/tests/chapter_"$chapter"
 if [[ -n $stage ]]; then
-	results=$(~/dev/nlsandler/writing-a-c-compiler-tests/test_compiler ~/dev/AislingHeanue/c-compiler/target/debug/c-compiler --chapter "$chapter" --stage "$stage" 2>&1)
+	results=$($root_test_path/test_compiler ./$binary_path --chapter "$chapter" --stage "$stage" 2>&1)
 else
-	results=$(~/dev/nlsandler/writing-a-c-compiler-tests/test_compiler ~/dev/AislingHeanue/c-compiler/target/debug/c-compiler --chapter "$chapter" 2>&1)
+	results=$($root_test_path/test_compiler ./$binary_path --chapter "$chapter" 2>&1)
 fi
 
-passing=1
-for i in $test_path/*
-do
-	j=$(echo $i | rev | cut -d/ -f1 | rev)
-	output=$(echo $results | grep -o "[^/]*/[^/]*\.c " | awk -F/ -v i=$j '{if ($1 == i) print $2;}' | cut -d" " -f1)
-	if [[ -n $output ]]; then
-		passing=0
-		echo TESTS FAILED IN \"${j}\":
-		echo -------
-		if [[ -n $VERBOSE ]]; then
-			echo "$output" | xargs -I{} bat ${test_path}/${j}/{}
-		else
-			echo "$output"
+passing=true
+for chapter_num in $(seq 1 $chapter); do
+	chapter_banner_printed=false
+	test_path=$root_test_path/tests/chapter_$chapter_num
+	for i in $test_path/*; do
+
+		j=$(echo $i | rev | cut -d/ -f1 | rev)
+		output=$(echo $results | grep -o "chapter_$chapter_num/$j/[^/]*\.c " | cut -d" " -f1 | rev | cut -d/ -f1 | rev)
+		if [[ -n $output ]]; then
+			if ! $chapter_banner_printed; then
+				echo ==============
+				printf "= CHAPTER %-2s =\n" $chapter_num
+				echo ==============
+				chapter_banner_printed=true
+			fi
+			passing=false
+			echo TESTS FAILED IN \"${j}\":
+			echo -------
+			if [[ -n $VERBOSE ]]; then
+				echo "$output" | xargs -I{} bat $test_path/$j/{}
+			else
+				echo "$output"
+			fi
 		fi
-	fi
+	done
 done
-if [[ $passing -eq 1 ]]; then
+if $passing; then
 	echo "$results"
+	exit 0
+else
+	exit 1
 fi

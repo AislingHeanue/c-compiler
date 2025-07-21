@@ -4,33 +4,38 @@ use super::{
 };
 use std::{collections::VecDeque, error::Error, fmt::Display, mem::discriminant};
 
-#[derive(Clone)]
 pub struct ProgramNode {
     pub function: FunctionNode,
     has_comments: bool,
 }
 
-#[derive(Clone)]
 pub struct FunctionNode {
     pub name: String,
     pub body: StatementNode,
 }
 
-#[derive(Clone)]
 pub enum StatementNode {
     Return(ExpressionNode),
 }
 
-#[derive(Clone)]
 pub enum ExpressionNode {
     Constant(Type),
     Unary(UnaryOperatorNode, Box<ExpressionNode>),
+    Binary(BinaryOperatorNode, Box<ExpressionNode>, Box<ExpressionNode>),
 }
 
-#[derive(Clone)]
 pub enum UnaryOperatorNode {
     Complement,
     Negate,
+}
+
+#[derive(Debug)]
+pub enum BinaryOperatorNode {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Mod,
 }
 
 pub fn parse(mut lexed: VecDeque<Token>) -> Result<ProgramNode, Box<dyn Error>> {
@@ -121,11 +126,7 @@ fn steal_last(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
         .pop_front()
         .ok_or::<Box<dyn Error>>("Too few tokens in identifier node".into())?;
     if !tokens.is_empty() {
-        return Err(format!(
-            "Unexpected extra tokens in identifier definition, got: {:?}",
-            tokens
-        )
-        .into());
+        return Err(format!("Unexpected extra tokens in definition, got: {:?}", tokens).into());
     };
     Ok(token)
 }
@@ -161,7 +162,8 @@ impl Parse for ProgramNode {
 impl IndentDisplay for FunctionNode {
     fn fmt_indent(&self, indent: usize, comments: bool) -> String {
         format!(
-            "{:indent$}Function (\n{:indent$}    name: {},\n{:indent$}    body: {}\n{:indent$})",
+            // TODO: reformat when functions can have multiple statements
+            "{:indent$}Function (\n{:indent$}    name: {},\n{:indent$}    body: {},\n{:indent$})",
             "",
             "",
             self.name,
@@ -196,13 +198,7 @@ impl IndentDisplay for StatementNode {
     fn fmt_indent(&self, indent: usize, comments: bool) -> String {
         match self {
             Self::Return(value) => {
-                format!(
-                    "Return (\n{:indent$}    {}\n{:indent$})",
-                    "",
-                    value.fmt_indent(indent + 4, comments),
-                    "",
-                    indent = indent
-                )
+                format!("Return {}", value.fmt_indent(indent + 4, comments),)
             }
         }
     }
@@ -221,14 +217,20 @@ impl Parse for StatementNode {
 impl IndentDisplay for ExpressionNode {
     fn fmt_indent(&self, indent: usize, comments: bool) -> String {
         match self {
-            Self::Constant(value) => {
-                format!("Constant({})", value.fmt_indent(indent + 4, comments),)
-            }
+            Self::Constant(value) => value.fmt_indent(indent + 4, comments),
             Self::Unary(operator, exp) => {
                 format!(
-                    "Operation({}, {})",
+                    "({}{})",
                     operator.fmt_indent(indent + 4, comments),
                     exp.fmt_indent(indent + 4, comments),
+                )
+            }
+            Self::Binary(operator, left, right) => {
+                format!(
+                    "({} {} {})",
+                    left.fmt_indent(indent + 4, comments),
+                    operator.fmt_indent(indent + 4, comments),
+                    right.fmt_indent(indent + 4, comments)
                 )
             }
         }
@@ -237,30 +239,50 @@ impl IndentDisplay for ExpressionNode {
 
 impl Parse for ExpressionNode {
     fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        let output = ExpressionNode::parse_with_level(tokens, 0)?;
+        if !tokens.is_empty() {
+            Err(format!(
+                "Extra characters found in expression after expression: {:?}",
+                tokens
+            )
+            .into())
+        } else {
+            Ok(output)
+        }
+    }
+}
+impl ExpressionNode {
+    fn parse_with_level(
+        tokens: &mut VecDeque<Token>,
+        level: usize,
+    ) -> Result<Self, Box<dyn Error>> {
+        let mut left = Self::parse_factor(tokens)?;
+        while let Some((node, precedence)) = BinaryOperatorNode::peek_operator(tokens, level) {
+            // delete the first token from the list (we just parsed it above)
+            let _ = steal(tokens)?;
+            let right = Self::parse_with_level(tokens, precedence)?;
+            left = ExpressionNode::Binary(node, Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_factor(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
         let token = steal(tokens)?;
         match token {
-            Token::Constant(value) => {
-                if !tokens.is_empty() {
-                    Err(format!(
-                        "Extra characters found in expression after constant: {:?}",
-                        tokens
-                    )
-                    .into())
-                } else {
-                    Ok(ExpressionNode::Constant(value))
-                }
-            }
+            Token::Constant(value) => Ok(ExpressionNode::Constant(value)),
             Token::OpenParen => {
-                // TODO: fix the fact that this doesn't match closing and opening parens properly
                 let expression = ExpressionNode::parse(&mut steal_until_paren(tokens)?)?;
-                expect(Token::CloseParen, steal_last(tokens)?)?;
+                expect(Token::CloseParen, steal(tokens)?)?;
                 Ok(expression)
             }
-            _ => {
+            Token::Hyphen | Token::Tilde => {
                 let operator = UnaryOperatorNode::parse(&mut vec![token].into())?;
-                let expression = ExpressionNode::parse(tokens)?;
+                // don't evaluate other binary expressions here, unary operations take precedence
+                // over everything
+                let expression = ExpressionNode::parse_factor(tokens)?;
                 Ok(ExpressionNode::Unary(operator, Box::new(expression)))
             }
+            _ => Err(format!("Invalid token at start of expression: {:?}", token).into()),
         }
     }
 }
@@ -268,8 +290,8 @@ impl Parse for ExpressionNode {
 impl IndentDisplay for UnaryOperatorNode {
     fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
         match self {
-            Self::Complement => "complement".to_string(),
-            Self::Negate => "negate".to_string(),
+            Self::Complement => "~".to_string(),
+            Self::Negate => "-".to_string(),
         }
     }
 }
@@ -279,6 +301,53 @@ impl Parse for UnaryOperatorNode {
         match steal_last(tokens)? {
             Token::Hyphen => Ok(UnaryOperatorNode::Negate),
             Token::Tilde => Ok(UnaryOperatorNode::Complement),
+            _ => Err(format!(
+                "Unexpected token, got: {:?}, expecting identifier or operator token",
+                tokens[0],
+            )
+            .into()),
+        }
+    }
+}
+
+impl BinaryOperatorNode {
+    fn peek_operator(
+        tokens: &mut VecDeque<Token>,
+        level: usize,
+    ) -> Option<(BinaryOperatorNode, usize)> {
+        if tokens.is_empty() {
+            return None;
+        }
+        match tokens[0] {
+            Token::Star if level < 50 => Some((BinaryOperatorNode::Multiply, 50)),
+            Token::Slash if level < 50 => Some((BinaryOperatorNode::Divide, 50)),
+            Token::Percent if level < 50 => Some((BinaryOperatorNode::Mod, 50)),
+
+            Token::Plus if level < 45 => Some((BinaryOperatorNode::Add, 45)),
+            Token::Hyphen if level < 45 => Some((BinaryOperatorNode::Subtract, 45)),
+
+            _ => None,
+        }
+    }
+}
+
+impl IndentDisplay for BinaryOperatorNode {
+    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
+        match self {
+            BinaryOperatorNode::Add => "+".to_string(),
+            BinaryOperatorNode::Subtract => "-".to_string(),
+            BinaryOperatorNode::Multiply => "*".to_string(),
+            BinaryOperatorNode::Divide => "/".to_string(),
+            BinaryOperatorNode::Mod => "%".to_string(),
+        }
+    }
+}
+
+impl Parse for BinaryOperatorNode {
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        match steal_last(tokens)? {
+            Token::Hyphen => Ok(BinaryOperatorNode::Add),
+            Token::Tilde => Ok(BinaryOperatorNode::Divide),
             _ => Err(format!(
                 "Unexpected token, got: {:?}, expecting identifier or operator token",
                 tokens[0],

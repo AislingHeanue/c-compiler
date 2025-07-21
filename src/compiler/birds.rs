@@ -84,9 +84,8 @@ impl BirdsInstructions {
                 let (mut instructions, new_src) =
                     BirdsInstructions::convert(*src, last_tmp_number)?;
 
-                let new_dst;
                 *last_tmp_number += 1;
-                new_dst = BirdsValueNode::Var(format!("tmp.{}", last_tmp_number));
+                let new_dst = BirdsValueNode::Var(format!("tmp.{}", last_tmp_number));
                 instructions.0.push(BirdsInstructionNode::Unary(
                     bird_op,
                     new_src,
@@ -94,6 +93,7 @@ impl BirdsInstructions {
                 ));
                 Ok((instructions, new_dst))
             }
+            ExpressionNode::Binary(_, _, _) => todo!(),
         }
     }
 }
