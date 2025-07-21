@@ -301,7 +301,6 @@ impl InstructionNode {
         match self {
             InstructionNode::Idiv(OperandNode::Imm(value)) => Some(
                 vec![
-                    InstructionNode::Mov(OperandNode::Imm(*value), OperandNode::Reg(Register::R10)),
                     InstructionNode::Mov(
                         OperandNode::Imm(*value),
                         // we use r10d to fix src's

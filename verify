@@ -30,10 +30,16 @@ tacky)
 all)
 	output_name=${file%.c}
 	bash -c "$binary $file"
+	# Run the outputted binary (if it exists)
+	$output_name
+	# Store the return code
+	result_code=$?
+
 	echo "Result of $name:"
-	echo $?
+	echo $result_code
 	echo
 	echo "Code:"
+	# Print the generated assembly code
 	bash -c "$binary $file -S"
 	;;
 esac
