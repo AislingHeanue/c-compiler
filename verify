@@ -2,7 +2,7 @@
 
 ### May change for other devices/languages being used ###
 root_test_path="../../nlsandler/writing-a-c-compiler-tests"
-binary="cargo run --"
+binary="cargo run --quiet --"
 ###
 
 chapter=$1
@@ -28,6 +28,12 @@ tacky)
 	bash -c "$binary $file --tacky"
 	;;
 all)
+	output_name=${file%.c}
+	bash -c "$binary $file"
+	echo "Result of $name:"
+	echo $?
+	echo
+	echo "Code:"
 	bash -c "$binary $file -S"
 	;;
 esac

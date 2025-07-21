@@ -1,7 +1,7 @@
 use super::{
     birds::{
-        BirdsInstructionNode, BirdsInstructions, BirdsProgramNode, BirdsUnaryOperatorNode,
-        BirdsValueNode,
+        BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsInstructions, BirdsProgramNode,
+        BirdsUnaryOperatorNode, BirdsValueNode,
     },
     lexer::Type,
     IndentDisplay,
@@ -27,22 +27,21 @@ struct AssemblyFunctionNode {
     is_mac: bool,
 }
 
-#[derive(Clone)]
 struct Instructions(VecDeque<InstructionNode>);
 
 #[derive(Clone)]
 enum InstructionNode {
     Mov(OperandNode, OperandNode),
     Unary(AssemblyUnaryOperatorNode, OperandNode), // Operand here is both the src and dst.
-    AllocateStack(i32),                            // number of bytes to allocate
+    // op src, dst. dst is the *first* number in the operation
+    Binary(AssemblyBinaryOperatorNode, OperandNode, OperandNode),
+    // dividend comes from EDX+EAX. quotient -> EDX, remainder -> EAX.
+    Idiv(OperandNode),
+    // expand a 32 bit number to 64 bits. EAX -> EDX+EAX.
+    Cdq,
+    AllocateStack(i32), // number of bytes to allocate
     Custom(String),
     Ret,
-}
-
-#[derive(Clone)]
-enum AssemblyUnaryOperatorNode {
-    Neg,
-    Not,
 }
 
 #[derive(Clone)]
@@ -55,8 +54,23 @@ enum OperandNode {
 
 #[derive(Clone)]
 enum Register {
-    AX,
+    AX, // eax or rax
+    DX, // edx or rdx
     R10,
+    R11,
+}
+
+#[derive(Clone)]
+enum AssemblyUnaryOperatorNode {
+    Neg,
+    Not,
+}
+
+#[derive(Clone)]
+enum AssemblyBinaryOperatorNode {
+    Add,
+    Sub,
+    Mult,
 }
 
 pub fn codegen(
@@ -127,22 +141,47 @@ impl Instructions {
 
         // THIRD PASS: use the value of current_max_pointer to add an instruction to the start of
         // the function
+        let instructions: VecDeque<InstructionNode> = vec![
+            // push the address of RBP to the stack (at RSP).
+            InstructionNode::Custom("pushq %rbp".to_string()),
+            // move RBP to RSP's current location.
+            InstructionNode::Custom("movq %rsp, %rbp".to_string()),
+            // allocate space for local variables in the space before RSP in the stack.
+            InstructionNode::AllocateStack(-current_max_pointer),
+        ]
+        .into_iter()
+        .chain(instructions)
+        .collect();
+
+        let instructions = Instructions::update_instructions(
+            instructions,
+            InstructionNode::fix_instructions_with_two_stack_entries,
+        );
+        let instructions = Instructions::update_instructions(
+            instructions,
+            InstructionNode::fix_immediate_values_in_bad_places,
+        );
+        let instructions = Instructions::update_instructions(
+            instructions,
+            InstructionNode::fix_memory_address_as_dst,
+        );
+
+        Ok(Instructions(instructions))
+    }
+
+    fn update_instructions(
+        instructions: VecDeque<InstructionNode>,
+        f: fn(&InstructionNode) -> Option<VecDeque<InstructionNode>>,
+    ) -> VecDeque<InstructionNode> {
         let mut new_instructions: VecDeque<InstructionNode> = VecDeque::new();
-        // push the address of RBP to the stack (at RSP).
-        new_instructions.push_back(InstructionNode::Custom("pushq %rbp".to_string()));
-        // move RBP to RSP's current location.
-        new_instructions.push_back(InstructionNode::Custom("movq %rsp, %rbp".to_string()));
-        // allocate space for local variables in the space before RSP in the stack.
-        new_instructions.push_back(InstructionNode::AllocateStack(-current_max_pointer));
-        for instruction in instructions.iter_mut() {
-            if let Some(mut res) = instruction.fix_instructions_with_two_stack_entries() {
+        for instruction in instructions.into_iter() {
+            if let Some(mut res) = f(&instruction) {
                 new_instructions.append(&mut res);
             } else {
-                new_instructions.push_back(instruction.clone())
+                new_instructions.push_back(instruction);
             }
         }
-
-        Ok(Instructions(new_instructions))
+        new_instructions
     }
 }
 
@@ -165,7 +204,48 @@ impl InstructionNode {
                 ),
             ]
             .into()),
-            BirdsInstructionNode::Binary(_, _, _, _) => todo!(),
+            BirdsInstructionNode::Binary(op, left, right, dst) => match op {
+                BirdsBinaryOperatorNode::Divide => Ok(vec![
+                    InstructionNode::Mov(
+                        OperandNode::convert(left)?,
+                        OperandNode::Reg(Register::AX),
+                    ),
+                    InstructionNode::Cdq,
+                    InstructionNode::Idiv(OperandNode::convert(right)?),
+                    InstructionNode::Mov(
+                        OperandNode::Reg(Register::AX), // read quotient result from EAX
+                        OperandNode::convert(dst)?,
+                    ),
+                ]
+                .into()),
+                BirdsBinaryOperatorNode::Mod => Ok(vec![
+                    InstructionNode::Mov(
+                        OperandNode::convert(left)?,
+                        OperandNode::Reg(Register::AX),
+                    ),
+                    InstructionNode::Cdq,
+                    // note: idiv can't operate on immediate values, so we need to stuff those into
+                    // a register during a later pass.
+                    InstructionNode::Idiv(OperandNode::convert(right)?),
+                    InstructionNode::Mov(
+                        OperandNode::Reg(Register::DX), // read remainder result from EDX
+                        OperandNode::convert(dst)?,
+                    ),
+                ]
+                .into()),
+                _ => Ok(vec![
+                    InstructionNode::Mov(
+                        OperandNode::convert(left)?,
+                        OperandNode::convert(dst.clone())?,
+                    ),
+                    InstructionNode::Binary(
+                        AssemblyBinaryOperatorNode::convert(op)?,
+                        OperandNode::convert(right)?,
+                        OperandNode::convert(dst)?,
+                    ),
+                ]
+                .into()),
+            },
         }
     }
 
@@ -182,25 +262,83 @@ impl InstructionNode {
             InstructionNode::Unary(_, dst) => {
                 dst.replace_mock_register(stack_locations, current_max_pointer);
             }
+            InstructionNode::Binary(_, src, dst) => {
+                src.replace_mock_register(stack_locations, current_max_pointer);
+                dst.replace_mock_register(stack_locations, current_max_pointer);
+            }
+            InstructionNode::Idiv(src) => {
+                src.replace_mock_register(stack_locations, current_max_pointer);
+            }
             _ => {}
         }
     }
 
-    fn fix_instructions_with_two_stack_entries(&mut self) -> Option<VecDeque<InstructionNode>> {
+    fn fix_instructions_with_two_stack_entries(&self) -> Option<VecDeque<InstructionNode>> {
         match self {
-            InstructionNode::Mov(src, dst) => {
-                if let (&OperandNode::Stack(_), &OperandNode::Stack(_)) = (&src, &dst) {
-                    Some(
-                        vec![
-                            InstructionNode::Mov(src.clone(), OperandNode::Reg(Register::R10)),
-                            InstructionNode::Mov(OperandNode::Reg(Register::R10), dst.clone()),
-                        ]
-                        .into(),
-                    )
-                } else {
-                    None
-                }
-            }
+            InstructionNode::Mov(OperandNode::Stack(src), OperandNode::Stack(dst)) => Some(
+                vec![
+                    InstructionNode::Mov(OperandNode::Stack(*src), OperandNode::Reg(Register::R10)),
+                    InstructionNode::Mov(OperandNode::Reg(Register::R10), OperandNode::Stack(*dst)),
+                ]
+                .into(),
+            ),
+            InstructionNode::Binary(op, OperandNode::Stack(src), OperandNode::Stack(dst)) => Some(
+                vec![
+                    InstructionNode::Mov(OperandNode::Stack(*src), OperandNode::Reg(Register::R10)),
+                    InstructionNode::Binary(
+                        op.clone(),
+                        OperandNode::Reg(Register::R10),
+                        OperandNode::Stack(*dst),
+                    ),
+                ]
+                .into(),
+            ),
+            _ => None,
+        }
+    }
+
+    fn fix_immediate_values_in_bad_places(&self) -> Option<VecDeque<InstructionNode>> {
+        match self {
+            InstructionNode::Idiv(OperandNode::Imm(value)) => Some(
+                vec![
+                    InstructionNode::Mov(OperandNode::Imm(*value), OperandNode::Reg(Register::R10)),
+                    InstructionNode::Mov(
+                        OperandNode::Imm(*value),
+                        // we use r10d to fix src's
+                        OperandNode::Reg(Register::R10),
+                    ),
+                    InstructionNode::Idiv(OperandNode::Reg(Register::R10)),
+                ]
+                .into(),
+            ),
+            _ => None,
+        }
+    }
+
+    fn fix_memory_address_as_dst(&self) -> Option<VecDeque<InstructionNode>> {
+        match self {
+            InstructionNode::Binary(
+                AssemblyBinaryOperatorNode::Mult,
+                src,
+                OperandNode::Stack(value),
+            ) => Some(
+                vec![
+                    InstructionNode::Mov(
+                        OperandNode::Stack(*value),
+                        OperandNode::Reg(Register::R11),
+                    ),
+                    InstructionNode::Binary(
+                        AssemblyBinaryOperatorNode::Mult,
+                        src.clone(),
+                        OperandNode::Reg(Register::R11), // we use r11d to fix dst's
+                    ),
+                    InstructionNode::Mov(
+                        OperandNode::Reg(Register::R11),
+                        OperandNode::Stack(*value),
+                    ),
+                ]
+                .into(),
+            ),
             _ => None,
         }
     }
@@ -234,6 +372,21 @@ impl AssemblyUnaryOperatorNode {
         match input {
             BirdsUnaryOperatorNode::Negate => Ok(AssemblyUnaryOperatorNode::Neg),
             BirdsUnaryOperatorNode::Complement => Ok(AssemblyUnaryOperatorNode::Not),
+        }
+    }
+}
+
+impl AssemblyBinaryOperatorNode {
+    fn convert(
+        input: BirdsBinaryOperatorNode,
+    ) -> Result<AssemblyBinaryOperatorNode, Box<dyn Error>> {
+        match input {
+            BirdsBinaryOperatorNode::Add => Ok(AssemblyBinaryOperatorNode::Add),
+            BirdsBinaryOperatorNode::Subtract => Ok(AssemblyBinaryOperatorNode::Sub),
+            BirdsBinaryOperatorNode::Multiply => Ok(AssemblyBinaryOperatorNode::Mult),
+            BirdsBinaryOperatorNode::Divide | BirdsBinaryOperatorNode::Mod => {
+                panic!("should not treat mod and divide as binary expressions during codegen")
+            }
         }
     }
 }
@@ -332,6 +485,7 @@ impl IndentDisplay for InstructionNode {
             }
             InstructionNode::Custom(s) => s.to_string(),
             InstructionNode::Unary(op, src) => format!("{} {}", op, src),
+            InstructionNode::Binary(op, src, dst) => format!("{} {}, {}", op, src, dst),
             InstructionNode::AllocateStack(num) => {
                 if comments {
                     format!(
@@ -340,6 +494,26 @@ impl IndentDisplay for InstructionNode {
                 )
                 } else {
                     format!("subq ${}, %rsp", num)
+                }
+            }
+            InstructionNode::Idiv(src) => {
+                if comments {
+                    format!(
+                    "# Read the dividend from EDX and EAX, and then store the quotient in EDX and the remainder in EAX\n{:indent$}idivl {}",
+                    "", src, indent=indent
+                )
+                } else {
+                    format!("idivl {}", src)
+                }
+            }
+            InstructionNode::Cdq => {
+                if comments {
+                    format!(
+                    "# Extend the 32-bit value in EAX to a 64-bit value spanning EDX and EAX\n{:indent$}cdq",
+                    "", indent=indent
+                )
+                } else {
+                    "cdq".to_string()
                 }
             }
         }
@@ -355,6 +529,8 @@ impl Display for OperandNode {
             OperandNode::Reg(reg) => match reg {
                 Register::AX => write!(f, "%eax"),
                 Register::R10 => write!(f, "%r10d"),
+                Register::DX => write!(f, "%edx"),
+                Register::R11 => write!(f, "%r11d"),
             },
             OperandNode::MockReg(name) => panic!(
                 "Tried to generate assembly code with a mock register: {}",
@@ -370,6 +546,16 @@ impl Display for AssemblyUnaryOperatorNode {
         match self {
             AssemblyUnaryOperatorNode::Neg => write!(f, "negl"),
             AssemblyUnaryOperatorNode::Not => write!(f, "notl"),
+        }
+    }
+}
+
+impl Display for AssemblyBinaryOperatorNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AssemblyBinaryOperatorNode::Add => write!(f, "addl"),
+            AssemblyBinaryOperatorNode::Sub => write!(f, "subl"),
+            AssemblyBinaryOperatorNode::Mult => write!(f, "imull"),
         }
     }
 }
