@@ -7,7 +7,7 @@ binary="cargo run --quiet --"
 
 chapter=$1
 stage=$2
-name=$(echo $3 | cut -d. -f1)
+name=$(echo "$3" | cut -d. -f1)
 
 file=$(find "$root_test_path/tests/chapter_$chapter" -mindepth 2 -maxdepth 2 -name "$name.c")
 

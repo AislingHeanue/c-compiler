@@ -1,8 +1,7 @@
-use super::{
-    lexer::{Keyword, Token, Type},
-    IndentDisplay,
-};
-use std::{collections::VecDeque, error::Error, fmt::Display, mem::discriminant};
+use super::lexer::{Keyword, Token, Type};
+use std::{collections::VecDeque, error::Error, mem::discriminant};
+
+mod display;
 
 pub struct ProgramNode {
     pub function: FunctionNode,
@@ -27,6 +26,7 @@ pub enum ExpressionNode {
 pub enum UnaryOperatorNode {
     Complement,
     Negate,
+    Not,
 }
 
 #[derive(Debug)]
@@ -36,6 +36,14 @@ pub enum BinaryOperatorNode {
     Multiply,
     Divide,
     Mod,
+    And,
+    Or,
+    Equal,
+    NotEqual,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
 }
 
 pub fn parse(mut lexed: VecDeque<Token>) -> Result<ProgramNode, Box<dyn Error>> {
@@ -53,13 +61,13 @@ fn expect(expected: Token, input: Token) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn steal(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
+fn read(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
     tokens
         .pop_front()
         .ok_or::<Box<dyn Error>>("Too few tokens in identifier node".into())
 }
 
-fn steal_until(
+fn read_until_token(
     tokens: &mut VecDeque<Token>,
     expected: Token,
 ) -> Result<VecDeque<Token>, Box<dyn Error>> {
@@ -82,7 +90,7 @@ fn steal_until(
     Err(format!("Could not find expected token: {:?}", expected).into())
 }
 
-fn steal_until_paren(tokens: &mut VecDeque<Token>) -> Result<VecDeque<Token>, Box<dyn Error>> {
+fn read_until_paren(tokens: &mut VecDeque<Token>) -> Result<VecDeque<Token>, Box<dyn Error>> {
     let mut output = VecDeque::new();
     let mut nesting_level = 0;
     while !tokens.is_empty() {
@@ -108,7 +116,17 @@ fn steal_until_paren(tokens: &mut VecDeque<Token>) -> Result<VecDeque<Token>, Bo
     Err(format!("Could not find expected token: {:?}", Token::CloseParen).into())
 }
 
-fn parse_string(token: Token) -> Result<String, Box<dyn Error>> {
+fn read_last(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
+    let token = tokens
+        .pop_front()
+        .ok_or::<Box<dyn Error>>("Too few tokens in identifier node".into())?;
+    if !tokens.is_empty() {
+        return Err(format!("Unexpected extra tokens in definition, got: {:?}", tokens).into());
+    };
+    Ok(token)
+}
+
+fn identifier_to_string(token: Token) -> Result<String, Box<dyn Error>> {
     if let Token::Identifier(string) = token {
         Ok(string)
     } else {
@@ -121,31 +139,11 @@ fn parse_string(token: Token) -> Result<String, Box<dyn Error>> {
     }
 }
 
-fn steal_last(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
-    let token = tokens
-        .pop_front()
-        .ok_or::<Box<dyn Error>>("Too few tokens in identifier node".into())?;
-    if !tokens.is_empty() {
-        return Err(format!("Unexpected extra tokens in definition, got: {:?}", tokens).into());
-    };
-    Ok(token)
-}
-
 trait Parse
 where
     Self: Sized,
 {
     fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>>;
-}
-
-impl Display for ProgramNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Program (\n{}\n)",
-            self.function.fmt_indent(4, self.has_comments)
-        )
-    }
 }
 
 impl Parse for ProgramNode {
@@ -159,81 +157,32 @@ impl Parse for ProgramNode {
     }
 }
 
-impl IndentDisplay for FunctionNode {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
-        format!(
-            // TODO: reformat when functions can have multiple statements
-            "{:indent$}Function (\n{:indent$}    name: {},\n{:indent$}    body: {},\n{:indent$})",
-            "",
-            "",
-            self.name,
-            "",
-            self.body.fmt_indent(indent + 4, comments),
-            "",
-            indent = indent,
-        )
-    }
-}
-
 impl Parse for FunctionNode {
     fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
-        expect(Token::Keyword(Keyword::Int), steal(tokens)?)?;
-        let name = parse_string(steal(tokens)?)?;
-        expect(Token::OpenParen, steal(tokens)?)?;
-        expect(Token::Keyword(Keyword::Void), steal(tokens)?)?;
-        expect(Token::CloseParen, steal(tokens)?)?;
-        expect(Token::OpenBrace, steal(tokens)?)?;
+        expect(Token::Keyword(Keyword::Int), read(tokens)?)?;
+        let name = identifier_to_string(read(tokens)?)?;
+        expect(Token::OpenParen, read(tokens)?)?;
+        expect(Token::Keyword(Keyword::Void), read(tokens)?)?;
+        expect(Token::CloseParen, read(tokens)?)?;
+        expect(Token::OpenBrace, read(tokens)?)?;
         let mut body_tokens: VecDeque<Token> = VecDeque::new();
         while !tokens.is_empty() && tokens[0] != Token::CloseBrace {
-            body_tokens.push_back(steal(tokens)?);
+            body_tokens.push_back(read(tokens)?);
         }
         let body = StatementNode::parse(&mut body_tokens)?;
-        expect(Token::CloseBrace, steal_last(tokens)?)?;
+        expect(Token::CloseBrace, read_last(tokens)?)?;
 
         Ok(FunctionNode { name, body })
     }
 }
 
-impl IndentDisplay for StatementNode {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
-        match self {
-            Self::Return(value) => {
-                format!("Return {}", value.fmt_indent(indent + 4, comments),)
-            }
-        }
-    }
-}
-
 impl Parse for StatementNode {
     fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
-        expect(Token::Keyword(Keyword::Return), steal(tokens)?)?;
-        let expression = ExpressionNode::parse(&mut steal_until(tokens, Token::SemiColon)?)?;
-        expect(Token::SemiColon, steal_last(tokens)?)?;
+        expect(Token::Keyword(Keyword::Return), read(tokens)?)?;
+        let expression = ExpressionNode::parse(&mut read_until_token(tokens, Token::SemiColon)?)?;
+        expect(Token::SemiColon, read_last(tokens)?)?;
 
         Ok(StatementNode::Return(expression))
-    }
-}
-
-impl IndentDisplay for ExpressionNode {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
-        match self {
-            Self::Constant(value) => value.fmt_indent(indent + 4, comments),
-            Self::Unary(operator, exp) => {
-                format!(
-                    "({}{})",
-                    operator.fmt_indent(indent + 4, comments),
-                    exp.fmt_indent(indent + 4, comments),
-                )
-            }
-            Self::Binary(operator, left, right) => {
-                format!(
-                    "({} {} {})",
-                    left.fmt_indent(indent + 4, comments),
-                    operator.fmt_indent(indent + 4, comments),
-                    right.fmt_indent(indent + 4, comments)
-                )
-            }
-        }
     }
 }
 
@@ -256,23 +205,23 @@ impl ExpressionNode {
         tokens: &mut VecDeque<Token>,
         level: usize,
     ) -> Result<Self, Box<dyn Error>> {
-        let mut left = Self::parse_factor(tokens)?;
+        let mut left = ExpressionNode::parse_factor(tokens)?;
         while let Some((node, precedence)) = BinaryOperatorNode::peek_operator(tokens, level) {
             // delete the first token from the list (we just parsed it above)
-            let _ = steal(tokens)?;
-            let right = Self::parse_with_level(tokens, precedence)?;
+            let _ = read(tokens)?;
+            let right = ExpressionNode::parse_with_level(tokens, precedence)?;
             left = ExpressionNode::Binary(node, Box::new(left), Box::new(right));
         }
         Ok(left)
     }
 
     fn parse_factor(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
-        let token = steal(tokens)?;
+        let token = read(tokens)?;
         match token {
             Token::Constant(value) => Ok(ExpressionNode::Constant(value)),
             Token::OpenParen => {
-                let expression = ExpressionNode::parse(&mut steal_until_paren(tokens)?)?;
-                expect(Token::CloseParen, steal(tokens)?)?;
+                let expression = ExpressionNode::parse(&mut read_until_paren(tokens)?)?;
+                expect(Token::CloseParen, read(tokens)?)?;
                 Ok(expression)
             }
             Token::Hyphen | Token::Tilde => {
@@ -287,20 +236,25 @@ impl ExpressionNode {
     }
 }
 
-impl IndentDisplay for UnaryOperatorNode {
-    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
-        match self {
-            Self::Complement => "~".to_string(),
-            Self::Negate => "-".to_string(),
+impl Parse for UnaryOperatorNode {
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        match read_last(tokens)? {
+            Token::Hyphen => Ok(UnaryOperatorNode::Negate),
+            Token::Tilde => Ok(UnaryOperatorNode::Complement),
+            _ => Err(format!(
+                "Unexpected token, got: {:?}, expecting identifier or operator token",
+                tokens[0],
+            )
+            .into()),
         }
     }
 }
 
-impl Parse for UnaryOperatorNode {
+impl Parse for BinaryOperatorNode {
     fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
-        match steal_last(tokens)? {
-            Token::Hyphen => Ok(UnaryOperatorNode::Negate),
-            Token::Tilde => Ok(UnaryOperatorNode::Complement),
+        match read_last(tokens)? {
+            Token::Hyphen => Ok(BinaryOperatorNode::Add),
+            Token::Tilde => Ok(BinaryOperatorNode::Divide),
             _ => Err(format!(
                 "Unexpected token, got: {:?}, expecting identifier or operator token",
                 tokens[0],
@@ -327,32 +281,6 @@ impl BinaryOperatorNode {
             Token::Hyphen if level < 45 => Some((BinaryOperatorNode::Subtract, 45)),
 
             _ => None,
-        }
-    }
-}
-
-impl IndentDisplay for BinaryOperatorNode {
-    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
-        match self {
-            BinaryOperatorNode::Add => "+".to_string(),
-            BinaryOperatorNode::Subtract => "-".to_string(),
-            BinaryOperatorNode::Multiply => "*".to_string(),
-            BinaryOperatorNode::Divide => "/".to_string(),
-            BinaryOperatorNode::Mod => "%".to_string(),
-        }
-    }
-}
-
-impl Parse for BinaryOperatorNode {
-    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
-        match steal_last(tokens)? {
-            Token::Hyphen => Ok(BinaryOperatorNode::Add),
-            Token::Tilde => Ok(BinaryOperatorNode::Divide),
-            _ => Err(format!(
-                "Unexpected token, got: {:?}, expecting identifier or operator token",
-                tokens[0],
-            )
-            .into()),
         }
     }
 }

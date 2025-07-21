@@ -4,7 +4,7 @@ use std::{collections::VecDeque, error::Error};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-use super::IndentDisplay;
+mod display;
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter)]
 pub enum Token {
@@ -20,6 +20,15 @@ pub enum Token {
     Slash,
     Star,
     Percent,
+    Not,
+    And,
+    Or,
+    Equal,
+    NotEqual,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
     Keyword(Keyword),
     Identifier(String),
     Constant(Type),
@@ -31,8 +40,8 @@ pub enum Type {
 }
 
 impl Default for Type {
-    fn default() -> Self {
-        Self::Integer(0)
+    fn default() -> Type {
+        Type::Integer(0)
     }
 }
 
@@ -51,44 +60,56 @@ lazy_static! {
         let mut v = Vec::new();
         for token in Token::iter() {
             let entry = match token {
-                Token::OpenParen => Regex::new(r"^\("),
-                Token::CloseParen => Regex::new(r"^\)"),
-                Token::OpenBrace => Regex::new(r"^\{"),
-                Token::CloseBrace => Regex::new(r"^\}"),
-                Token::SemiColon => Regex::new(r"^;"),
-                Token::Tilde => Regex::new(r"^~"),
-                Token::Hyphen => Regex::new(r"^-"),
-                Token::Decrement => Regex::new(r"^--"),
-                Token::Plus => Regex::new(r"^\+"),
-                Token::Slash => Regex::new(r"^/"),
-                Token::Star => Regex::new(r"^\*"),
-                Token::Percent => Regex::new(r"^%"),
-                Token::Identifier(_) => Regex::new(r"^[a-zA-Z_]\w*\b"),
+                Token::OpenParen => r"\(",
+                Token::CloseParen => r"\)",
+                Token::OpenBrace => r"\{",
+                Token::CloseBrace => r"\}",
+                Token::SemiColon => r";",
+                Token::Tilde => r"~",
+                Token::Hyphen => r"-",
+                Token::Decrement => r"--",
+                Token::Plus => r"\+",
+                Token::Slash => r"/",
+                Token::Star => r"\*",
+                Token::Not => r"!",
+                Token::And => r"&&",
+                Token::Or => r"\|\|",
+                Token::Equal => r"==",
+                Token::NotEqual => "!=",
+                Token::Less => r"<",
+                Token::Greater => r">",
+                Token::LessEqual => r"<=",
+                Token::GreaterEqual => r">=",
+                Token::Percent => r"%",
+                Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
                 // small hack to avoid having to use Option<> in this block, hijack an existing
                 // error struct in the regex package.
-                Token::Constant(_) => Err(regex::Error::Syntax("Constant regex defined elsewhere".into())),
-                Token::Keyword(_) => Err(regex::Error::Syntax("Keyword regex defined elsewhere".into())),
+                Token::Constant(_) => "",
+                Token::Keyword(_) => "",
             };
-            if let Ok(regex) = entry {
-                v.push((token, regex, 0))
+            if !entry.is_empty(){
+                let entry = "^".to_string() + entry;
+                v.push((token, Regex::new(&entry).unwrap(), 0))
             }
         }
         for keyword in Keyword::iter() {
             let keyword_entry = match keyword {
-                Keyword::Int => Regex::new("^int"),
-                Keyword::Return => Regex::new("^return"),
-                Keyword::Void => Regex::new("^void"),
+                Keyword::Int => "int",
+                Keyword::Return => "return",
+                Keyword::Void => "void",
             };
-            if let Ok(regex) = keyword_entry {
-                v.push((Token::Keyword(keyword), regex, 1))
+            if !keyword_entry.is_empty(){
+                let keyword_entry = "^".to_string() + keyword_entry;
+                v.push((Token::Keyword(keyword), Regex::new(&keyword_entry).unwrap(), 0))
             }
         }
         for a_type in Type::iter() {
             let type_entry = match a_type {
-                Type::Integer(_) =>Regex::new(r"^[0-9]+\b"),
+                Type::Integer(_) =>r"[0-9]+\b",
             };
-            if let Ok(regex) = type_entry {
-                v.push((Token::Constant(a_type), regex, 0))
+            if !type_entry.is_empty() {
+                let type_entry = "^".to_string() + type_entry;
+                v.push((Token::Constant(a_type), Regex::new(&type_entry).unwrap(), 0))
             }
         }
         v
@@ -148,12 +169,4 @@ pub fn lex(mut contents: &str) -> Result<VecDeque<Token>, Box<dyn Error>> {
     }
 
     Ok(tokens)
-}
-
-impl IndentDisplay for Type {
-    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
-        match self {
-            Self::Integer(value) => value.to_string(),
-        }
-    }
 }

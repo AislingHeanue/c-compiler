@@ -98,6 +98,7 @@ impl BirdsInstructions {
                 let bird_op = match op {
                     UnaryOperatorNode::Complement => BirdsUnaryOperatorNode::Complement,
                     UnaryOperatorNode::Negate => BirdsUnaryOperatorNode::Negate,
+                    UnaryOperatorNode::Not => todo!(),
                 };
 
                 let (mut instructions, new_src) =
@@ -119,6 +120,14 @@ impl BirdsInstructions {
                     BinaryOperatorNode::Multiply => BirdsBinaryOperatorNode::Multiply,
                     BinaryOperatorNode::Divide => BirdsBinaryOperatorNode::Divide,
                     BinaryOperatorNode::Mod => BirdsBinaryOperatorNode::Mod,
+                    BinaryOperatorNode::And => todo!(),
+                    BinaryOperatorNode::Or => todo!(),
+                    BinaryOperatorNode::Equal => todo!(),
+                    BinaryOperatorNode::NotEqual => todo!(),
+                    BinaryOperatorNode::Less => todo!(),
+                    BinaryOperatorNode::Greater => todo!(),
+                    BinaryOperatorNode::LessEqual => todo!(),
+                    BinaryOperatorNode::GreaterEqual => todo!(),
                 };
 
                 let (mut instructions, new_left) =

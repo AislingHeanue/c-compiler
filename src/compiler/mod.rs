@@ -12,6 +12,10 @@ pub mod parser;
 static IS_LINUX: bool = true;
 static IS_MAC: bool = false;
 
+trait IndentDisplay {
+    fn fmt_indent(&self, indent: usize, comments: bool) -> String;
+}
+
 pub fn compile(
     filename: &str,
     asm_filename: &str,
@@ -51,8 +55,4 @@ pub fn compile(
     fs::write(asm_filename, code.to_string())?;
 
     Ok(())
-}
-
-trait IndentDisplay {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String;
 }
