@@ -47,7 +47,6 @@ pub fn compile(
 
     let code = codegen(birds_output, add_comments, IS_LINUX, IS_MAC)?;
     if only_codegen {
-        println!("{}", code);
         return Ok(());
     }
 

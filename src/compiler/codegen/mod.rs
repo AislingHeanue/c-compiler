@@ -8,7 +8,7 @@ mod display;
 pub struct Program {
     function: Function,
     footer: ExtraStrings,
-    has_comments: bool,
+    displaying_context: DisplayContext,
 }
 
 struct ExtraStrings(Vec<String>);
@@ -17,24 +17,31 @@ struct Function {
     header: ExtraStrings,
     name: String,
     instructions: Instructions,
-    is_mac: bool,
 }
 
 struct Instructions(VecDeque<Instruction>);
 
-#[derive(Clone)]
 enum Instruction {
     Mov(Operand, Operand),
     Unary(UnaryOperator, Operand), // Operand here is both the src and dst.
     // op src, dst. dst is the *first* number in the operation
     Binary(BinaryOperator, Operand, Operand),
+    // compare left and right and set "ZF" (zero), "SF" (sign) and "OF" (signed overflow)
+    // based on the result, so that they can be read by JmpCondition and SetCondition
+    Cmp(Operand, Operand),
     // dividend comes from EDX+EAX. quotient -> EDX, remainder -> EAX.
     Idiv(Operand),
     // expand a 32 bit number to 64 bits. EAX -> EDX+EAX.
     Cdq,
+    Jmp(String),
+    JmpCondition(ConditionCode, String),
+    // write 0 or 1 to the first byte of dst based on Cmp output.
+    SetCondition(ConditionCode, Operand),
+    // named label to jump to. Follows different indentation rules to others.
+    Label(String),
     AllocateStack(i32), // number of bytes to allocate
-    Custom(String), // custom assembly strings, so I can avoid templating them in at a later stage
     Ret,
+    Custom(String), // custom assembly strings, so I can avoid templating them in at a later stage
 }
 
 #[derive(Clone)]
@@ -66,6 +73,15 @@ enum BinaryOperator {
     Mult,
 }
 
+enum ConditionCode {
+    E,
+    Ne,
+    G,
+    Ge,
+    L,
+    Le,
+}
+
 trait Convert
 where
     Self: Sized,
@@ -82,6 +98,37 @@ pub struct ConvertContext {
     comments: bool,
     is_mac: bool,
     is_linux: bool,
+}
+
+trait CodeDisplay {
+    fn show(&self, context: &mut DisplayContext) -> String;
+}
+
+#[derive(Clone)]
+pub struct DisplayContext {
+    comments: bool,
+    indent: usize,
+    is_mac: bool,
+    word_length_bytes: usize,
+    // is_linux: bool,
+}
+
+impl DisplayContext {
+    fn indent(&mut self) -> DisplayContext {
+        let mut s = self.clone();
+        s.indent += 4;
+        s
+    }
+    fn unindent(&mut self) -> DisplayContext {
+        let mut s = self.clone();
+        s.indent -= 4;
+        s
+    }
+    fn short(&mut self) -> DisplayContext {
+        let mut s = self.clone();
+        s.word_length_bytes = 1;
+        s
+    }
 }
 
 pub fn codegen(

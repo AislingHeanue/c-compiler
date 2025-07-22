@@ -4,6 +4,9 @@
 root_test_path="../../nlsandler/writing-a-c-compiler-tests"
 binary="cargo run --quiet --"
 ###
+if [[ -n "$COMMENTS" ]]; then
+	binary="cargo run --quiet -- --comments"
+fi
 
 chapter=$1
 stage=$2
@@ -27,6 +30,9 @@ parse)
 tacky)
 	bash -c "$binary $file --tacky"
 	;;
+codegen)
+	bash -c "$binary $file --codegen"
+	;;
 all)
 	output_name=${file%.c}
 	bash -c "$binary $file"
@@ -40,6 +46,6 @@ all)
 	echo
 	echo "Code:"
 	# Print the generated assembly code
-	bash -c "$binary $file -S"
+	bash -c "$binary $file -S" | bat -l asm --paging=never
 	;;
 esac

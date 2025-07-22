@@ -120,7 +120,7 @@ impl Convert for BirdsInstructions {
                         BinaryOperatorNode::Or => {
                             instructions.0.push(BirdsInstructionNode::JumpNotZero(
                                 new_left,
-                                false_label_name.clone(),
+                                true_label_name.clone(),
                             ));
 
                             instructions.0.append(&mut instructions_from_right.0);
@@ -172,5 +172,19 @@ impl Convert for BirdsInstructions {
                 Ok((instructions, new_dst))
             }
         }
+    }
+}
+
+impl BirdsBinaryOperatorNode {
+    pub fn is_relational(&self) -> bool {
+        matches!(
+            self,
+            BirdsBinaryOperatorNode::Equal
+                | BirdsBinaryOperatorNode::NotEqual
+                | BirdsBinaryOperatorNode::Greater
+                | BirdsBinaryOperatorNode::GreaterEqual
+                | BirdsBinaryOperatorNode::Less
+                | BirdsBinaryOperatorNode::LessEqual
+        )
     }
 }
