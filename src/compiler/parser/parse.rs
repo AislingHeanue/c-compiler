@@ -1,9 +1,13 @@
 use super::{
-    BinaryOperatorNode, ExpressionNode, FunctionNode, Parse, ProgramNode, StatementNode,
-    UnaryOperatorNode,
+    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, FunctionNode, Parse,
+    ProgramNode, StatementNode, Type, UnaryOperatorNode,
 };
-use crate::compiler::lexer::{Keyword, Token};
-use std::{collections::VecDeque, error::Error, mem::discriminant};
+use crate::compiler::lexer::Token;
+use std::{
+    collections::VecDeque,
+    error::Error,
+    mem::{discriminant, Discriminant},
+};
 
 fn expect(expected: Token, input: Token) -> Result<(), Box<dyn Error>> {
     if discriminant(&expected) != discriminant(&input) {
@@ -24,11 +28,14 @@ fn read(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
 
 fn read_until_token(
     tokens: &mut VecDeque<Token>,
-    expected: Token,
+    expected: Vec<Token>,
 ) -> Result<VecDeque<Token>, Box<dyn Error>> {
     let mut output = VecDeque::new();
+
+    let discriminants: Vec<Discriminant<Token>> = expected.iter().map(discriminant).collect();
+
     while !tokens.is_empty() {
-        if discriminant(&expected) == discriminant(&tokens[0]) {
+        if discriminants.contains(&discriminant(&tokens[0])) {
             if output.is_empty() {
                 return Err(format!(
                     "Didn't find any tokens between current token and {:?}",
@@ -45,15 +52,20 @@ fn read_until_token(
     Err(format!("Could not find expected token: {:?}", expected).into())
 }
 
-fn read_until_paren(tokens: &mut VecDeque<Token>) -> Result<VecDeque<Token>, Box<dyn Error>> {
+fn read_until_match(
+    tokens: &mut VecDeque<Token>,
+    open: Token,
+    close: Token,
+    allow_empty: bool,
+) -> Result<VecDeque<Token>, Box<dyn Error>> {
     let mut output = VecDeque::new();
     let mut nesting_level = 0;
     while !tokens.is_empty() {
         let d = discriminant(&tokens[0]);
-        if d == discriminant(&Token::CloseParen) {
-            if output.is_empty() {
+        if d == discriminant(&close) {
+            if output.is_empty() && !allow_empty {
                 return Err(format!(
-                    "Didn't find any tokens between current token and {:?}",
+                    "Didn't find any tokens between current token and matching {:?}",
                     &Token::CloseParen
                 )
                 .into());
@@ -62,7 +74,7 @@ fn read_until_paren(tokens: &mut VecDeque<Token>) -> Result<VecDeque<Token>, Box
             } else {
                 nesting_level -= 1;
             }
-        } else if d == discriminant(&Token::OpenParen) {
+        } else if d == discriminant(&open) {
             nesting_level += 1;
         }
 
@@ -107,30 +119,88 @@ impl Parse for ProgramNode {
 
 impl Parse for FunctionNode {
     fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
-        expect(Token::Keyword(Keyword::Int), read(tokens)?)?;
+        expect(Token::KeywordInt, read(tokens)?)?;
         let name = identifier_to_string(read(tokens)?)?;
         expect(Token::OpenParen, read(tokens)?)?;
-        expect(Token::Keyword(Keyword::Void), read(tokens)?)?;
+        expect(Token::KeywordVoid, read(tokens)?)?;
         expect(Token::CloseParen, read(tokens)?)?;
         expect(Token::OpenBrace, read(tokens)?)?;
-        let mut body_tokens: VecDeque<Token> = VecDeque::new();
-        while !tokens.is_empty() && tokens[0] != Token::CloseBrace {
-            body_tokens.push_back(read(tokens)?);
-        }
-        let body = StatementNode::parse(&mut body_tokens)?;
+        let body = Block::parse(&mut read_until_match(
+            tokens,
+            Token::OpenBrace,
+            Token::CloseBrace,
+            true,
+        )?)?;
         expect(Token::CloseBrace, read_last(tokens)?)?;
 
         Ok(FunctionNode { name, body })
     }
 }
 
+impl Parse for Block {
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        let mut items: Vec<BlockItemNode> = Vec::new();
+        while !tokens.is_empty() {
+            items.push(match tokens[0] {
+                Token::KeywordInt => BlockItemNode::Declaration(DeclarationNode::parse(tokens)?),
+                _ => BlockItemNode::Statement(StatementNode::parse(tokens)?),
+            })
+        }
+        Ok(items)
+    }
+}
+
+impl Parse for DeclarationNode {
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        expect(Token::KeywordInt, read(tokens)?)?;
+        let t = read(tokens)?;
+        let name = if let Token::Identifier(name) = t {
+            name
+        } else {
+            return Err(format!(
+                "Expected a string identifier reading a declaration name, got {:?}",
+                t
+            )
+            .into());
+        };
+        match read(tokens)? {
+            Token::SemiColon => Ok(DeclarationNode::Declaration(Type::Integer, name, None)),
+            Token::Assignment => {
+                let expression =
+                    ExpressionNode::parse(&mut read_until_token(tokens, vec![Token::SemiColon])?)?;
+                expect(Token::SemiColon, read(tokens)?)?;
+                Ok(DeclarationNode::Declaration(
+                    Type::Integer,
+                    name,
+                    Some(expression),
+                ))
+            }
+            t => Err(format!("Unexpected token in declaration of {}: {:?}", name, t).into()),
+        }
+    }
+}
+
 impl Parse for StatementNode {
     fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
-        expect(Token::Keyword(Keyword::Return), read(tokens)?)?;
-        let expression = ExpressionNode::parse(&mut read_until_token(tokens, Token::SemiColon)?)?;
-        expect(Token::SemiColon, read_last(tokens)?)?;
-
-        Ok(StatementNode::Return(expression))
+        match tokens[0] {
+            Token::KeywordReturn => {
+                expect(Token::KeywordReturn, read(tokens)?)?;
+                let expression =
+                    ExpressionNode::parse(&mut read_until_token(tokens, vec![Token::SemiColon])?)?;
+                expect(Token::SemiColon, read(tokens)?)?;
+                Ok(StatementNode::Return(expression))
+            }
+            Token::SemiColon => {
+                expect(Token::SemiColon, read(tokens)?)?;
+                Ok(StatementNode::Pass)
+            }
+            _ => {
+                let expression =
+                    ExpressionNode::parse(&mut read_until_token(tokens, vec![Token::SemiColon])?)?;
+                expect(Token::SemiColon, read(tokens)?)?;
+                Ok(StatementNode::Expression(expression))
+            }
+        }
     }
 }
 
@@ -155,11 +225,28 @@ impl ExpressionNode {
         level: usize,
     ) -> Result<Self, Box<dyn Error>> {
         let mut left = ExpressionNode::parse_factor(tokens)?;
-        while let Some((node, precedence)) = BinaryOperatorNode::peek_operator(tokens, level) {
-            // delete the first token from the list (we just parsed it above)
-            let _ = read(tokens)?;
-            let right = ExpressionNode::parse_with_level(tokens, precedence)?;
-            left = ExpressionNode::Binary(node, Box::new(left), Box::new(right));
+        while !tokens.is_empty() {
+            if let Some(precedence) = BinaryOperatorNode::precedence(&tokens[0]) {
+                if precedence < level {
+                    break;
+                }
+                match read(tokens)? {
+                    Token::Assignment => {
+                        let right = ExpressionNode::parse_with_level(tokens, precedence)?;
+                        left = ExpressionNode::Assignment(Box::new(left), Box::new(right));
+                    }
+                    t => {
+                        let right = ExpressionNode::parse_with_level(tokens, precedence + 1)?;
+                        left = ExpressionNode::Binary(
+                            BinaryOperatorNode::parse(&mut vec![t].into())?,
+                            Box::new(left),
+                            Box::new(right),
+                        );
+                    }
+                }
+            } else {
+                break;
+            }
         }
         Ok(left)
     }
@@ -167,12 +254,18 @@ impl ExpressionNode {
     fn parse_factor(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
         let token = read(tokens)?;
         match token {
-            Token::Constant(value) => Ok(ExpressionNode::Constant(value)),
+            Token::IntegerConstant(value) => Ok(ExpressionNode::IntegerConstant(value)),
             Token::OpenParen => {
-                let expression = ExpressionNode::parse(&mut read_until_paren(tokens)?)?;
+                let expression = ExpressionNode::parse(&mut read_until_match(
+                    tokens,
+                    Token::OpenParen,
+                    Token::CloseParen,
+                    false,
+                )?)?;
                 expect(Token::CloseParen, read(tokens)?)?;
                 Ok(expression)
             }
+            Token::Identifier(name) => Ok(ExpressionNode::Var(name)),
             Token::Hyphen | Token::Tilde | Token::Not => {
                 let operator = UnaryOperatorNode::parse(&mut vec![token].into())?;
                 // don't evaluate other binary expressions here, unary operations take precedence
@@ -180,7 +273,7 @@ impl ExpressionNode {
                 let expression = ExpressionNode::parse_factor(tokens)?;
                 Ok(ExpressionNode::Unary(operator, Box::new(expression)))
             }
-            _ => Err(format!("Invalid token at start of expression: {:?}", token).into()),
+            t => Err(format!("Invalid token at start of expression: {:?}", t).into()),
         }
     }
 }
@@ -200,44 +293,59 @@ impl Parse for UnaryOperatorNode {
     }
 }
 
+impl Parse for BinaryOperatorNode {
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        Ok(match read_last(tokens)? {
+            Token::Star => BinaryOperatorNode::Multiply,
+            Token::Slash => BinaryOperatorNode::Divide,
+            Token::Percent => BinaryOperatorNode::Mod,
+
+            Token::Plus => BinaryOperatorNode::Add,
+            Token::Hyphen => BinaryOperatorNode::Subtract,
+
+            Token::Less => BinaryOperatorNode::Less,
+            Token::LessEqual => BinaryOperatorNode::LessEqual,
+            Token::Greater => BinaryOperatorNode::Greater,
+            Token::GreaterEqual => BinaryOperatorNode::GreaterEqual,
+
+            Token::Equal => BinaryOperatorNode::Equal,
+            Token::NotEqual => BinaryOperatorNode::NotEqual,
+
+            Token::And => BinaryOperatorNode::And,
+
+            Token::Or => BinaryOperatorNode::Or,
+
+            Token::Assignment => panic!("Assingment can't be translated to a binary op"),
+
+            a => return Err(format!("token is not a binary operation: {:?}", a).into()),
+        })
+    }
+}
 impl BinaryOperatorNode {
-    fn peek_operator(
-        tokens: &mut VecDeque<Token>,
-        min_level: usize,
-    ) -> Option<(BinaryOperatorNode, usize)> {
-        if tokens.is_empty() {
-            return None;
-        }
-        let mut m = match tokens[0] {
-            Token::Star if min_level < 50 => Some((BinaryOperatorNode::Multiply, 50)),
-            Token::Slash if min_level < 50 => Some((BinaryOperatorNode::Divide, 50)),
-            Token::Percent if min_level < 50 => Some((BinaryOperatorNode::Mod, 50)),
+    fn precedence(token: &Token) -> Option<usize> {
+        Some(match token {
+            Token::Star => 50,
+            Token::Slash => 50,
+            Token::Percent => 50,
 
-            Token::Plus if min_level < 45 => Some((BinaryOperatorNode::Add, 45)),
-            Token::Hyphen if min_level < 45 => Some((BinaryOperatorNode::Subtract, 45)),
+            Token::Plus => 45,
+            Token::Hyphen => 45,
 
-            Token::Less if min_level < 35 => Some((BinaryOperatorNode::Less, 35)),
-            Token::LessEqual if min_level < 35 => Some((BinaryOperatorNode::LessEqual, 35)),
-            Token::Greater if min_level < 35 => Some((BinaryOperatorNode::Greater, 35)),
-            Token::GreaterEqual if min_level < 35 => Some((BinaryOperatorNode::GreaterEqual, 35)),
+            Token::Less => 35,
+            Token::LessEqual => 35,
+            Token::Greater => 35,
+            Token::GreaterEqual => 35,
 
-            Token::Equal if min_level < 30 => Some((BinaryOperatorNode::Equal, 30)),
-            Token::NotEqual if min_level < 30 => Some((BinaryOperatorNode::NotEqual, 30)),
+            Token::Equal => 30,
+            Token::NotEqual => 30,
 
-            Token::And if min_level < 10 => Some((BinaryOperatorNode::And, 10)),
+            Token::And => 10,
 
-            Token::Or if min_level < 5 => Some((BinaryOperatorNode::Or, 5)),
+            Token::Or => 5,
 
-            _ => None,
-        };
+            Token::Assignment => 1,
 
-        match m {
-            Some(found) if min_level >= found.1 => {
-                m = None;
-            }
-            _ => {}
-        }
-
-        m
+            _ => return None,
+        })
     }
 }

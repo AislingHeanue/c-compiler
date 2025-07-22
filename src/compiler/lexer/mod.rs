@@ -4,8 +4,6 @@ use std::{collections::VecDeque, error::Error};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-mod display;
-
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter)]
 pub enum Token {
     OpenParen,
@@ -29,20 +27,12 @@ pub enum Token {
     Greater,
     LessEqual,
     GreaterEqual,
-    Keyword(Keyword),
+    Assignment,
+    IntegerConstant(usize),
     Identifier(String),
-    Constant(Type),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, EnumIter)]
-pub enum Type {
-    Integer(i32),
-}
-
-impl Default for Type {
-    fn default() -> Type {
-        Type::Integer(0)
-    }
+    KeywordInt,
+    KeywordVoid,
+    KeywordReturn,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -81,35 +71,18 @@ lazy_static! {
                 Token::LessEqual => r"<=",
                 Token::GreaterEqual => r">=",
                 Token::Percent => r"%",
+                Token::Assignment => r"=",
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
+                Token::IntegerConstant(_) =>r"[0-9]+\b",
                 // small hack to avoid having to use Option<> in this block, hijack an existing
                 // error struct in the regex package.
-                Token::Constant(_) => "",
-                Token::Keyword(_) => "",
+                Token::KeywordInt => "",
+                Token::KeywordVoid => "",
+                Token::KeywordReturn => "",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
                 v.push((token, Regex::new(&entry).unwrap(), 0))
-            }
-        }
-        for keyword in Keyword::iter() {
-            let keyword_entry = match keyword {
-                Keyword::Int => "int",
-                Keyword::Return => "return",
-                Keyword::Void => "void",
-            };
-            if !keyword_entry.is_empty(){
-                let keyword_entry = "^".to_string() + keyword_entry;
-                v.push((Token::Keyword(keyword), Regex::new(&keyword_entry).unwrap(), 0))
-            }
-        }
-        for a_type in Type::iter() {
-            let type_entry = match a_type {
-                Type::Integer(_) =>r"[0-9]+\b",
-            };
-            if !type_entry.is_empty() {
-                let type_entry = "^".to_string() + type_entry;
-                v.push((Token::Constant(a_type), Regex::new(&type_entry).unwrap(), 0))
             }
         }
         v
@@ -121,10 +94,13 @@ impl Token {
         // fill in values for identifiers and integer constants, since they need to read the actual
         // contents of the matching field
         match self {
-            Token::Identifier(_) => Token::Identifier(text.to_string()),
-            Token::Constant(Type::Integer(_)) => {
-                Token::Constant(Type::Integer(text.parse::<i32>().unwrap()))
-            }
+            Token::Identifier(_) => match text {
+                "int" => Token::KeywordInt,
+                "return" => Token::KeywordReturn,
+                "void" => Token::KeywordVoid,
+                _ => Token::Identifier(text.to_string()),
+            },
+            Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<usize>().unwrap()),
             _ => self.clone(),
         }
     }

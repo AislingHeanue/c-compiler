@@ -1,4 +1,4 @@
-use super::{lexer::Type, parser::ProgramNode};
+use super::parser::ProgramNode;
 use std::error::Error;
 
 mod convert;
@@ -39,7 +39,7 @@ pub enum BirdsInstructionNode {
 
 #[derive(Clone, Debug)]
 pub enum BirdsValueNode {
-    Constant(Type),
+    IntegerConstant(usize),
     Var(String),
 }
 

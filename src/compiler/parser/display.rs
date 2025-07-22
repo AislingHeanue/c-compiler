@@ -1,5 +1,6 @@
 use super::{
-    BinaryOperatorNode, ExpressionNode, FunctionNode, ProgramNode, StatementNode, UnaryOperatorNode,
+    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, FunctionNode,
+    ProgramNode, StatementNode, Type, UnaryOperatorNode,
 };
 use crate::compiler::IndentDisplay;
 use std::fmt::Display;
@@ -30,12 +31,52 @@ impl IndentDisplay for FunctionNode {
     }
 }
 
+impl IndentDisplay for Block {
+    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
+        self.iter()
+            .map(|item| match item {
+                BlockItemNode::Statement(s) => s.fmt_indent(indent, comments),
+                BlockItemNode::Declaration(d) => d.fmt_indent(indent, comments),
+            })
+            .collect::<Vec<String>>()
+            .join(",\n")
+    }
+}
+
 impl IndentDisplay for StatementNode {
     fn fmt_indent(&self, indent: usize, comments: bool) -> String {
         match self {
             StatementNode::Return(value) => {
                 format!("Return {}", value.fmt_indent(indent + 4, comments),)
             }
+            StatementNode::Expression(e) => e.fmt_indent(indent + 4, comments),
+            StatementNode::Pass => "pass".to_string(),
+        }
+    }
+}
+
+impl IndentDisplay for DeclarationNode {
+    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
+        match self {
+            DeclarationNode::Declaration(t, s, Some(e)) => {
+                format!(
+                    "{} {} = {}",
+                    t.fmt_indent(indent, comments),
+                    s,
+                    e.fmt_indent(indent + 4, comments),
+                )
+            }
+            DeclarationNode::Declaration(t, s, None) => {
+                format!("{} {}", t.fmt_indent(indent, comments), s,)
+            }
+        }
+    }
+}
+
+impl IndentDisplay for Type {
+    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
+        match self {
+            Type::Integer => "int".to_string(),
         }
     }
 }
@@ -43,7 +84,7 @@ impl IndentDisplay for StatementNode {
 impl IndentDisplay for ExpressionNode {
     fn fmt_indent(&self, indent: usize, comments: bool) -> String {
         match self {
-            ExpressionNode::Constant(value) => value.fmt_indent(indent + 4, comments),
+            ExpressionNode::IntegerConstant(value) => value.to_string(),
             ExpressionNode::Unary(operator, exp) => {
                 format!(
                     "({}{})",
@@ -59,6 +100,12 @@ impl IndentDisplay for ExpressionNode {
                     right.fmt_indent(indent + 4, comments)
                 )
             }
+            ExpressionNode::Var(s) => format!("Var( {} )", s),
+            ExpressionNode::Assignment(l, r) => format!(
+                "{} = {}",
+                l.fmt_indent(indent, comments),
+                r.fmt_indent(indent, comments)
+            ),
         }
     }
 }

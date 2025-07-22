@@ -1,8 +1,10 @@
 use birds::birds;
 use codegen::codegen;
 use lexer::lex;
-use parser::parse;
+use parser::{parse, validate};
 use std::{error::Error, fs};
+
+use crate::CompileConfig;
 
 pub mod birds;
 pub mod codegen;
@@ -19,34 +21,36 @@ trait IndentDisplay {
 pub fn compile(
     filename: &str,
     asm_filename: &str,
-    only_lex: bool,
-    only_parse: bool,
-    only_birds: bool,
-    only_codegen: bool,
-    add_comments: bool,
+    config: CompileConfig,
 ) -> Result<(), Box<dyn Error>> {
     let contents = fs::read_to_string(filename)?;
 
     let lexed = lex(&contents)?;
-    if only_lex {
+    if config.only_lex {
         println!("{:?}", lexed);
         return Ok(());
     }
 
     let parsed = parse(lexed)?;
-    if only_parse {
+    if config.only_parse {
+        println!("{}", parsed);
+        return Ok(());
+    }
+
+    let parsed = validate(parsed)?;
+    if config.only_validate {
         println!("{}", parsed);
         return Ok(());
     }
 
     let birds_output = birds(parsed)?;
-    if only_birds {
+    if config.only_birds {
         println!("{:?}", birds_output);
         return Ok(());
     }
 
-    let code = codegen(birds_output, add_comments, IS_LINUX, IS_MAC)?;
-    if only_codegen {
+    let code = codegen(birds_output, config.add_comments, IS_LINUX, IS_MAC)?;
+    if config.only_codegen {
         return Ok(());
     }
 

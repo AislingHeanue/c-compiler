@@ -27,6 +27,9 @@ lex)
 parse)
 	bash -c "$binary $file --parse"
 	;;
+validate)
+	bash -c "$binary $file --validate"
+	;;
 tacky)
 	bash -c "$binary $file --tacky"
 	;;

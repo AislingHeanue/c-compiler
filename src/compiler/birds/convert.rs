@@ -1,11 +1,8 @@
 use std::error::Error;
 
-use crate::compiler::{
-    lexer::Type,
-    parser::{
-        BinaryOperatorNode, ExpressionNode, FunctionNode, ProgramNode, StatementNode,
-        UnaryOperatorNode,
-    },
+use crate::compiler::parser::{
+    BinaryOperatorNode, BlockItemNode, ExpressionNode, FunctionNode, ProgramNode, StatementNode,
+    UnaryOperatorNode,
 };
 
 use super::{
@@ -32,17 +29,21 @@ impl Convert for BirdsFunctionNode {
     type Output = Self;
 
     fn convert(
-        parsed: FunctionNode,
+        mut parsed: FunctionNode,
         context: &mut ConvertContext,
     ) -> Result<BirdsFunctionNode, Box<dyn Error>> {
         let name = parsed.name;
 
-        let StatementNode::Return(expression) = parsed.body;
-        let (mut instructions, new_src) = BirdsInstructions::convert(expression, context)?;
-        let return_instruction = BirdsInstructionNode::Return(new_src);
-        instructions.0.push(return_instruction);
+        match parsed.body.pop().unwrap() {
+            BlockItemNode::Statement(StatementNode::Return(expression)) => {
+                let (mut instructions, new_src) = BirdsInstructions::convert(expression, context)?;
+                let return_instruction = BirdsInstructionNode::Return(new_src);
+                instructions.0.push(return_instruction);
 
-        Ok(BirdsFunctionNode { name, instructions })
+                Ok(BirdsFunctionNode { name, instructions })
+            }
+            t => Err(format!("{:?}", t).into()),
+        }
     }
 }
 
@@ -55,9 +56,12 @@ impl Convert for BirdsInstructions {
         context: &mut ConvertContext,
     ) -> Result<(BirdsInstructions, BirdsValueNode), Box<dyn Error>> {
         match parsed {
-            ExpressionNode::Constant(c) => {
-                Ok((BirdsInstructions(Vec::new()), BirdsValueNode::Constant(c)))
-            }
+            ExpressionNode::IntegerConstant(c) => Ok((
+                BirdsInstructions(Vec::new()),
+                BirdsValueNode::IntegerConstant(c),
+            )),
+            ExpressionNode::Var(_) => todo!(),
+            ExpressionNode::Assignment(_, _) => todo!(),
             ExpressionNode::Unary(op, src) => {
                 context.last_stack_number += 1;
                 let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
@@ -131,13 +135,13 @@ impl Convert for BirdsInstructions {
                                     true_label_name.clone(),
                                 ),
                                 BirdsInstructionNode::Copy(
-                                    BirdsValueNode::Constant(Type::Integer(0)),
+                                    BirdsValueNode::IntegerConstant(0),
                                     new_dst.clone(),
                                 ),
                                 BirdsInstructionNode::Jump(end_label_name.clone()),
                                 BirdsInstructionNode::Label(true_label_name),
                                 BirdsInstructionNode::Copy(
-                                    BirdsValueNode::Constant(Type::Integer(1)),
+                                    BirdsValueNode::IntegerConstant(1),
                                     new_dst.clone(),
                                 ),
                                 BirdsInstructionNode::Label(end_label_name),
@@ -154,13 +158,13 @@ impl Convert for BirdsInstructions {
                             instructions.0.append(&mut vec![
                                 BirdsInstructionNode::JumpZero(new_right, false_label_name.clone()),
                                 BirdsInstructionNode::Copy(
-                                    BirdsValueNode::Constant(Type::Integer(1)),
+                                    BirdsValueNode::IntegerConstant(1),
                                     new_dst.clone(),
                                 ),
                                 BirdsInstructionNode::Jump(end_label_name.clone()),
                                 BirdsInstructionNode::Label(false_label_name),
                                 BirdsInstructionNode::Copy(
-                                    BirdsValueNode::Constant(Type::Integer(0)),
+                                    BirdsValueNode::IntegerConstant(0),
                                     new_dst.clone(),
                                 ),
                                 BirdsInstructionNode::Label(end_label_name),

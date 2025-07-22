@@ -46,7 +46,7 @@ enum Instruction {
 
 #[derive(Clone)]
 enum Operand {
-    Imm(i32),        //constant numeric value
+    Imm(usize),      //constant numeric value
     Reg(Register),   // register in assembly
     MockReg(String), // mocked register for temporary use.
     Stack(i32),      // Stack entry whose value is the offset from RSP.

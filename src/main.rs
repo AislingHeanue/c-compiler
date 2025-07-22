@@ -3,11 +3,21 @@ use std::{env, fs, process::Command};
 
 mod compiler;
 
+struct CompileConfig {
+    only_lex: bool,
+    only_parse: bool,
+    only_validate: bool,
+    only_birds: bool,
+    only_codegen: bool,
+    add_comments: bool,
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut filename = "".to_string();
     let mut only_lex = false;
     let mut only_parse = false;
+    let mut only_validate = false;
     let mut only_birds = false;
     let mut only_codegen = false;
     let mut assembly_out = false;
@@ -16,6 +26,7 @@ fn main() {
         match arg.as_str() {
             "--lex" => only_lex = true,
             "--parse" => only_parse = true,
+            "--validate" => only_validate = true,
             "--tacky" => only_birds = true,
             "--codegen" => only_codegen = true,
             "-S" => assembly_out = true,
@@ -48,11 +59,14 @@ fn main() {
     let res = compile(
         &preprocessed_filename,
         &asm_filename,
-        only_lex,
-        only_parse,
-        only_birds,
-        only_codegen,
-        add_comments,
+        CompileConfig {
+            only_lex,
+            only_parse,
+            only_validate,
+            only_birds,
+            only_codegen,
+            add_comments,
+        },
     );
     if res.is_err() {
         panic!("Compiler failed: {:?}", res);
@@ -60,7 +74,7 @@ fn main() {
 
     let _ = fs::remove_file(&preprocessed_filename);
 
-    if only_lex || only_parse || only_codegen || assembly_out || only_birds {
+    if only_lex || only_parse || only_validate || only_birds || only_codegen || assembly_out {
         // a flag signalling an early exit was passed, so exit here without an error
         if assembly_out {
             println!("{}", fs::read_to_string(asm_filename).unwrap());

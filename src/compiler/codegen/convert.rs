@@ -1,12 +1,8 @@
-use itertools::process_results;
-
-use crate::compiler::{
-    birds::{
-        BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsInstructions, BirdsProgramNode,
-        BirdsUnaryOperatorNode, BirdsValueNode,
-    },
-    lexer::Type,
+use crate::compiler::birds::{
+    BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsInstructions, BirdsProgramNode,
+    BirdsUnaryOperatorNode, BirdsValueNode,
 };
+use itertools::process_results;
 use std::{
     collections::{HashMap, VecDeque},
     error::Error,
@@ -350,7 +346,7 @@ impl Convert for Operand {
         _config: &mut ConvertContext,
     ) -> Result<Operand, Box<dyn Error>> {
         match input {
-            BirdsValueNode::Constant(Type::Integer(c)) => Ok(Operand::Imm(c)),
+            BirdsValueNode::IntegerConstant(c) => Ok(Operand::Imm(c)),
             BirdsValueNode::Var(s) => Ok(Operand::MockReg(s)),
         }
     }
