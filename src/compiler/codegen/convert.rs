@@ -12,15 +12,18 @@ use std::{
 
 use super::{
     AssemblyBinaryOperatorNode, AssemblyFunctionNode, AssemblyProgramNode,
-    AssemblyUnaryOperatorNode, Convert, ConvertConfig, ExtraStrings, InstructionNode, Instructions,
-    OperandNode, Register,
+    AssemblyUnaryOperatorNode, Convert, ConvertContext, ExtraStrings, InstructionNode,
+    Instructions, OperandNode, Register,
 };
 
 impl Convert for AssemblyProgramNode {
     type Input = BirdsProgramNode;
     type Output = Self;
 
-    fn convert(parsed: BirdsProgramNode, config: &ConvertConfig) -> Result<Self, Box<dyn Error>> {
+    fn convert(
+        parsed: BirdsProgramNode,
+        config: &mut ConvertContext,
+    ) -> Result<Self, Box<dyn Error>> {
         Ok(AssemblyProgramNode {
             function: AssemblyFunctionNode {
                 header: if config.comments {
@@ -59,7 +62,7 @@ impl Convert for Instructions {
     type Output = Self;
     fn convert(
         input: BirdsInstructions,
-        config: &ConvertConfig,
+        config: &mut ConvertContext,
     ) -> Result<Instructions, Box<dyn Error>> {
         // FIRST PASS: create a bunch of mock registers to be replaced with stack entries later
         let mut instructions: VecDeque<InstructionNode> = VecDeque::new();
@@ -130,7 +133,7 @@ impl Convert for InstructionNode {
 
     fn convert(
         input: BirdsInstructionNode,
-        config: &ConvertConfig,
+        config: &mut ConvertContext,
     ) -> Result<VecDeque<InstructionNode>, Box<dyn Error>> {
         match input {
             BirdsInstructionNode::Return(src) => Ok(vec![
@@ -194,6 +197,11 @@ impl Convert for InstructionNode {
                 ]
                 .into()),
             },
+            BirdsInstructionNode::Copy(_, _) => todo!(),
+            BirdsInstructionNode::Jump(_) => todo!(),
+            BirdsInstructionNode::JumpZero(_, _) => todo!(),
+            BirdsInstructionNode::JumpNotZero(_, _) => todo!(),
+            BirdsInstructionNode::Label(_) => todo!(),
         }
     }
 }
@@ -299,7 +307,7 @@ impl Convert for OperandNode {
 
     fn convert(
         input: BirdsValueNode,
-        _config: &ConvertConfig,
+        _config: &mut ConvertContext,
     ) -> Result<OperandNode, Box<dyn Error>> {
         match input {
             BirdsValueNode::Constant(Type::Integer(c)) => Ok(OperandNode::Imm(c)),
@@ -329,11 +337,12 @@ impl Convert for AssemblyUnaryOperatorNode {
 
     fn convert(
         input: BirdsUnaryOperatorNode,
-        _config: &ConvertConfig,
+        _config: &mut ConvertContext,
     ) -> Result<AssemblyUnaryOperatorNode, Box<dyn Error>> {
         match input {
             BirdsUnaryOperatorNode::Negate => Ok(AssemblyUnaryOperatorNode::Neg),
             BirdsUnaryOperatorNode::Complement => Ok(AssemblyUnaryOperatorNode::Not),
+            BirdsUnaryOperatorNode::Not => todo!(),
         }
     }
 }
@@ -344,12 +353,18 @@ impl Convert for AssemblyBinaryOperatorNode {
 
     fn convert(
         input: BirdsBinaryOperatorNode,
-        _config: &ConvertConfig,
+        _config: &mut ConvertContext,
     ) -> Result<AssemblyBinaryOperatorNode, Box<dyn Error>> {
         match input {
             BirdsBinaryOperatorNode::Add => Ok(AssemblyBinaryOperatorNode::Add),
             BirdsBinaryOperatorNode::Subtract => Ok(AssemblyBinaryOperatorNode::Sub),
             BirdsBinaryOperatorNode::Multiply => Ok(AssemblyBinaryOperatorNode::Mult),
+            BirdsBinaryOperatorNode::Equal => todo!(),
+            BirdsBinaryOperatorNode::NotEqual => todo!(),
+            BirdsBinaryOperatorNode::Less => todo!(),
+            BirdsBinaryOperatorNode::Greater => todo!(),
+            BirdsBinaryOperatorNode::LessEqual => todo!(),
+            BirdsBinaryOperatorNode::GreaterEqual => todo!(),
             BirdsBinaryOperatorNode::Divide | BirdsBinaryOperatorNode::Mod => {
                 panic!("should not treat mod and divide as binary expressions during codegen")
             }

@@ -30,6 +30,11 @@ pub enum BirdsInstructionNode {
         BirdsValueNode,
         BirdsValueNode,
     ),
+    Copy(BirdsValueNode, BirdsValueNode),
+    Jump(String),
+    JumpZero(BirdsValueNode, String),
+    JumpNotZero(BirdsValueNode, String),
+    Label(String),
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +47,7 @@ pub enum BirdsValueNode {
 pub enum BirdsUnaryOperatorNode {
     Complement,
     Negate,
+    Not,
 }
 
 #[derive(Debug)]
@@ -51,6 +57,12 @@ pub enum BirdsBinaryOperatorNode {
     Multiply,
     Divide,
     Mod,
+    Equal,
+    NotEqual,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
 }
 
 trait Convert
@@ -59,9 +71,27 @@ where
 {
     type Input;
     type Output;
-    fn convert(parsed: Self::Input) -> Result<Self::Output, Box<dyn Error>>;
+    fn convert(
+        parsed: Self::Input,
+        context: &mut ConvertContext,
+    ) -> Result<Self::Output, Box<dyn Error>>;
+}
+
+pub struct ConvertContext {
+    last_end_label_number: i32,
+    last_false_label_number: i32,
+    last_stack_number: i32,
+    last_true_label_number: i32,
 }
 
 pub fn birds(parsed: ProgramNode) -> Result<BirdsProgramNode, Box<dyn Error>> {
-    BirdsProgramNode::convert(parsed)
+    BirdsProgramNode::convert(
+        parsed,
+        &mut ConvertContext {
+            last_end_label_number: 0,
+            last_false_label_number: 0,
+            last_stack_number: 0,
+            last_true_label_number: 0,
+        },
+    )
 }

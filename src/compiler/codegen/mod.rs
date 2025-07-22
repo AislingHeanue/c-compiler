@@ -66,20 +66,22 @@ enum AssemblyBinaryOperatorNode {
     Mult,
 }
 
-pub struct ConvertConfig {
-    comments: bool,
-    is_mac: bool,
-    is_linux: bool,
-}
-
 trait Convert
 where
     Self: Sized,
 {
     type Input;
     type Output;
-    fn convert(parsed: Self::Input, config: &ConvertConfig)
-        -> Result<Self::Output, Box<dyn Error>>;
+    fn convert(
+        parsed: Self::Input,
+        config: &mut ConvertContext,
+    ) -> Result<Self::Output, Box<dyn Error>>;
+}
+
+pub struct ConvertContext {
+    comments: bool,
+    is_mac: bool,
+    is_linux: bool,
 }
 
 pub fn codegen(
@@ -90,7 +92,7 @@ pub fn codegen(
 ) -> Result<AssemblyProgramNode, Box<dyn Error>> {
     AssemblyProgramNode::convert(
         parsed,
-        &ConvertConfig {
+        &mut ConvertContext {
             comments,
             is_linux: linux,
             is_mac: mac,

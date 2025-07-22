@@ -5,17 +5,6 @@ use super::{
 use crate::compiler::lexer::{Keyword, Token};
 use std::{collections::VecDeque, error::Error, mem::discriminant};
 
-impl Parse for ProgramNode {
-    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
-        let function = FunctionNode::parse(tokens)?;
-
-        Ok(ProgramNode {
-            function,
-            has_comments: false,
-        })
-    }
-}
-
 fn expect(expected: Token, input: Token) -> Result<(), Box<dyn Error>> {
     if discriminant(&expected) != discriminant(&input) {
         return Err(format!(
@@ -102,6 +91,17 @@ fn identifier_to_string(token: Token) -> Result<String, Box<dyn Error>> {
             token
         )
         .into())
+    }
+}
+
+impl Parse for ProgramNode {
+    fn parse(tokens: &mut VecDeque<Token>) -> Result<Self, Box<dyn Error>> {
+        let function = FunctionNode::parse(tokens)?;
+
+        Ok(ProgramNode {
+            function,
+            has_comments: false,
+        })
     }
 }
 
@@ -203,31 +203,41 @@ impl Parse for UnaryOperatorNode {
 impl BinaryOperatorNode {
     fn peek_operator(
         tokens: &mut VecDeque<Token>,
-        level: usize,
+        min_level: usize,
     ) -> Option<(BinaryOperatorNode, usize)> {
         if tokens.is_empty() {
             return None;
         }
-        match tokens[0] {
-            Token::Star if level < 50 => Some((BinaryOperatorNode::Multiply, 50)),
-            Token::Slash if level < 50 => Some((BinaryOperatorNode::Divide, 50)),
-            Token::Percent if level < 50 => Some((BinaryOperatorNode::Mod, 50)),
+        let mut m = match tokens[0] {
+            Token::Star if min_level < 50 => Some((BinaryOperatorNode::Multiply, 50)),
+            Token::Slash if min_level < 50 => Some((BinaryOperatorNode::Divide, 50)),
+            Token::Percent if min_level < 50 => Some((BinaryOperatorNode::Mod, 50)),
 
-            Token::Plus if level < 45 => Some((BinaryOperatorNode::Add, 45)),
-            Token::Hyphen if level < 45 => Some((BinaryOperatorNode::Subtract, 45)),
+            Token::Plus if min_level < 45 => Some((BinaryOperatorNode::Add, 45)),
+            Token::Hyphen if min_level < 45 => Some((BinaryOperatorNode::Subtract, 45)),
 
-            Token::Less if level < 35 => Some((BinaryOperatorNode::Less, 35)),
-            Token::LessEqual if level < 35 => Some((BinaryOperatorNode::LessEqual, 35)),
-            Token::Greater if level < 35 => Some((BinaryOperatorNode::Greater, 35)),
-            Token::GreaterEqual if level < 35 => Some((BinaryOperatorNode::GreaterEqual, 35)),
+            Token::Less if min_level < 35 => Some((BinaryOperatorNode::Less, 35)),
+            Token::LessEqual if min_level < 35 => Some((BinaryOperatorNode::LessEqual, 35)),
+            Token::Greater if min_level < 35 => Some((BinaryOperatorNode::Greater, 35)),
+            Token::GreaterEqual if min_level < 35 => Some((BinaryOperatorNode::GreaterEqual, 35)),
 
-            Token::Equal if level < 30 => Some((BinaryOperatorNode::Equal, 30)),
-            Token::NotEqual if level < 30 => Some((BinaryOperatorNode::NotEqual, 30)),
+            Token::Equal if min_level < 30 => Some((BinaryOperatorNode::Equal, 30)),
+            Token::NotEqual if min_level < 30 => Some((BinaryOperatorNode::NotEqual, 30)),
 
-            Token::And if level < 10 => Some((BinaryOperatorNode::And, 10)),
+            Token::And if min_level < 10 => Some((BinaryOperatorNode::And, 10)),
 
-            Token::Or if level < 5 => Some((BinaryOperatorNode::Or, 5)),
+            Token::Or if min_level < 5 => Some((BinaryOperatorNode::Or, 5)),
+
             _ => None,
+        };
+
+        match m {
+            Some(found) if min_level >= found.1 => {
+                m = None;
+            }
+            _ => {}
         }
+
+        m
     }
 }
