@@ -11,12 +11,11 @@ use std::{
 };
 
 use super::{
-    AssemblyBinaryOperatorNode, AssemblyFunctionNode, AssemblyProgramNode,
-    AssemblyUnaryOperatorNode, Convert, ConvertContext, ExtraStrings, InstructionNode,
-    Instructions, OperandNode, Register,
+    BinaryOperator, Convert, ConvertContext, ExtraStrings, Function, Instruction, Instructions,
+    Operand, Program, Register, UnaryOperator,
 };
 
-impl Convert for AssemblyProgramNode {
+impl Convert for Program {
     type Input = BirdsProgramNode;
     type Output = Self;
 
@@ -24,8 +23,8 @@ impl Convert for AssemblyProgramNode {
         parsed: BirdsProgramNode,
         config: &mut ConvertContext,
     ) -> Result<Self, Box<dyn Error>> {
-        Ok(AssemblyProgramNode {
-            function: AssemblyFunctionNode {
+        Ok(Program {
+            function: Function {
                 header: if config.comments {
                     ExtraStrings(vec![
                         "# make the function name accessible globally".to_string(),
@@ -65,9 +64,9 @@ impl Convert for Instructions {
         config: &mut ConvertContext,
     ) -> Result<Instructions, Box<dyn Error>> {
         // FIRST PASS: create a bunch of mock registers to be replaced with stack entries later
-        let mut instructions: VecDeque<InstructionNode> = VecDeque::new();
+        let mut instructions: VecDeque<Instruction> = VecDeque::new();
         for instruction in input.0.into_iter() {
-            let mut converted_instructions = InstructionNode::convert(instruction, config)?;
+            let mut converted_instructions = Instruction::convert(instruction, config)?;
             instructions.append(&mut converted_instructions);
         }
 
@@ -81,13 +80,13 @@ impl Convert for Instructions {
 
         // THIRD PASS: use the value of current_max_pointer to add an instruction to the start of
         // the function
-        let instructions: VecDeque<InstructionNode> = vec![
+        let instructions: VecDeque<Instruction> = vec![
             // push the address of RBP to the stack (at RSP).
-            InstructionNode::Custom("pushq %rbp".to_string()),
+            Instruction::Custom("pushq %rbp".to_string()),
             // move RBP to RSP's current location.
-            InstructionNode::Custom("movq %rsp, %rbp".to_string()),
+            Instruction::Custom("movq %rsp, %rbp".to_string()),
             // allocate space for local variables in the space before RSP in the stack.
-            InstructionNode::AllocateStack(-current_max_pointer),
+            Instruction::AllocateStack(-current_max_pointer),
         ]
         .into_iter()
         .chain(instructions)
@@ -95,16 +94,14 @@ impl Convert for Instructions {
 
         let instructions = Instructions::update_instructions(
             instructions,
-            InstructionNode::fix_instructions_with_two_stack_entries,
+            Instruction::fix_instructions_with_two_stack_entries,
         );
         let instructions = Instructions::update_instructions(
             instructions,
-            InstructionNode::fix_immediate_values_in_bad_places,
+            Instruction::fix_immediate_values_in_bad_places,
         );
-        let instructions = Instructions::update_instructions(
-            instructions,
-            InstructionNode::fix_memory_address_as_dst,
-        );
+        let instructions =
+            Instructions::update_instructions(instructions, Instruction::fix_memory_address_as_dst);
 
         Ok(Instructions(instructions))
     }
@@ -112,10 +109,10 @@ impl Convert for Instructions {
 
 impl Instructions {
     fn update_instructions(
-        instructions: VecDeque<InstructionNode>,
-        f: fn(&InstructionNode) -> Option<VecDeque<InstructionNode>>,
-    ) -> VecDeque<InstructionNode> {
-        let mut new_instructions: VecDeque<InstructionNode> = VecDeque::new();
+        instructions: VecDeque<Instruction>,
+        f: fn(&Instruction) -> Option<VecDeque<Instruction>>,
+    ) -> VecDeque<Instruction> {
+        let mut new_instructions: VecDeque<Instruction> = VecDeque::new();
         for instruction in instructions.into_iter() {
             if let Some(mut res) = f(&instruction) {
                 new_instructions.append(&mut res);
@@ -127,72 +124,63 @@ impl Instructions {
     }
 }
 
-impl Convert for InstructionNode {
+impl Convert for Instruction {
     type Input = BirdsInstructionNode;
-    type Output = VecDeque<InstructionNode>;
+    type Output = VecDeque<Instruction>;
 
     fn convert(
         input: BirdsInstructionNode,
         config: &mut ConvertContext,
-    ) -> Result<VecDeque<InstructionNode>, Box<dyn Error>> {
+    ) -> Result<VecDeque<Instruction>, Box<dyn Error>> {
         match input {
             BirdsInstructionNode::Return(src) => Ok(vec![
-                InstructionNode::Mov(
-                    OperandNode::convert(src, config)?,
-                    OperandNode::Reg(Register::AX),
-                ),
-                InstructionNode::Ret,
+                Instruction::Mov(Operand::convert(src, config)?, Operand::Reg(Register::AX)),
+                Instruction::Ret,
             ]
             .into()),
             BirdsInstructionNode::Unary(op, src, dst) => Ok(vec![
-                InstructionNode::Mov(
-                    OperandNode::convert(src, config)?,
-                    OperandNode::convert(dst.clone(), config)?,
+                Instruction::Mov(
+                    Operand::convert(src, config)?,
+                    Operand::convert(dst.clone(), config)?,
                 ),
-                InstructionNode::Unary(
-                    AssemblyUnaryOperatorNode::convert(op, config)?,
-                    OperandNode::convert(dst, config)?,
+                Instruction::Unary(
+                    UnaryOperator::convert(op, config)?,
+                    Operand::convert(dst, config)?,
                 ),
             ]
             .into()),
             BirdsInstructionNode::Binary(op, left, right, dst) => match op {
                 BirdsBinaryOperatorNode::Divide => Ok(vec![
-                    InstructionNode::Mov(
-                        OperandNode::convert(left, config)?,
-                        OperandNode::Reg(Register::AX),
-                    ),
-                    InstructionNode::Cdq,
-                    InstructionNode::Idiv(OperandNode::convert(right, config)?),
-                    InstructionNode::Mov(
-                        OperandNode::Reg(Register::AX), // read quotient result from EAX
-                        OperandNode::convert(dst, config)?,
+                    Instruction::Mov(Operand::convert(left, config)?, Operand::Reg(Register::AX)),
+                    Instruction::Cdq,
+                    Instruction::Idiv(Operand::convert(right, config)?),
+                    Instruction::Mov(
+                        Operand::Reg(Register::AX), // read quotient result from EAX
+                        Operand::convert(dst, config)?,
                     ),
                 ]
                 .into()),
                 BirdsBinaryOperatorNode::Mod => Ok(vec![
-                    InstructionNode::Mov(
-                        OperandNode::convert(left, config)?,
-                        OperandNode::Reg(Register::AX),
-                    ),
-                    InstructionNode::Cdq,
+                    Instruction::Mov(Operand::convert(left, config)?, Operand::Reg(Register::AX)),
+                    Instruction::Cdq,
                     // note: idiv can't operate on immediate values, so we need to stuff those into
                     // a register during a later pass.
-                    InstructionNode::Idiv(OperandNode::convert(right, config)?),
-                    InstructionNode::Mov(
-                        OperandNode::Reg(Register::DX), // read remainder result from EDX
-                        OperandNode::convert(dst, config)?,
+                    Instruction::Idiv(Operand::convert(right, config)?),
+                    Instruction::Mov(
+                        Operand::Reg(Register::DX), // read remainder result from EDX
+                        Operand::convert(dst, config)?,
                     ),
                 ]
                 .into()),
                 _ => Ok(vec![
-                    InstructionNode::Mov(
-                        OperandNode::convert(left, config)?,
-                        OperandNode::convert(dst.clone(), config)?,
+                    Instruction::Mov(
+                        Operand::convert(left, config)?,
+                        Operand::convert(dst.clone(), config)?,
                     ),
-                    InstructionNode::Binary(
-                        AssemblyBinaryOperatorNode::convert(op, config)?,
-                        OperandNode::convert(right, config)?,
-                        OperandNode::convert(dst, config)?,
+                    Instruction::Binary(
+                        BinaryOperator::convert(op, config)?,
+                        Operand::convert(right, config)?,
+                        Operand::convert(dst, config)?,
                     ),
                 ]
                 .into()),
@@ -206,47 +194,47 @@ impl Convert for InstructionNode {
     }
 }
 
-impl InstructionNode {
+impl Instruction {
     fn replace_mock_registers(
         &mut self,
         stack_locations: &mut HashMap<String, i32>,
         current_max_pointer: &mut i32,
     ) {
         match self {
-            InstructionNode::Mov(src, dst) => {
+            Instruction::Mov(src, dst) => {
                 src.replace_mock_register(stack_locations, current_max_pointer);
                 dst.replace_mock_register(stack_locations, current_max_pointer);
             }
-            InstructionNode::Unary(_, dst) => {
+            Instruction::Unary(_, dst) => {
                 dst.replace_mock_register(stack_locations, current_max_pointer);
             }
-            InstructionNode::Binary(_, src, dst) => {
+            Instruction::Binary(_, src, dst) => {
                 src.replace_mock_register(stack_locations, current_max_pointer);
                 dst.replace_mock_register(stack_locations, current_max_pointer);
             }
-            InstructionNode::Idiv(src) => {
+            Instruction::Idiv(src) => {
                 src.replace_mock_register(stack_locations, current_max_pointer);
             }
             _ => {}
         }
     }
 
-    fn fix_instructions_with_two_stack_entries(&self) -> Option<VecDeque<InstructionNode>> {
+    fn fix_instructions_with_two_stack_entries(&self) -> Option<VecDeque<Instruction>> {
         match self {
-            InstructionNode::Mov(OperandNode::Stack(src), OperandNode::Stack(dst)) => Some(
+            Instruction::Mov(Operand::Stack(src), Operand::Stack(dst)) => Some(
                 vec![
-                    InstructionNode::Mov(OperandNode::Stack(*src), OperandNode::Reg(Register::R10)),
-                    InstructionNode::Mov(OperandNode::Reg(Register::R10), OperandNode::Stack(*dst)),
+                    Instruction::Mov(Operand::Stack(*src), Operand::Reg(Register::R10)),
+                    Instruction::Mov(Operand::Reg(Register::R10), Operand::Stack(*dst)),
                 ]
                 .into(),
             ),
-            InstructionNode::Binary(op, OperandNode::Stack(src), OperandNode::Stack(dst)) => Some(
+            Instruction::Binary(op, Operand::Stack(src), Operand::Stack(dst)) => Some(
                 vec![
-                    InstructionNode::Mov(OperandNode::Stack(*src), OperandNode::Reg(Register::R10)),
-                    InstructionNode::Binary(
+                    Instruction::Mov(Operand::Stack(*src), Operand::Reg(Register::R10)),
+                    Instruction::Binary(
                         op.clone(),
-                        OperandNode::Reg(Register::R10),
-                        OperandNode::Stack(*dst),
+                        Operand::Reg(Register::R10),
+                        Operand::Stack(*dst),
                     ),
                 ]
                 .into(),
@@ -255,16 +243,16 @@ impl InstructionNode {
         }
     }
 
-    fn fix_immediate_values_in_bad_places(&self) -> Option<VecDeque<InstructionNode>> {
+    fn fix_immediate_values_in_bad_places(&self) -> Option<VecDeque<Instruction>> {
         match self {
-            InstructionNode::Idiv(OperandNode::Imm(value)) => Some(
+            Instruction::Idiv(Operand::Imm(value)) => Some(
                 vec![
-                    InstructionNode::Mov(
-                        OperandNode::Imm(*value),
+                    Instruction::Mov(
+                        Operand::Imm(*value),
                         // we use r10d to fix src's
-                        OperandNode::Reg(Register::R10),
+                        Operand::Reg(Register::R10),
                     ),
-                    InstructionNode::Idiv(OperandNode::Reg(Register::R10)),
+                    Instruction::Idiv(Operand::Reg(Register::R10)),
                 ]
                 .into(),
             ),
@@ -272,27 +260,17 @@ impl InstructionNode {
         }
     }
 
-    fn fix_memory_address_as_dst(&self) -> Option<VecDeque<InstructionNode>> {
+    fn fix_memory_address_as_dst(&self) -> Option<VecDeque<Instruction>> {
         match self {
-            InstructionNode::Binary(
-                AssemblyBinaryOperatorNode::Mult,
-                src,
-                OperandNode::Stack(value),
-            ) => Some(
+            Instruction::Binary(BinaryOperator::Mult, src, Operand::Stack(value)) => Some(
                 vec![
-                    InstructionNode::Mov(
-                        OperandNode::Stack(*value),
-                        OperandNode::Reg(Register::R11),
-                    ),
-                    InstructionNode::Binary(
-                        AssemblyBinaryOperatorNode::Mult,
+                    Instruction::Mov(Operand::Stack(*value), Operand::Reg(Register::R11)),
+                    Instruction::Binary(
+                        BinaryOperator::Mult,
                         src.clone(),
-                        OperandNode::Reg(Register::R11), // we use r11d to fix dst's
+                        Operand::Reg(Register::R11), // we use r11d to fix dst's
                     ),
-                    InstructionNode::Mov(
-                        OperandNode::Reg(Register::R11),
-                        OperandNode::Stack(*value),
-                    ),
+                    Instruction::Mov(Operand::Reg(Register::R11), Operand::Stack(*value)),
                 ]
                 .into(),
             ),
@@ -301,64 +279,64 @@ impl InstructionNode {
     }
 }
 
-impl Convert for OperandNode {
+impl Convert for Operand {
     type Input = BirdsValueNode;
     type Output = Self;
 
     fn convert(
         input: BirdsValueNode,
         _config: &mut ConvertContext,
-    ) -> Result<OperandNode, Box<dyn Error>> {
+    ) -> Result<Operand, Box<dyn Error>> {
         match input {
-            BirdsValueNode::Constant(Type::Integer(c)) => Ok(OperandNode::Imm(c)),
-            BirdsValueNode::Var(s) => Ok(OperandNode::MockReg(s)),
+            BirdsValueNode::Constant(Type::Integer(c)) => Ok(Operand::Imm(c)),
+            BirdsValueNode::Var(s) => Ok(Operand::MockReg(s)),
         }
     }
 }
-impl OperandNode {
+impl Operand {
     fn replace_mock_register(
         &mut self,
         stack_locations: &mut HashMap<String, i32>,
         current_max_pointer: &mut i32,
     ) {
-        if let OperandNode::MockReg(name) = self {
+        if let Operand::MockReg(name) = self {
             let new_location = stack_locations.entry(name.to_string()).or_insert_with(|| {
                 *current_max_pointer -= 4;
                 *current_max_pointer
             });
-            *self = OperandNode::Stack(*new_location);
+            *self = Operand::Stack(*new_location);
         }
     }
 }
 
-impl Convert for AssemblyUnaryOperatorNode {
+impl Convert for UnaryOperator {
     type Input = BirdsUnaryOperatorNode;
     type Output = Self;
 
     fn convert(
         input: BirdsUnaryOperatorNode,
         _config: &mut ConvertContext,
-    ) -> Result<AssemblyUnaryOperatorNode, Box<dyn Error>> {
+    ) -> Result<UnaryOperator, Box<dyn Error>> {
         match input {
-            BirdsUnaryOperatorNode::Negate => Ok(AssemblyUnaryOperatorNode::Neg),
-            BirdsUnaryOperatorNode::Complement => Ok(AssemblyUnaryOperatorNode::Not),
+            BirdsUnaryOperatorNode::Negate => Ok(UnaryOperator::Neg),
+            BirdsUnaryOperatorNode::Complement => Ok(UnaryOperator::Not),
             BirdsUnaryOperatorNode::Not => todo!(),
         }
     }
 }
 
-impl Convert for AssemblyBinaryOperatorNode {
+impl Convert for BinaryOperator {
     type Input = BirdsBinaryOperatorNode;
     type Output = Self;
 
     fn convert(
         input: BirdsBinaryOperatorNode,
         _config: &mut ConvertContext,
-    ) -> Result<AssemblyBinaryOperatorNode, Box<dyn Error>> {
+    ) -> Result<BinaryOperator, Box<dyn Error>> {
         match input {
-            BirdsBinaryOperatorNode::Add => Ok(AssemblyBinaryOperatorNode::Add),
-            BirdsBinaryOperatorNode::Subtract => Ok(AssemblyBinaryOperatorNode::Sub),
-            BirdsBinaryOperatorNode::Multiply => Ok(AssemblyBinaryOperatorNode::Mult),
+            BirdsBinaryOperatorNode::Add => Ok(BinaryOperator::Add),
+            BirdsBinaryOperatorNode::Subtract => Ok(BinaryOperator::Sub),
+            BirdsBinaryOperatorNode::Multiply => Ok(BinaryOperator::Mult),
             BirdsBinaryOperatorNode::Equal => todo!(),
             BirdsBinaryOperatorNode::NotEqual => todo!(),
             BirdsBinaryOperatorNode::Less => todo!(),

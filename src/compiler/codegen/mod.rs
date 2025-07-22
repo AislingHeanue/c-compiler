@@ -5,40 +5,40 @@ use super::birds::BirdsProgramNode;
 mod convert;
 mod display;
 
-pub struct AssemblyProgramNode {
-    function: AssemblyFunctionNode,
+pub struct Program {
+    function: Function,
     footer: ExtraStrings,
     has_comments: bool,
 }
 
 struct ExtraStrings(Vec<String>);
 
-struct AssemblyFunctionNode {
+struct Function {
     header: ExtraStrings,
     name: String,
     instructions: Instructions,
     is_mac: bool,
 }
 
-struct Instructions(VecDeque<InstructionNode>);
+struct Instructions(VecDeque<Instruction>);
 
 #[derive(Clone)]
-enum InstructionNode {
-    Mov(OperandNode, OperandNode),
-    Unary(AssemblyUnaryOperatorNode, OperandNode), // Operand here is both the src and dst.
+enum Instruction {
+    Mov(Operand, Operand),
+    Unary(UnaryOperator, Operand), // Operand here is both the src and dst.
     // op src, dst. dst is the *first* number in the operation
-    Binary(AssemblyBinaryOperatorNode, OperandNode, OperandNode),
+    Binary(BinaryOperator, Operand, Operand),
     // dividend comes from EDX+EAX. quotient -> EDX, remainder -> EAX.
-    Idiv(OperandNode),
+    Idiv(Operand),
     // expand a 32 bit number to 64 bits. EAX -> EDX+EAX.
     Cdq,
     AllocateStack(i32), // number of bytes to allocate
-    Custom(String),
+    Custom(String), // custom assembly strings, so I can avoid templating them in at a later stage
     Ret,
 }
 
 #[derive(Clone)]
-enum OperandNode {
+enum Operand {
     Imm(i32),        //constant numeric value
     Reg(Register),   // register in assembly
     MockReg(String), // mocked register for temporary use.
@@ -54,13 +54,13 @@ enum Register {
 }
 
 #[derive(Clone)]
-enum AssemblyUnaryOperatorNode {
+enum UnaryOperator {
     Neg,
     Not,
 }
 
 #[derive(Clone)]
-enum AssemblyBinaryOperatorNode {
+enum BinaryOperator {
     Add,
     Sub,
     Mult,
@@ -89,8 +89,8 @@ pub fn codegen(
     comments: bool,
     linux: bool,
     mac: bool,
-) -> Result<AssemblyProgramNode, Box<dyn Error>> {
-    AssemblyProgramNode::convert(
+) -> Result<Program, Box<dyn Error>> {
+    Program::convert(
         parsed,
         &mut ConvertContext {
             comments,
