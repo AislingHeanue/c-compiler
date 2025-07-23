@@ -1,7 +1,7 @@
 use birds::birds;
 use codegen::codegen;
 use lexer::lex;
-use parser::{parse, validate};
+use parser::parse;
 use std::{error::Error, fs};
 
 use crate::CompileConfig;
@@ -32,13 +32,7 @@ pub fn compile(
     }
 
     let parsed = parse(lexed)?;
-    if config.only_parse {
-        println!("{}", parsed);
-        return Ok(());
-    }
-
-    let parsed = validate(parsed)?;
-    if config.only_validate {
+    if config.only_parse || config.only_validate {
         println!("{}", parsed);
         return Ok(());
     }
