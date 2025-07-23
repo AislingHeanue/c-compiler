@@ -2,8 +2,8 @@ use itertools::process_results;
 use std::error::Error;
 
 use super::{
-    Block, BlockItemNode, DeclarationNode, ExpressionNode, ProgramNode, StatementNode, Validate,
-    ValidateContext,
+    Block, BlockItemNode, DeclarationNode, ExpressionNode, ProgramNode, StatementNode,
+    UnaryOperatorNode, Validate, ValidateContext,
 };
 
 impl Validate for ProgramNode {
@@ -53,6 +53,23 @@ impl Validate for ExpressionNode {
         match self {
             ExpressionNode::IntegerConstant(_) => {}
             ExpressionNode::Unary(op, src) => {
+                // VALIDATION: Make sure ++ and -- only operate on variables, not constants or
+                // other expressions
+                match op {
+                    UnaryOperatorNode::PrefixIncrement
+                    | UnaryOperatorNode::PrefixDecrement
+                    | UnaryOperatorNode::SuffixIncrement
+                    | UnaryOperatorNode::SuffixDecrement => {
+                        if !src.is_lvalue() {
+                            return Err(format!(
+                                "Can't perform suffix operation on non-variable: {:?}",
+                                src,
+                            )
+                            .into());
+                        }
+                    }
+                    _ => {}
+                }
                 self = ExpressionNode::Unary(op, Box::new(src.validate(_context)?))
             }
             ExpressionNode::Binary(op, left, right) => {

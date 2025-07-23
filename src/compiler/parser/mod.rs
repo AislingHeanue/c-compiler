@@ -57,6 +57,10 @@ pub enum UnaryOperatorNode {
     Complement,
     Negate,
     Not,
+    PrefixIncrement,
+    PrefixDecrement,
+    SuffixIncrement,
+    SuffixDecrement,
 }
 
 #[derive(Debug, Clone)]

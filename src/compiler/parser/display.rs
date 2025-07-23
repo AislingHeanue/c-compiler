@@ -118,6 +118,10 @@ impl IndentDisplay for UnaryOperatorNode {
             UnaryOperatorNode::Complement => "~",
             UnaryOperatorNode::Negate => "-",
             UnaryOperatorNode::Not => "!",
+            UnaryOperatorNode::PrefixIncrement => "++",
+            UnaryOperatorNode::PrefixDecrement => "--",
+            UnaryOperatorNode::SuffixIncrement => "(this is a suffix)++",
+            UnaryOperatorNode::SuffixDecrement => "(this is a suffix)--",
         }
         .to_string()
     }

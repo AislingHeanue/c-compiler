@@ -1,8 +1,10 @@
 use std::error::Error;
 
+use itertools::process_results;
+
 use crate::compiler::parser::{
-    BinaryOperatorNode, BlockItemNode, ExpressionNode, FunctionNode, ProgramNode, StatementNode,
-    UnaryOperatorNode,
+    BinaryOperatorNode, BlockItemNode, DeclarationNode, ExpressionNode, FunctionNode, ProgramNode,
+    StatementNode, UnaryOperatorNode,
 };
 
 use super::{
@@ -29,26 +31,77 @@ impl Convert for BirdsFunctionNode {
     type Output = Self;
 
     fn convert(
-        mut parsed: FunctionNode,
+        parsed: FunctionNode,
         context: &mut ConvertContext,
     ) -> Result<BirdsFunctionNode, Box<dyn Error>> {
         let name = parsed.name;
+        let mut instructions: BirdsInstructions = process_results(
+            parsed.body.into_iter().map(|node| match node {
+                BlockItemNode::Statement(statement) => match statement {
+                    StatementNode::Return(expression) => {
+                        let (mut instructions, new_src) =
+                            BirdsInstructions::convert(expression, context)?;
+                        let return_instruction = BirdsInstructionNode::Return(new_src);
+                        instructions.0.push(return_instruction);
+                        Ok(instructions)
+                    }
+                    StatementNode::Expression(expression) => {
+                        // expressions (including assignments) all have return values that are thrown away
+                        // as we move onto the next line. eg. "a = 5" returns 5 AND ALSO assigns 5 to a.
+                        let (instructions, _new_src) =
+                            BirdsInstructions::convert(expression, context)?;
+                        Ok(instructions)
+                    }
+                    StatementNode::Pass => {
+                        Ok::<BirdsInstructions, Box<dyn Error>>(BirdsInstructions(Vec::new()))
+                    }
+                },
+                BlockItemNode::Declaration(declaration) => match declaration {
+                    DeclarationNode::Declaration(_type, name, expression) => match expression {
+                        Some(e) => {
+                            let assignment_expression = ExpressionNode::Assignment(
+                                Box::new(ExpressionNode::Var(name)),
+                                Box::new(e),
+                            );
+                            let (instructions, _new_src) =
+                                BirdsInstructions::convert(assignment_expression, context)?;
+                            Ok(instructions)
+                        }
+                        None => Ok(BirdsInstructions(Vec::new())),
+                    },
+                },
+            }),
+            |iter| iter.flatten().collect(),
+        )?;
 
-        match parsed.body.pop().unwrap() {
-            BlockItemNode::Statement(StatementNode::Return(expression)) => {
-                let (mut instructions, new_src) = BirdsInstructions::convert(expression, context)?;
-                let return_instruction = BirdsInstructionNode::Return(new_src);
-                instructions.0.push(return_instruction);
+        // add an extra "return 0" at the end because the C standard dictates that if main() exits
+        // without a return statement, then it must actually return 0. If a return statement is
+        // otherwise present, this instruction will never be run (dead code).
+        instructions.0.push(BirdsInstructionNode::Return(
+            BirdsValueNode::IntegerConstant(0),
+        ));
 
-                Ok(BirdsFunctionNode { name, instructions })
-            }
-            t => Err(format!("{:?}", t).into()),
-        }
+        Ok(BirdsFunctionNode { name, instructions })
+    }
+}
+
+impl IntoIterator for BirdsInstructions {
+    type Item = BirdsInstructionNode;
+    type IntoIter = std::vec::IntoIter<BirdsInstructionNode>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+impl FromIterator<BirdsInstructionNode> for BirdsInstructions {
+    fn from_iter<T: IntoIterator<Item = BirdsInstructionNode>>(iter: T) -> Self {
+        BirdsInstructions(iter.into_iter().collect())
     }
 }
 
 impl Convert for BirdsInstructions {
     type Input = ExpressionNode;
+    // outputs a list of instructions, and the location of the output of the instructions.
     type Output = (BirdsInstructions, BirdsValueNode);
 
     fn convert(
@@ -60,8 +113,85 @@ impl Convert for BirdsInstructions {
                 BirdsInstructions(Vec::new()),
                 BirdsValueNode::IntegerConstant(c),
             )),
-            ExpressionNode::Var(_) => todo!(),
-            ExpressionNode::Assignment(_, _) => todo!(),
+            ExpressionNode::Var(name) => {
+                Ok((BirdsInstructions(Vec::new()), BirdsValueNode::Var(name)))
+            }
+            ExpressionNode::Assignment(left, right) => {
+                // The LHS of this expression should *always* be of type ExpressionNode::Var(name), but
+                // it's better to account for other cases here so that that assumption doesn't
+                // cause errors in the future. At the moment, this guarantee is given to us by the
+                // parser package.
+                let (mut instructions, new_dst) = BirdsInstructions::convert(*left, context)?;
+                let (mut instructions_from_src, new_src) =
+                    BirdsInstructions::convert(*right, context)?;
+                instructions.0.append(&mut instructions_from_src.0);
+
+                instructions
+                    .0
+                    .push(BirdsInstructionNode::Copy(new_src.clone(), new_dst.clone()));
+
+                Ok((instructions, new_dst))
+            }
+            ExpressionNode::Unary(UnaryOperatorNode::PrefixIncrement, src) => {
+                let (mut instructions, new_src) = BirdsInstructions::convert(*src, context)?;
+                context.last_stack_number += 1;
+                let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
+                instructions.0.push(BirdsInstructionNode::Binary(
+                    BirdsBinaryOperatorNode::Add,
+                    new_src.clone(),
+                    BirdsValueNode::IntegerConstant(1),
+                    new_dst.clone(),
+                ));
+                instructions
+                    .0
+                    .push(BirdsInstructionNode::Copy(new_dst.clone(), new_src.clone()));
+                Ok((instructions, new_dst))
+            }
+            ExpressionNode::Unary(UnaryOperatorNode::PrefixDecrement, src) => {
+                let (mut instructions, new_src) = BirdsInstructions::convert(*src, context)?;
+                context.last_stack_number += 1;
+                let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
+                instructions.0.push(BirdsInstructionNode::Binary(
+                    BirdsBinaryOperatorNode::Subtract,
+                    new_src.clone(),
+                    BirdsValueNode::IntegerConstant(1),
+                    new_dst.clone(),
+                ));
+                instructions
+                    .0
+                    .push(BirdsInstructionNode::Copy(new_dst.clone(), new_src.clone()));
+                Ok((instructions, new_dst))
+            }
+            ExpressionNode::Unary(UnaryOperatorNode::SuffixIncrement, src) => {
+                let (mut instructions, new_src) = BirdsInstructions::convert(*src, context)?;
+                context.last_stack_number += 1;
+                let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
+                instructions
+                    .0
+                    .push(BirdsInstructionNode::Copy(new_src.clone(), new_dst.clone()));
+                instructions.0.push(BirdsInstructionNode::Binary(
+                    BirdsBinaryOperatorNode::Add,
+                    new_dst.clone(),
+                    BirdsValueNode::IntegerConstant(1),
+                    new_src.clone(),
+                ));
+                Ok((instructions, new_dst))
+            }
+            ExpressionNode::Unary(UnaryOperatorNode::SuffixDecrement, src) => {
+                let (mut instructions, new_src) = BirdsInstructions::convert(*src, context)?;
+                context.last_stack_number += 1;
+                let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
+                instructions
+                    .0
+                    .push(BirdsInstructionNode::Copy(new_src.clone(), new_dst.clone()));
+                instructions.0.push(BirdsInstructionNode::Binary(
+                    BirdsBinaryOperatorNode::Subtract,
+                    new_dst.clone(),
+                    BirdsValueNode::IntegerConstant(1),
+                    new_src.clone(),
+                ));
+                Ok((instructions, new_dst))
+            }
             ExpressionNode::Unary(op, src) => {
                 context.last_stack_number += 1;
                 let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
@@ -69,6 +199,10 @@ impl Convert for BirdsInstructions {
                     UnaryOperatorNode::Complement => BirdsUnaryOperatorNode::Complement,
                     UnaryOperatorNode::Negate => BirdsUnaryOperatorNode::Negate,
                     UnaryOperatorNode::Not => BirdsUnaryOperatorNode::Not,
+                    UnaryOperatorNode::PrefixIncrement
+                    | UnaryOperatorNode::PrefixDecrement
+                    | UnaryOperatorNode::SuffixIncrement
+                    | UnaryOperatorNode::SuffixDecrement => unreachable!(),
                 };
 
                 let (mut instructions, new_src) = BirdsInstructions::convert(*src, context)?;

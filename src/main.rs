@@ -88,6 +88,7 @@ fn main() {
         .output()
         .unwrap();
     if res.status.code() != Some(0) {
+        println!("{}", fs::read_to_string(asm_filename).unwrap());
         panic!("Linker failed: {:?}", res);
     }
 

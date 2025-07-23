@@ -262,20 +262,71 @@ impl ExpressionNode {
             if precedence < level {
                 break;
             }
-            match read(tokens)? {
-                Token::Assignment => {
+            let t = read(tokens)?;
+            match t {
+                Token::Assignment
+                | Token::AddAssign
+                | Token::SubtractAssign
+                | Token::MultiplyAssign
+                | Token::DivideAssign
+                | Token::ModAssign => {
                     // VALIDATION STEP: Check to make sure we are not assigning to any expression
                     // more complex than a single identifier
                     if !matches!(left, ExpressionNode::Var(_)) {
                         return Err(format!("Found a non-variable to the left side of an assignment, can't assign to {:?}", left).into());
                     }
                     let right = ExpressionNode::parse_with_level(tokens, context, precedence)?;
-                    left = ExpressionNode::Assignment(Box::new(left), Box::new(right));
+                    left = match t {
+                        Token::Assignment => {
+                            ExpressionNode::Assignment(Box::new(left), Box::new(right))
+                        }
+                        Token::AddAssign => ExpressionNode::Assignment(
+                            Box::new(left.clone()),
+                            Box::new(ExpressionNode::Binary(
+                                BinaryOperatorNode::Add,
+                                Box::new(left),
+                                Box::new(right),
+                            )),
+                        ),
+                        Token::SubtractAssign => ExpressionNode::Assignment(
+                            Box::new(left.clone()),
+                            Box::new(ExpressionNode::Binary(
+                                BinaryOperatorNode::Subtract,
+                                Box::new(left),
+                                Box::new(right),
+                            )),
+                        ),
+                        Token::MultiplyAssign => ExpressionNode::Assignment(
+                            Box::new(left.clone()),
+                            Box::new(ExpressionNode::Binary(
+                                BinaryOperatorNode::Multiply,
+                                Box::new(left),
+                                Box::new(right),
+                            )),
+                        ),
+                        Token::DivideAssign => ExpressionNode::Assignment(
+                            Box::new(left.clone()),
+                            Box::new(ExpressionNode::Binary(
+                                BinaryOperatorNode::Divide,
+                                Box::new(left),
+                                Box::new(right),
+                            )),
+                        ),
+                        Token::ModAssign => ExpressionNode::Assignment(
+                            Box::new(left.clone()),
+                            Box::new(ExpressionNode::Binary(
+                                BinaryOperatorNode::Mod,
+                                Box::new(left),
+                                Box::new(right),
+                            )),
+                        ),
+                        _ => unreachable!(),
+                    }
                 }
-                t => {
+                some_t => {
                     let right = ExpressionNode::parse_with_level(tokens, context, precedence + 1)?;
                     left = ExpressionNode::Binary(
-                        BinaryOperatorNode::parse(&mut vec![t].into(), context)?,
+                        BinaryOperatorNode::parse(&mut vec![some_t].into(), context)?,
                         Box::new(left),
                         Box::new(right),
                     );
@@ -290,31 +341,61 @@ impl ExpressionNode {
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         let token = read(tokens)?;
-        match token {
-            Token::IntegerConstant(value) => Ok(ExpressionNode::IntegerConstant(value)),
+        let expression = match token {
+            Token::IntegerConstant(value) => ExpressionNode::IntegerConstant(value),
             Token::OpenParen => {
                 let expression = ExpressionNode::parse(
                     &mut read_until_match(tokens, Token::OpenParen, Token::CloseParen, false)?,
                     context,
                 )?;
                 expect(Token::CloseParen, read(tokens)?)?;
-                Ok(expression)
+                expression
             }
             Token::Identifier(name) => {
                 // VALIDATION STEP: Check the variable has been declared
-                match context.variables.get(&name) {
-                    Some(s) => Ok(ExpressionNode::Var(s.to_string())),
-                    None => Err(format!("Variable used before declaration: {}", name).into()),
-                }
+                ExpressionNode::Var(
+                    context
+                        .variables
+                        .get(&name)
+                        .ok_or::<Box<dyn Error>>(
+                            format!("Variable used before declaration: {}", name).into(),
+                        )?
+                        .to_string(),
+                )
             }
-            Token::Hyphen | Token::Tilde | Token::Not => {
+            Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement => {
                 let operator = UnaryOperatorNode::parse(&mut vec![token].into(), context)?;
                 // don't evaluate other binary expressions here, unary operations take precedence
                 // over everything
                 let expression = ExpressionNode::parse_factor(tokens, context)?;
+                ExpressionNode::Unary(operator, Box::new(expression))
+            }
+            t => return Err(format!("Invalid token at start of expression: {:?}", t).into()),
+        };
+
+        match ExpressionNode::check_suffix_operators(tokens, context) {
+            Some(operator) => {
+                // pop the token
+                let _ = read(tokens)?;
                 Ok(ExpressionNode::Unary(operator, Box::new(expression)))
             }
-            t => Err(format!("Invalid token at start of expression: {:?}", t).into()),
+            None => Ok(expression),
+        }
+    }
+
+    pub fn is_lvalue(&self) -> bool {
+        matches!(self, ExpressionNode::Var(_))
+    }
+
+    fn check_suffix_operators(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Option<UnaryOperatorNode> {
+        match tokens.front() {
+            Some(Token::Increment | Token::Decrement) => {
+                UnaryOperatorNode::parse_as_suffix(tokens, context).ok()
+            }
+            _ => None,
         }
     }
 }
@@ -328,6 +409,25 @@ impl Parse for UnaryOperatorNode {
             Token::Hyphen => Ok(UnaryOperatorNode::Negate),
             Token::Tilde => Ok(UnaryOperatorNode::Complement),
             Token::Not => Ok(UnaryOperatorNode::Not),
+            Token::Increment => Ok(UnaryOperatorNode::PrefixIncrement),
+            Token::Decrement => Ok(UnaryOperatorNode::PrefixDecrement),
+            t => Err(format!(
+                "Unexpected token, got: {:?}, expecting identifier or operator token",
+                t,
+            )
+            .into()),
+        }
+    }
+}
+
+impl UnaryOperatorNode {
+    fn parse_as_suffix(
+        tokens: &mut VecDeque<Token>,
+        _context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        match tokens.front().unwrap() {
+            Token::Increment => Ok(UnaryOperatorNode::SuffixIncrement),
+            Token::Decrement => Ok(UnaryOperatorNode::SuffixDecrement),
             t => Err(format!(
                 "Unexpected token, got: {:?}, expecting identifier or operator token",
                 t,
@@ -362,8 +462,6 @@ impl Parse for BinaryOperatorNode {
 
             Token::Or => BinaryOperatorNode::Or,
 
-            Token::Assignment => panic!("Assignment can't be translated to a binary op"),
-
             a => return Err(format!("token is not a binary operation: {:?}", a).into()),
         })
     }
@@ -392,6 +490,11 @@ impl BinaryOperatorNode {
                 Token::Or => 5,
 
                 Token::Assignment => 1,
+                Token::AddAssign => 1,
+                Token::SubtractAssign => 1,
+                Token::MultiplyAssign => 1,
+                Token::DivideAssign => 1,
+                Token::ModAssign => 1,
 
                 _ => return None,
             })
