@@ -6,6 +6,7 @@ use std::{
 
 mod display;
 mod parse;
+mod validate;
 
 pub struct ProgramNode {
     pub function: FunctionNode,
@@ -81,21 +82,34 @@ where
 {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        context: &mut ValidateContext,
+        context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>>;
+}
+
+struct ParseContext {
+    variables: HashMap<String, String>,
+    num_variables: usize,
 }
 
 pub fn parse(mut lexed: VecDeque<Token>) -> Result<ProgramNode, Box<dyn Error>> {
     ProgramNode::parse(
         &mut lexed,
-        &mut ValidateContext {
+        &mut ParseContext {
             variables: HashMap::new(),
             num_variables: 0,
         },
     )
 }
 
-struct ValidateContext {
-    variables: HashMap<String, String>,
-    num_variables: usize,
+trait Validate
+where
+    Self: Sized,
+{
+    fn validate(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>>;
+}
+
+struct ValidateContext {}
+
+pub fn validate(parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> {
+    parsed.validate(&mut ValidateContext {})
 }

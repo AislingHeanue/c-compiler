@@ -2,7 +2,7 @@ use super::{
     BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, FunctionNode, Parse,
     ProgramNode, StatementNode, Type, UnaryOperatorNode,
 };
-use crate::compiler::{lexer::Token, parser::ValidateContext};
+use crate::compiler::{lexer::Token, parser::ParseContext};
 use std::{
     collections::VecDeque,
     error::Error,
@@ -108,7 +108,7 @@ fn identifier_to_string(token: Token) -> Result<String, Box<dyn Error>> {
 impl Parse for ProgramNode {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        context: &mut ValidateContext,
+        context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         let function = FunctionNode::parse(tokens, context)?;
 
@@ -122,7 +122,7 @@ impl Parse for ProgramNode {
 impl Parse for FunctionNode {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        context: &mut ValidateContext,
+        context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         expect(Token::KeywordInt, read(tokens)?)?;
         let name = identifier_to_string(read(tokens)?)?;
@@ -143,7 +143,7 @@ impl Parse for FunctionNode {
 impl Parse for Block {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        context: &mut ValidateContext,
+        context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         let mut items: Vec<BlockItemNode> = Vec::new();
         while !tokens.is_empty() {
@@ -161,7 +161,7 @@ impl Parse for Block {
 impl Parse for DeclarationNode {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        context: &mut ValidateContext,
+        context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         expect(Token::KeywordInt, read(tokens)?)?;
         let t = read(tokens)?;
@@ -205,7 +205,7 @@ impl Parse for DeclarationNode {
 impl Parse for StatementNode {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        context: &mut ValidateContext,
+        context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         match tokens.front().ok_or("Statement has no tokens")? {
             Token::KeywordReturn => {
@@ -236,7 +236,7 @@ impl Parse for StatementNode {
 impl Parse for ExpressionNode {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        context: &mut ValidateContext,
+        context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         let output = ExpressionNode::parse_with_level(tokens, context, 0)?;
         if !tokens.is_empty() {
@@ -254,7 +254,7 @@ impl Parse for ExpressionNode {
 impl ExpressionNode {
     fn parse_with_level(
         tokens: &mut VecDeque<Token>,
-        context: &mut ValidateContext,
+        context: &mut ParseContext,
         level: usize,
     ) -> Result<Self, Box<dyn Error>> {
         let mut left = ExpressionNode::parse_factor(tokens, context)?;
@@ -287,7 +287,7 @@ impl ExpressionNode {
 
     fn parse_factor(
         tokens: &mut VecDeque<Token>,
-        context: &mut ValidateContext,
+        context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         let token = read(tokens)?;
         match token {
@@ -322,7 +322,7 @@ impl ExpressionNode {
 impl Parse for UnaryOperatorNode {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        _context: &mut ValidateContext,
+        _context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         match read_last(tokens)? {
             Token::Hyphen => Ok(UnaryOperatorNode::Negate),
@@ -340,7 +340,7 @@ impl Parse for UnaryOperatorNode {
 impl Parse for BinaryOperatorNode {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        _context: &mut ValidateContext,
+        _context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         Ok(match read_last(tokens)? {
             Token::Star => BinaryOperatorNode::Multiply,
