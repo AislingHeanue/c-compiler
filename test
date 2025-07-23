@@ -2,7 +2,7 @@
 
 ### May change for other devices/languages being used ###
 root_test_path=../../nlsandler/writing-a-c-compiler-tests
-extra_args="--increment --compound"
+extra_args="--increment --compound --goto"
 binary_path=target/debug/c-compiler
 ###
 

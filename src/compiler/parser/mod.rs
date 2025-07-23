@@ -39,6 +39,12 @@ pub enum Type {
 #[derive(Debug)]
 pub enum StatementNode {
     Expression(ExpressionNode),
+    // condition, then, else
+    If(
+        ExpressionNode,
+        Box<StatementNode>,
+        Box<Option<StatementNode>>,
+    ),
     Pass, // null statement, just a semicolon
     Return(ExpressionNode),
 }
@@ -50,6 +56,12 @@ pub enum ExpressionNode {
     Binary(BinaryOperatorNode, Box<ExpressionNode>, Box<ExpressionNode>),
     Var(String),
     Assignment(Box<ExpressionNode>, Box<ExpressionNode>),
+    // condition ? then : otherwise
+    Ternary(
+        Box<ExpressionNode>,
+        Box<ExpressionNode>,
+        Box<ExpressionNode>,
+    ),
 }
 
 #[derive(Clone, Debug)]

@@ -3,7 +3,7 @@ use super::{
     ProgramNode, StatementNode, Type, UnaryOperatorNode,
 };
 use crate::compiler::IndentDisplay;
-use std::fmt::Display;
+use std::{borrow::Borrow, fmt::Display};
 
 impl Display for ProgramNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -53,6 +53,28 @@ impl IndentDisplay for StatementNode {
             }
             StatementNode::Expression(e) => e.fmt_indent(indent + 4, comments),
             StatementNode::Pass => "pass".to_string(),
+            StatementNode::If(condition, then, otherwise) => {
+                if let Some(other) = otherwise.borrow() {
+                    format!(
+                        "if ({})\n{:indent$}    {}\n{:indent$}else\n{:indent$}    {}",
+                        condition.fmt_indent(indent + 4, comments),
+                        "",
+                        then.fmt_indent(indent + 4, comments),
+                        "",
+                        "",
+                        other.fmt_indent(indent, comments),
+                        indent = indent
+                    )
+                } else {
+                    format!(
+                        "if ({})\n{:indent$}    {}",
+                        condition.fmt_indent(indent + 4, comments),
+                        "",
+                        then.fmt_indent(indent + 4, comments),
+                        indent = indent
+                    )
+                }
+            }
         }
     }
 }
@@ -108,6 +130,14 @@ impl IndentDisplay for ExpressionNode {
                 l.fmt_indent(indent, comments),
                 r.fmt_indent(indent, comments)
             ),
+            ExpressionNode::Ternary(condition, then, otherwise) => {
+                format!(
+                    "{} ? {} : {}",
+                    condition.fmt_indent(indent + 4, comments),
+                    then.fmt_indent(indent + 4, comments),
+                    otherwise.fmt_indent(indent, comments),
+                )
+            }
         }
     }
 }

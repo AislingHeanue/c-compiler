@@ -34,11 +34,15 @@ pub enum Token {
     MultiplyAssign,
     DivideAssign,
     ModAssign,
+    Question,
+    Colon,
     IntegerConstant(usize),
     Identifier(String),
     KeywordInt,
     KeywordVoid,
     KeywordReturn,
+    KeywordIf,
+    KeywordElse,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -84,6 +88,8 @@ lazy_static! {
                 Token::MultiplyAssign => r"\*=",
                 Token::DivideAssign => r"/=",
                 Token::ModAssign => r"%=",
+                Token::Question => r"\?",
+                Token::Colon => r":",
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
                 Token::IntegerConstant(_) =>r"[0-9]+\b",
                 // small hack to avoid having to use Option<> in this block, hijack an existing
@@ -91,6 +97,8 @@ lazy_static! {
                 Token::KeywordInt => "",
                 Token::KeywordVoid => "",
                 Token::KeywordReturn => "",
+                Token::KeywordIf => "",
+                Token::KeywordElse => "",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -110,6 +118,8 @@ impl Token {
                 "int" => Token::KeywordInt,
                 "return" => Token::KeywordReturn,
                 "void" => Token::KeywordVoid,
+                "if" => Token::KeywordIf,
+                "else" => Token::KeywordElse,
                 _ => Token::Identifier(text.to_string()),
             },
             Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<usize>().unwrap()),

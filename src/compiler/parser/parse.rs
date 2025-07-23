@@ -217,6 +217,28 @@ impl Parse for StatementNode {
                 expect(Token::SemiColon, read(tokens)?)?;
                 Ok(StatementNode::Return(expression))
             }
+            Token::KeywordIf => {
+                expect(Token::KeywordIf, read(tokens)?)?;
+                expect(Token::OpenParen, read(tokens)?)?;
+                let condition = ExpressionNode::parse(
+                    &mut read_until_match(tokens, Token::OpenParen, Token::CloseParen, false)?,
+                    context,
+                )?;
+                expect(Token::CloseParen, read(tokens)?)?;
+                let then = StatementNode::parse(tokens, context)?;
+                let otherwise = match tokens.front() {
+                    Some(Token::KeywordElse) => {
+                        expect(Token::KeywordElse, read(tokens)?)?;
+                        Some(StatementNode::parse(tokens, context)?)
+                    }
+                    _ => None,
+                };
+                Ok(StatementNode::If(
+                    condition,
+                    Box::new(then),
+                    Box::new(otherwise),
+                ))
+            }
             Token::SemiColon => {
                 expect(Token::SemiColon, read(tokens)?)?;
                 Ok(StatementNode::Pass)
@@ -322,6 +344,16 @@ impl ExpressionNode {
                         ),
                         _ => unreachable!(),
                     }
+                }
+                Token::Question => {
+                    // parse this expression with precedence level reset
+                    let middle = ExpressionNode::parse(
+                        &mut read_until_match(tokens, Token::Question, Token::Colon, false)?,
+                        context,
+                    )?;
+                    expect(Token::Colon, read(tokens)?)?;
+                    let end = ExpressionNode::parse_with_level(tokens, context, precedence)?;
+                    left = ExpressionNode::Ternary(Box::new(left), Box::new(middle), Box::new(end))
                 }
                 some_t => {
                     let right = ExpressionNode::parse_with_level(tokens, context, precedence + 1)?;
@@ -488,6 +520,8 @@ impl BinaryOperatorNode {
                 Token::And => 10,
 
                 Token::Or => 5,
+
+                Token::Question => 3,
 
                 Token::Assignment => 1,
                 Token::AddAssign => 1,

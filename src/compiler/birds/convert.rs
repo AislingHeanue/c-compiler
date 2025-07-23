@@ -12,64 +12,25 @@ use super::{
     BirdsProgramNode, BirdsUnaryOperatorNode, BirdsValueNode, Convert, ConvertContext,
 };
 
-impl Convert for BirdsProgramNode {
-    type Input = ProgramNode;
-    type Output = Self;
+impl Convert for ProgramNode {
+    type Output = BirdsProgramNode;
 
-    fn convert(
-        parsed: ProgramNode,
-        context: &mut ConvertContext,
-    ) -> Result<BirdsProgramNode, Box<dyn Error>> {
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         Ok(BirdsProgramNode {
-            function: BirdsFunctionNode::convert(parsed.function, context)?,
+            function: self.function.convert(context)?,
         })
     }
 }
 
-impl Convert for BirdsFunctionNode {
-    type Input = FunctionNode;
-    type Output = Self;
+impl Convert for FunctionNode {
+    type Output = BirdsFunctionNode;
 
-    fn convert(
-        parsed: FunctionNode,
-        context: &mut ConvertContext,
-    ) -> Result<BirdsFunctionNode, Box<dyn Error>> {
-        let name = parsed.name;
+    fn convert(self, context: &mut ConvertContext) -> Result<BirdsFunctionNode, Box<dyn Error>> {
+        let name = self.name;
         let mut instructions: BirdsInstructions = process_results(
-            parsed.body.into_iter().map(|node| match node {
-                BlockItemNode::Statement(statement) => match statement {
-                    StatementNode::Return(expression) => {
-                        let (mut instructions, new_src) =
-                            BirdsInstructions::convert(expression, context)?;
-                        let return_instruction = BirdsInstructionNode::Return(new_src);
-                        instructions.0.push(return_instruction);
-                        Ok(instructions)
-                    }
-                    StatementNode::Expression(expression) => {
-                        // expressions (including assignments) all have return values that are thrown away
-                        // as we move onto the next line. eg. "a = 5" returns 5 AND ALSO assigns 5 to a.
-                        let (instructions, _new_src) =
-                            BirdsInstructions::convert(expression, context)?;
-                        Ok(instructions)
-                    }
-                    StatementNode::Pass => {
-                        Ok::<BirdsInstructions, Box<dyn Error>>(BirdsInstructions(Vec::new()))
-                    }
-                },
-                BlockItemNode::Declaration(declaration) => match declaration {
-                    DeclarationNode::Declaration(_type, name, expression) => match expression {
-                        Some(e) => {
-                            let assignment_expression = ExpressionNode::Assignment(
-                                Box::new(ExpressionNode::Var(name)),
-                                Box::new(e),
-                            );
-                            let (instructions, _new_src) =
-                                BirdsInstructions::convert(assignment_expression, context)?;
-                            Ok(instructions)
-                        }
-                        None => Ok(BirdsInstructions(Vec::new())),
-                    },
-                },
+            self.body.into_iter().map(|node| match node {
+                BlockItemNode::Statement(statement) => statement.convert(context),
+                BlockItemNode::Declaration(declaration) => declaration.convert(context),
             }),
             |iter| iter.flatten().collect(),
         )?;
@@ -93,22 +54,108 @@ impl IntoIterator for BirdsInstructions {
         self.0.into_iter()
     }
 }
+
 impl FromIterator<BirdsInstructionNode> for BirdsInstructions {
     fn from_iter<T: IntoIterator<Item = BirdsInstructionNode>>(iter: T) -> Self {
         BirdsInstructions(iter.into_iter().collect())
     }
 }
 
-impl Convert for BirdsInstructions {
-    type Input = ExpressionNode;
+impl Convert for StatementNode {
+    type Output = BirdsInstructions;
+
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+        match self {
+            StatementNode::Return(expression) => {
+                let (mut instructions, new_src) = expression.convert(context)?;
+                let return_instruction = BirdsInstructionNode::Return(new_src);
+                instructions.0.push(return_instruction);
+                Ok(instructions)
+            }
+            StatementNode::Expression(expression) => {
+                // expressions (including assignments) all have return values that are thrown away
+                // as we move onto the next line. eg. "a = 5" returns 5 AND ALSO assigns 5 to a.
+                let (instructions, _new_src) = expression.convert(context)?;
+                Ok(instructions)
+            }
+            StatementNode::Pass => {
+                Ok::<BirdsInstructions, Box<dyn Error>>(BirdsInstructions(Vec::new()))
+            }
+            StatementNode::If(condition, then, otherwise) => {
+                if let Some(other) = *otherwise {
+                    context.last_end_label_number += 1;
+                    let new_end_label_name = format!("end_{}", context.last_end_label_number);
+                    context.last_else_label_number += 1;
+                    let new_else_label_name = format!("else_{}", context.last_else_label_number);
+
+                    let (mut instructions, new_cond) = condition.convert(context)?;
+                    instructions.0.push(BirdsInstructionNode::JumpZero(
+                        new_cond,
+                        new_else_label_name.clone(),
+                    ));
+                    instructions.0.append(&mut then.convert(context)?.0);
+                    instructions
+                        .0
+                        .push(BirdsInstructionNode::Jump(new_end_label_name.clone()));
+                    instructions
+                        .0
+                        .push(BirdsInstructionNode::Label(new_else_label_name));
+                    instructions.0.append(&mut other.convert(context)?.0);
+                    instructions
+                        .0
+                        .push(BirdsInstructionNode::Label(new_end_label_name));
+
+                    Ok(instructions)
+                } else {
+                    context.last_end_label_number += 1;
+                    let new_end_label_name = format!("end_{}", context.last_end_label_number);
+                    let (mut instructions, new_cond) = condition.convert(context)?;
+                    instructions.0.push(BirdsInstructionNode::JumpZero(
+                        new_cond,
+                        new_end_label_name.clone(),
+                    ));
+
+                    instructions.0.append(&mut then.convert(context)?.0);
+
+                    instructions
+                        .0
+                        .push(BirdsInstructionNode::Label(new_end_label_name));
+                    Ok(instructions)
+                }
+            }
+        }
+    }
+}
+
+impl Convert for DeclarationNode {
+    type Output = BirdsInstructions;
+
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+        match self {
+            DeclarationNode::Declaration(_type, name, expression) => match expression {
+                Some(e) => {
+                    let assignment_expression = ExpressionNode::Assignment(
+                        Box::new(ExpressionNode::Var(name)),
+                        Box::new(e),
+                    );
+                    let (instructions, _new_src) = assignment_expression.convert(context)?;
+                    Ok(instructions)
+                }
+                None => Ok(BirdsInstructions(Vec::new())),
+            },
+        }
+    }
+}
+
+impl Convert for ExpressionNode {
     // outputs a list of instructions, and the location of the output of the instructions.
     type Output = (BirdsInstructions, BirdsValueNode);
 
     fn convert(
-        parsed: ExpressionNode,
+        self,
         context: &mut ConvertContext,
     ) -> Result<(BirdsInstructions, BirdsValueNode), Box<dyn Error>> {
-        match parsed {
+        match self {
             ExpressionNode::IntegerConstant(c) => Ok((
                 BirdsInstructions(Vec::new()),
                 BirdsValueNode::IntegerConstant(c),
@@ -121,9 +168,8 @@ impl Convert for BirdsInstructions {
                 // it's better to account for other cases here so that that assumption doesn't
                 // cause errors in the future. At the moment, this guarantee is given to us by the
                 // parser package.
-                let (mut instructions, new_dst) = BirdsInstructions::convert(*left, context)?;
-                let (mut instructions_from_src, new_src) =
-                    BirdsInstructions::convert(*right, context)?;
+                let (mut instructions, new_dst) = left.convert(context)?;
+                let (mut instructions_from_src, new_src) = right.convert(context)?;
                 instructions.0.append(&mut instructions_from_src.0);
 
                 instructions
@@ -133,7 +179,7 @@ impl Convert for BirdsInstructions {
                 Ok((instructions, new_dst))
             }
             ExpressionNode::Unary(UnaryOperatorNode::PrefixIncrement, src) => {
-                let (mut instructions, new_src) = BirdsInstructions::convert(*src, context)?;
+                let (mut instructions, new_src) = src.convert(context)?;
                 context.last_stack_number += 1;
                 let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
                 instructions.0.push(BirdsInstructionNode::Binary(
@@ -148,7 +194,7 @@ impl Convert for BirdsInstructions {
                 Ok((instructions, new_dst))
             }
             ExpressionNode::Unary(UnaryOperatorNode::PrefixDecrement, src) => {
-                let (mut instructions, new_src) = BirdsInstructions::convert(*src, context)?;
+                let (mut instructions, new_src) = src.convert(context)?;
                 context.last_stack_number += 1;
                 let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
                 instructions.0.push(BirdsInstructionNode::Binary(
@@ -163,7 +209,7 @@ impl Convert for BirdsInstructions {
                 Ok((instructions, new_dst))
             }
             ExpressionNode::Unary(UnaryOperatorNode::SuffixIncrement, src) => {
-                let (mut instructions, new_src) = BirdsInstructions::convert(*src, context)?;
+                let (mut instructions, new_src) = src.convert(context)?;
                 context.last_stack_number += 1;
                 let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
                 instructions
@@ -178,7 +224,7 @@ impl Convert for BirdsInstructions {
                 Ok((instructions, new_dst))
             }
             ExpressionNode::Unary(UnaryOperatorNode::SuffixDecrement, src) => {
-                let (mut instructions, new_src) = BirdsInstructions::convert(*src, context)?;
+                let (mut instructions, new_src) = src.convert(context)?;
                 context.last_stack_number += 1;
                 let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
                 instructions
@@ -205,7 +251,7 @@ impl Convert for BirdsInstructions {
                     | UnaryOperatorNode::SuffixDecrement => unreachable!(),
                 };
 
-                let (mut instructions, new_src) = BirdsInstructions::convert(*src, context)?;
+                let (mut instructions, new_src) = src.convert(context)?;
 
                 instructions.0.push(BirdsInstructionNode::Unary(
                     bird_op,
@@ -215,10 +261,9 @@ impl Convert for BirdsInstructions {
                 Ok((instructions, new_dst))
             }
             ExpressionNode::Binary(op, left, right) => {
-                let (mut instructions, new_left) = BirdsInstructions::convert(*left, context)?;
+                let (mut instructions, new_left) = left.convert(context)?;
 
-                let (mut instructions_from_right, new_right) =
-                    BirdsInstructions::convert(*right, context)?;
+                let (mut instructions_from_right, new_right) = right.convert(context)?;
 
                 context.last_stack_number += 1;
                 let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
@@ -307,6 +352,37 @@ impl Convert for BirdsInstructions {
                         _ => panic!("Unexpected binary operator found: {:?}", op),
                     };
                 }
+                Ok((instructions, new_dst))
+            }
+            ExpressionNode::Ternary(condition, then, otherwise) => {
+                context.last_end_label_number += 1;
+                let new_end_label_name = format!("end_{}", context.last_end_label_number);
+                context.last_else_label_number += 1;
+                let new_else_label_name = format!("else_{}", context.last_else_label_number);
+                context.last_stack_number += 1;
+                let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
+
+                let (mut instructions, new_cond) = condition.convert(context)?;
+                instructions.0.push(BirdsInstructionNode::JumpZero(
+                    new_cond,
+                    new_else_label_name.clone(),
+                ));
+                let (mut instructions_from_then, new_then) = then.convert(context)?;
+                instructions.0.append(&mut instructions_from_then.0);
+                instructions.0.append(&mut vec![
+                    BirdsInstructionNode::Copy(new_then.clone(), new_dst.clone()),
+                    BirdsInstructionNode::Jump(new_end_label_name.clone()),
+                    BirdsInstructionNode::Label(new_else_label_name),
+                ]);
+                let (mut instructions_from_other, new_other) = otherwise.convert(context)?;
+                instructions.0.append(&mut instructions_from_other.0);
+                instructions
+                    .0
+                    .push(BirdsInstructionNode::Copy(new_other, new_dst.clone()));
+                instructions
+                    .0
+                    .push(BirdsInstructionNode::Label(new_end_label_name));
+
                 Ok((instructions, new_dst))
             }
         }

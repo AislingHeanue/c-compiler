@@ -43,6 +43,17 @@ impl Validate for StatementNode {
             StatementNode::Return(e) => {
                 self = StatementNode::Return(e.validate(context)?);
             }
+            StatementNode::If(condition, then, otherwise) => {
+                let new_other = match *otherwise {
+                    Some(other) => Some(other.validate(context)?),
+                    None => None,
+                };
+                self = StatementNode::If(
+                    condition.validate(context)?,
+                    Box::new(then.validate(context)?),
+                    Box::new(new_other),
+                )
+            }
         }
         Ok(self)
     }
@@ -84,6 +95,13 @@ impl Validate for ExpressionNode {
                 self = ExpressionNode::Assignment(
                     Box::new(dst.validate(_context)?),
                     Box::new(src.validate(_context)?),
+                )
+            }
+            ExpressionNode::Ternary(condition, then, otherwise) => {
+                self = ExpressionNode::Ternary(
+                    Box::new(condition.validate(_context)?),
+                    Box::new(then.validate(_context)?),
+                    Box::new(otherwise.validate(_context)?),
                 )
             }
         }
