@@ -75,6 +75,10 @@ impl IndentDisplay for StatementNode {
                     )
                 }
             }
+            StatementNode::Label(s, statement) => {
+                format!("{}: {}", s, statement.fmt_indent(indent, comments))
+            }
+            StatementNode::Goto(s) => format!("goto {}", s),
         }
     }
 }

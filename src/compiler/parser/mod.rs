@@ -38,6 +38,8 @@ pub enum Type {
 
 #[derive(Debug)]
 pub enum StatementNode {
+    Label(String, Box<StatementNode>),
+    Goto(String),
     Expression(ExpressionNode),
     // condition, then, else
     If(

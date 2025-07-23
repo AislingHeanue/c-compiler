@@ -123,6 +123,8 @@ impl Convert for StatementNode {
                     Ok(instructions)
                 }
             }
+            StatementNode::Label(_, _) => todo!(),
+            StatementNode::Goto(_) => todo!(),
         }
     }
 }

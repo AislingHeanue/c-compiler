@@ -43,6 +43,7 @@ pub enum Token {
     KeywordReturn,
     KeywordIf,
     KeywordElse,
+    KeywordGoto,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -99,6 +100,7 @@ lazy_static! {
                 Token::KeywordReturn => "",
                 Token::KeywordIf => "",
                 Token::KeywordElse => "",
+                Token::KeywordGoto => "",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -120,6 +122,7 @@ impl Token {
                 "void" => Token::KeywordVoid,
                 "if" => Token::KeywordIf,
                 "else" => Token::KeywordElse,
+                "goto" => Token::KeywordGoto,
                 _ => Token::Identifier(text.to_string()),
             },
             Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<usize>().unwrap()),

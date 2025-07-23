@@ -54,6 +54,10 @@ impl Validate for StatementNode {
                     Box::new(new_other),
                 )
             }
+            StatementNode::Label(s, statement) => {
+                self = StatementNode::Label(s, Box::new(statement.validate(context)?))
+            }
+            StatementNode::Goto(_) => {}
         }
         Ok(self)
     }

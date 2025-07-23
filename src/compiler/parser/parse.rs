@@ -243,13 +243,34 @@ impl Parse for StatementNode {
                 expect(Token::SemiColon, read(tokens)?)?;
                 Ok(StatementNode::Pass)
             }
-            _ => {
-                let expression = ExpressionNode::parse(
-                    &mut read_until_token(tokens, vec![Token::SemiColon])?,
-                    context,
-                )?;
+            Token::KeywordGoto => {
+                expect(Token::KeywordGoto, read(tokens)?)?;
+                let s = identifier_to_string(read(tokens)?)?;
                 expect(Token::SemiColon, read(tokens)?)?;
-                Ok(StatementNode::Expression(expression))
+                Ok(StatementNode::Goto(s))
+            }
+            _ => {
+                match (
+                    tokens.front().unwrap().clone(),
+                    tokens.get(1).ok_or("Statement has only one token")?,
+                ) {
+                    (Token::Identifier(s), Token::Colon) => {
+                        expect(Token::Identifier("".to_string()), read(tokens)?)?;
+                        expect(Token::Colon, read(tokens)?)?;
+                        Ok(StatementNode::Label(
+                            s.to_string(),
+                            Box::new(StatementNode::parse(tokens, context)?),
+                        ))
+                    }
+                    _ => {
+                        let expression = ExpressionNode::parse(
+                            &mut read_until_token(tokens, vec![Token::SemiColon])?,
+                            context,
+                        )?;
+                        expect(Token::SemiColon, read(tokens)?)?;
+                        Ok(StatementNode::Expression(expression))
+                    }
+                }
             }
         }
     }
