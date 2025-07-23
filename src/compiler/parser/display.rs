@@ -24,7 +24,7 @@ impl IndentDisplay for FunctionNode {
             "",
             self.name,
             "",
-            self.body.fmt_indent(indent + 4, comments),
+            self.body.fmt_indent(indent + 8, comments),
             "",
             indent = indent,
         )
@@ -33,13 +33,15 @@ impl IndentDisplay for FunctionNode {
 
 impl IndentDisplay for Block {
     fn fmt_indent(&self, indent: usize, comments: bool) -> String {
-        self.iter()
-            .map(|item| match item {
-                BlockItemNode::Statement(s) => s.fmt_indent(indent, comments),
-                BlockItemNode::Declaration(d) => d.fmt_indent(indent, comments),
-            })
-            .collect::<Vec<String>>()
-            .join(",\n")
+        format!("\n{:indent$}", "", indent = indent)
+            + &self
+                .iter()
+                .map(|item| match item {
+                    BlockItemNode::Statement(s) => s.fmt_indent(indent, comments),
+                    BlockItemNode::Declaration(d) => d.fmt_indent(indent, comments),
+                })
+                .collect::<Vec<String>>()
+                .join(format!(",\n{:indent$}", "", indent = indent).as_str())
     }
 }
 
@@ -100,7 +102,7 @@ impl IndentDisplay for ExpressionNode {
                     right.fmt_indent(indent + 4, comments)
                 )
             }
-            ExpressionNode::Var(s) => format!("Var( {} )", s),
+            ExpressionNode::Var(s) => format!("Var({})", s),
             ExpressionNode::Assignment(l, r) => format!(
                 "{} = {}",
                 l.fmt_indent(indent, comments),

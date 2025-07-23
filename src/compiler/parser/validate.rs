@@ -99,10 +99,7 @@ impl Validate for ExpressionNode {
                 if !context.variables.contains_key(name) {
                     return Err(format!("Variable used before declaration: {}", name).into());
                 } else {
-                    context.num_variables += 1;
-                    let new_name = format!("{}:{}", name, context.num_variables);
-                    context.variables.insert(name.to_string(), new_name.clone());
-                    self = ExpressionNode::Var(new_name)
+                    self = ExpressionNode::Var(context.variables.get(name).unwrap().to_string())
                 }
             }
             ExpressionNode::Assignment(dst, src) => {
