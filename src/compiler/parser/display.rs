@@ -1,6 +1,6 @@
 use super::{
-    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, FunctionNode,
-    ProgramNode, StatementNode, Type, UnaryOperatorNode,
+    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
+    FunctionNode, ProgramNode, StatementNode, Type, UnaryOperatorNode,
 };
 use crate::compiler::IndentDisplay;
 use std::{borrow::Borrow, fmt::Display};
@@ -57,11 +57,9 @@ impl IndentDisplay for StatementNode {
                     )
                 } else {
                     format!(
-                        "if ({})\n{:indent$}    {}",
+                        "if ({}) {}",
                         condition.fmt_indent(indent + 4, comments),
-                        "",
                         then.fmt_indent(indent + 4, comments),
-                        indent = indent
                     )
                 }
             }
@@ -75,6 +73,40 @@ impl IndentDisplay for StatementNode {
                 "",
                 indent = indent
             ),
+            StatementNode::Break(_) => "break".to_string(),
+            StatementNode::Continue(_) => "break".to_string(),
+            StatementNode::While(expression, body, _) => {
+                format!(
+                    "while ({}) {}",
+                    expression.fmt_indent(indent + 4, comments),
+                    body.fmt_indent(indent + 4, comments)
+                )
+            }
+            StatementNode::DoWhile(body, expression, _) => {
+                format!(
+                    "do {} while ({})",
+                    expression.fmt_indent(indent + 4, comments),
+                    body.fmt_indent(indent + 4, comments)
+                )
+            }
+            StatementNode::For(init, cond, post, body, _) => {
+                format!(
+                    "for({};{};{}) {}",
+                    init.fmt_indent(indent + 4, comments),
+                    cond.fmt_indent(indent + 4, comments),
+                    post.fmt_indent(indent + 4, comments),
+                    body.fmt_indent(indent + 4, comments)
+                )
+            }
+        }
+    }
+}
+
+impl IndentDisplay for ForInitialiserNode {
+    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
+        match self {
+            ForInitialiserNode::Declaration(d) => d.fmt_indent(indent, comments),
+            ForInitialiserNode::Expression(e) => e.fmt_indent(indent, comments),
         }
     }
 }
@@ -105,6 +137,14 @@ impl IndentDisplay for Type {
     }
 }
 
+impl IndentDisplay for Option<ExpressionNode> {
+    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
+        match self {
+            None => "".to_string(),
+            Some(e) => e.fmt_indent(indent, comments),
+        }
+    }
+}
 impl IndentDisplay for ExpressionNode {
     fn fmt_indent(&self, indent: usize, comments: bool) -> String {
         match self {

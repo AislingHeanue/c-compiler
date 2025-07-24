@@ -54,6 +54,11 @@ pub enum Token {
     KeywordIf,
     KeywordElse,
     KeywordGoto,
+    KeywordDo,
+    KeywordWhile,
+    KeywordFor,
+    KeywordBreak,
+    KeywordContinue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -121,6 +126,11 @@ lazy_static! {
                 Token::KeywordIf => "",
                 Token::KeywordElse => "",
                 Token::KeywordGoto => "",
+                Token::KeywordDo => "",
+                Token::KeywordWhile => "",
+                Token::KeywordFor => "",
+                Token::KeywordBreak => "",
+                Token::KeywordContinue => "",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -143,6 +153,11 @@ impl Token {
                 "if" => Token::KeywordIf,
                 "else" => Token::KeywordElse,
                 "goto" => Token::KeywordGoto,
+                "do" => Token::KeywordDo,
+                "while" => Token::KeywordWhile,
+                "for" => Token::KeywordFor,
+                "break" => Token::KeywordBreak,
+                "continue" => Token::KeywordContinue,
                 _ => Token::Identifier(text.to_string()),
             },
             Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<usize>().unwrap()),

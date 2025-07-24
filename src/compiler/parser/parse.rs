@@ -1,6 +1,6 @@
 use super::{
-    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, FunctionNode, Parse,
-    ProgramNode, StatementNode, Type, UnaryOperatorNode,
+    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
+    FunctionNode, Parse, ProgramNode, StatementNode, Type, UnaryOperatorNode,
 };
 use crate::compiler::{lexer::Token, parser::ParseContext};
 use std::{
@@ -21,6 +21,7 @@ fn expect(expected: Token, input: Token) -> Result<(), Box<dyn Error>> {
 }
 
 fn read(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
+    // println!("{:?}", tokens);
     tokens
         .pop_front()
         .ok_or::<Box<dyn Error>>("Too few tokens in identifier node".into())
@@ -29,13 +30,14 @@ fn read(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
 fn read_until_token(
     tokens: &mut VecDeque<Token>,
     expected: Vec<Token>,
+    allow_empty: bool,
 ) -> Result<VecDeque<Token>, Box<dyn Error>> {
     let mut output = VecDeque::new();
     let discriminants: Vec<Discriminant<Token>> = expected.iter().map(discriminant).collect();
 
     while !tokens.is_empty() {
         if discriminants.contains(&discriminant(tokens.front().unwrap())) {
-            if output.is_empty() {
+            if output.is_empty() && !allow_empty {
                 return Err(format!(
                     "Didn't find any tokens between current token and {:?}",
                     expected
@@ -183,6 +185,29 @@ impl Parse for BlockItemNode {
     }
 }
 
+impl Parse for ForInitialiserNode {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        match tokens.front().unwrap() {
+            Token::KeywordInt => Ok(ForInitialiserNode::Declaration(DeclarationNode::parse(
+                tokens, context,
+            )?)),
+            _ => {
+                let expression = ForInitialiserNode::Expression(Option::<ExpressionNode>::parse(
+                    &mut read_until_token(tokens, vec![Token::SemiColon], true)?,
+                    context,
+                )?);
+                // pop the extra semi-colon off of tokens, since expressions themselves don't
+                // expect semi-colons
+                expect(Token::SemiColon, read(tokens)?)?;
+                Ok(expression)
+            }
+        }
+    }
+}
+
 impl Parse for DeclarationNode {
     fn parse(
         tokens: &mut VecDeque<Token>,
@@ -219,7 +244,7 @@ impl Parse for DeclarationNode {
             )),
             Token::Assignment => {
                 let expression = ExpressionNode::parse(
-                    &mut read_until_token(tokens, vec![Token::SemiColon])?,
+                    &mut read_until_token(tokens, vec![Token::SemiColon], false)?,
                     context,
                 )?;
                 expect(Token::SemiColon, read(tokens)?)?;
@@ -243,7 +268,7 @@ impl Parse for StatementNode {
             Token::KeywordReturn => {
                 expect(Token::KeywordReturn, read(tokens)?)?;
                 let expression = ExpressionNode::parse(
-                    &mut read_until_token(tokens, vec![Token::SemiColon])?,
+                    &mut read_until_token(tokens, vec![Token::SemiColon], false)?,
                     context,
                 )?;
                 expect(Token::SemiColon, read(tokens)?)?;
@@ -290,6 +315,60 @@ impl Parse for StatementNode {
                 expect(Token::CloseBrace, read(tokens)?)?;
                 Ok(StatementNode::Compound(block))
             }
+            Token::KeywordFor => {
+                expect(Token::KeywordFor, read(tokens)?)?;
+                expect(Token::OpenParen, read(tokens)?)?;
+                let mut tokens_to_read_for_init =
+                    read_until_token(tokens, vec![Token::SemiColon], true)?;
+                tokens_to_read_for_init.push_back(read(tokens)?);
+                let init = ForInitialiserNode::parse(&mut tokens_to_read_for_init, context)?;
+                let cond = Option::<ExpressionNode>::parse(
+                    &mut read_until_token(tokens, vec![Token::SemiColon], true)?,
+                    context,
+                )?;
+                expect(Token::SemiColon, read(tokens)?)?;
+                let post = Option::<ExpressionNode>::parse(
+                    &mut read_until_match(tokens, Token::OpenParen, Token::CloseParen, true)?,
+                    context,
+                )?;
+                expect(Token::CloseParen, read(tokens)?)?;
+                let body = StatementNode::parse(tokens, context)?;
+                Ok(StatementNode::For(init, cond, post, Box::new(body), None))
+            }
+            Token::KeywordDo => {
+                expect(Token::KeywordDo, read(tokens)?)?;
+                let body = StatementNode::parse(tokens, context)?;
+                expect(Token::KeywordWhile, read(tokens)?)?;
+                expect(Token::OpenParen, read(tokens)?)?;
+                let expression = ExpressionNode::parse(
+                    &mut read_until_match(tokens, Token::OpenParen, Token::CloseParen, false)?,
+                    context,
+                )?;
+                expect(Token::CloseParen, read(tokens)?)?;
+                expect(Token::SemiColon, read(tokens)?)?;
+                Ok(StatementNode::DoWhile(Box::new(body), expression, None))
+            }
+            Token::KeywordWhile => {
+                expect(Token::KeywordWhile, read(tokens)?)?;
+                expect(Token::OpenParen, read(tokens)?)?;
+                let expression = ExpressionNode::parse(
+                    &mut read_until_match(tokens, Token::OpenParen, Token::CloseParen, false)?,
+                    context,
+                )?;
+                expect(Token::CloseParen, read(tokens)?)?;
+                let body = StatementNode::parse(tokens, context)?;
+                Ok(StatementNode::While(expression, Box::new(body), None))
+            }
+            Token::KeywordBreak => {
+                expect(Token::KeywordBreak, read(tokens)?)?;
+                expect(Token::SemiColon, read(tokens)?)?;
+                Ok(StatementNode::Break(None))
+            }
+            Token::KeywordContinue => {
+                expect(Token::KeywordContinue, read(tokens)?)?;
+                expect(Token::SemiColon, read(tokens)?)?;
+                Ok(StatementNode::Continue(None))
+            }
             _ => {
                 match (
                     tokens.front().unwrap().clone(),
@@ -305,7 +384,7 @@ impl Parse for StatementNode {
                     }
                     _ => {
                         let expression = ExpressionNode::parse(
-                            &mut read_until_token(tokens, vec![Token::SemiColon])?,
+                            &mut read_until_token(tokens, vec![Token::SemiColon], false)?,
                             context,
                         )?;
                         expect(Token::SemiColon, read(tokens)?)?;
@@ -313,6 +392,19 @@ impl Parse for StatementNode {
                     }
                 }
             }
+        }
+    }
+}
+
+impl Parse for Option<ExpressionNode> {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        if tokens.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(ExpressionNode::parse(tokens, context)?))
         }
     }
 }

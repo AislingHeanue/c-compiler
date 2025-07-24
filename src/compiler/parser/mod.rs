@@ -52,6 +52,31 @@ pub enum StatementNode {
     ),
     Pass, // null statement, just a semicolon
     Return(ExpressionNode),
+    // name of enclosing loop (controls where this jumps to)
+    Break(Option<String>),
+    // name of enclosing loop (controls where this jumps to)
+    Continue(Option<String>),
+    // third field is the auto-generated name of the label for this loop,
+    // which we create during the validation step.
+    While(ExpressionNode, Box<StatementNode>, Option<String>),
+    // third field is the auto-generated name of the label for this loop,
+    // which we create during the validation step.
+    DoWhile(Box<StatementNode>, ExpressionNode, Option<String>),
+    // fifth field is the auto-generated name of the label for this loop,
+    // which we create during the validation step.
+    For(
+        ForInitialiserNode,
+        Option<ExpressionNode>,
+        Option<ExpressionNode>,
+        Box<StatementNode>,
+        Option<String>,
+    ),
+}
+
+#[derive(Debug)]
+pub enum ForInitialiserNode {
+    Declaration(DeclarationNode),
+    Expression(Option<ExpressionNode>),
 }
 
 #[derive(Clone, Debug)]

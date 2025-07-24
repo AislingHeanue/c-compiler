@@ -138,6 +138,11 @@ impl Convert for StatementNode {
             }
             StatementNode::Goto(s) => Ok(BirdsInstructions(vec![BirdsInstructionNode::Jump(s)])),
             StatementNode::Compound(block) => Ok(block.convert(context)?),
+            StatementNode::Break(_) => todo!(),
+            StatementNode::Continue(_) => todo!(),
+            StatementNode::While(_, _, _) => todo!(),
+            StatementNode::DoWhile(_, _, _) => todo!(),
+            StatementNode::For(_, _, _, _, _) => todo!(),
         }
     }
 }
