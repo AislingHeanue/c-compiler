@@ -71,6 +71,9 @@ impl Validate for StatementNode {
                 self = StatementNode::Label(s, Box::new(statement.validate(context)?))
             }
             StatementNode::Goto(_) => {}
+            StatementNode::Compound(block) => {
+                self = StatementNode::Compound(block.validate(context)?)
+            }
         }
         Ok(self)
     }

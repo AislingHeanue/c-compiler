@@ -32,7 +32,7 @@ for chapter_num in $(seq 1 $chapter); do
 	for i in $test_path/*; do
 
 		j=$(echo $i | rev | cut -d/ -f1 | rev)
-		output=$(echo $results | grep -o "chapter_$chapter_num/$j\(/extra_credit\)\?/[^/^\.]*" | cut -d" " -f1 | cut -d/ -f3-)
+		output=$(echo $results | grep -o "chapter_$chapter_num/$j\(/extra_credit\)\?/[^/^\.]*" | cut -d" " -f1 | cut -d/ -f3- | uniq)
 		if [[ -n $output ]]; then
 			if ! $chapter_banner_printed; then
 				echo ==============

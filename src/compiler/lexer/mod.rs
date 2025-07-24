@@ -113,8 +113,8 @@ lazy_static! {
                 Token::Colon => r":",
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
                 Token::IntegerConstant(_) =>r"[0-9]+\b",
-                // small hack to avoid having to use Option<> in this block, hijack an existing
-                // error struct in the regex package.
+                // small hack to avoid having to use Option<> in this block, use
+                // an empty string and then filter those out below
                 Token::KeywordInt => "",
                 Token::KeywordVoid => "",
                 Token::KeywordReturn => "",

@@ -3,8 +3,8 @@ use std::error::Error;
 use itertools::process_results;
 
 use crate::compiler::parser::{
-    BinaryOperatorNode, BlockItemNode, DeclarationNode, ExpressionNode, FunctionNode, ProgramNode,
-    StatementNode, UnaryOperatorNode,
+    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, FunctionNode,
+    ProgramNode, StatementNode, UnaryOperatorNode,
 };
 
 use super::{
@@ -27,13 +27,7 @@ impl Convert for FunctionNode {
 
     fn convert(self, context: &mut ConvertContext) -> Result<BirdsFunctionNode, Box<dyn Error>> {
         let name = self.name;
-        let mut instructions: BirdsInstructions = process_results(
-            self.body.into_iter().map(|node| match node {
-                BlockItemNode::Statement(statement) => statement.convert(context),
-                BlockItemNode::Declaration(declaration) => declaration.convert(context),
-            }),
-            |iter| iter.flatten().collect(),
-        )?;
+        let mut instructions = self.body.convert(context)?;
 
         // add an extra "return 0" at the end because the C standard dictates that if main() exits
         // without a return statement, then it must actually return 0. If a return statement is
@@ -58,6 +52,20 @@ impl IntoIterator for BirdsInstructions {
 impl FromIterator<BirdsInstructionNode> for BirdsInstructions {
     fn from_iter<T: IntoIterator<Item = BirdsInstructionNode>>(iter: T) -> Self {
         BirdsInstructions(iter.into_iter().collect())
+    }
+}
+
+impl Convert for Block {
+    type Output = BirdsInstructions;
+
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+        process_results(
+            self.into_iter().map(|node| match node {
+                BlockItemNode::Statement(statement) => statement.convert(context),
+                BlockItemNode::Declaration(declaration) => declaration.convert(context),
+            }),
+            |iter| iter.flatten().collect(),
+        )
     }
 }
 
@@ -129,6 +137,7 @@ impl Convert for StatementNode {
                 Ok(instructions)
             }
             StatementNode::Goto(s) => Ok(BirdsInstructions(vec![BirdsInstructionNode::Jump(s)])),
+            StatementNode::Compound(block) => Ok(block.convert(context)?),
         }
     }
 }

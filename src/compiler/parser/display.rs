@@ -7,11 +7,7 @@ use std::{borrow::Borrow, fmt::Display};
 
 impl Display for ProgramNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Program (\n{}\n)",
-            self.function.fmt_indent(4, self.has_comments)
-        )
+        write!(f, "{}", self.function.fmt_indent(0, self.has_comments))
     }
 }
 
@@ -19,12 +15,10 @@ impl IndentDisplay for FunctionNode {
     fn fmt_indent(&self, indent: usize, comments: bool) -> String {
         format!(
             // TODO: reformat when functions can have multiple statements
-            "{:indent$}Function (\n{:indent$}    name: {},\n{:indent$}    body: {},\n{:indent$})",
-            "",
+            "{:indent$}{}() {{{}\n{:indent$}}}",
             "",
             self.name,
-            "",
-            self.body.fmt_indent(indent + 8, comments),
+            self.body.fmt_indent(indent + 4, comments),
             "",
             indent = indent,
         )
@@ -41,7 +35,7 @@ impl IndentDisplay for Block {
                     BlockItemNode::Declaration(d) => d.fmt_indent(indent, comments),
                 })
                 .collect::<Vec<String>>()
-                .join(format!(",\n{:indent$}", "", indent = indent).as_str())
+                .join(format!("\n{:indent$}", "", indent = indent).as_str())
     }
 }
 
@@ -56,14 +50,10 @@ impl IndentDisplay for StatementNode {
             StatementNode::If(condition, then, otherwise) => {
                 if let Some(other) = otherwise.borrow() {
                     format!(
-                        "if ({})\n{:indent$}    {}\n{:indent$}else\n{:indent$}    {}",
+                        "if ({}) {} else {}",
                         condition.fmt_indent(indent + 4, comments),
-                        "",
-                        then.fmt_indent(indent + 4, comments),
-                        "",
-                        "",
+                        then.fmt_indent(indent, comments),
                         other.fmt_indent(indent, comments),
-                        indent = indent
                     )
                 } else {
                     format!(
@@ -79,6 +69,12 @@ impl IndentDisplay for StatementNode {
                 format!("{}: {}", s, statement.fmt_indent(indent, comments))
             }
             StatementNode::Goto(s) => format!("goto {}", s),
+            StatementNode::Compound(block) => format!(
+                "{{{}\n{:indent$}}}",
+                block.fmt_indent(indent + 4, comments),
+                "",
+                indent = indent
+            ),
         }
     }
 }

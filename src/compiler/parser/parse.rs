@@ -4,7 +4,7 @@ use super::{
 };
 use crate::compiler::{lexer::Token, parser::ParseContext};
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     error::Error,
     mem::{discriminant, Discriminant},
 };
@@ -145,16 +145,41 @@ impl Parse for Block {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
+        // it's a new block it's a new scope
+        // (and I'm feeling... good)
+        let original_outer_scope_variables = context.outer_scope_variables.clone();
+        context
+            .outer_scope_variables
+            .extend(context.current_scope_variables.clone());
+        context.current_scope_variables = HashMap::new();
+
         let mut items: Vec<BlockItemNode> = Vec::new();
         while !tokens.is_empty() {
-            items.push(match tokens.front().unwrap() {
-                Token::KeywordInt => {
-                    BlockItemNode::Declaration(DeclarationNode::parse(tokens, context)?)
-                }
-                _ => BlockItemNode::Statement(StatementNode::parse(tokens, context)?),
-            })
+            items.push(BlockItemNode::parse(tokens, context)?)
         }
+
+        context.current_scope_variables = context.outer_scope_variables.clone();
+        context.outer_scope_variables = original_outer_scope_variables;
         Ok(items)
+    }
+}
+
+impl Parse for BlockItemNode {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        if tokens.is_empty() {
+            return Err("Block item has no tokens".into());
+        }
+        match tokens.front().unwrap() {
+            Token::KeywordInt => Ok(BlockItemNode::Declaration(DeclarationNode::parse(
+                tokens, context,
+            )?)),
+            _ => Ok(BlockItemNode::Statement(StatementNode::parse(
+                tokens, context,
+            )?)),
+        }
     }
 }
 
@@ -175,16 +200,23 @@ impl Parse for DeclarationNode {
                 .into(),
             ),
         }?;
+
         // VALIDATION STEP: Make sure this variable has not already been defined 'in this scope'
-        if !context.do_not_validate && context.variables.contains_key(&name) {
+        if !context.do_not_validate && context.current_scope_variables.contains_key(&name) {
             return Err(format!("Duplicate definition of name: {}", name).into());
         }
+
         context.num_variables += 1;
         let new_name = format!("{}:{}", name, context.num_variables);
-        context.variables.insert(name.to_string(), new_name.clone());
-
+        context
+            .current_scope_variables
+            .insert(name.to_string(), new_name.clone());
         match read(tokens)? {
-            Token::SemiColon => Ok(DeclarationNode::Declaration(Type::Integer, new_name, None)),
+            Token::SemiColon => Ok(DeclarationNode::Declaration(
+                Type::Integer,
+                new_name.clone(),
+                None,
+            )),
             Token::Assignment => {
                 let expression = ExpressionNode::parse(
                     &mut read_until_token(tokens, vec![Token::SemiColon])?,
@@ -193,7 +225,7 @@ impl Parse for DeclarationNode {
                 expect(Token::SemiColon, read(tokens)?)?;
                 Ok(DeclarationNode::Declaration(
                     Type::Integer,
-                    new_name,
+                    new_name.clone(),
                     Some(expression),
                 ))
             }
@@ -248,6 +280,15 @@ impl Parse for StatementNode {
                 let s = identifier_to_string(read(tokens)?)?;
                 expect(Token::SemiColon, read(tokens)?)?;
                 Ok(StatementNode::Goto(s))
+            }
+            Token::OpenBrace => {
+                expect(Token::OpenBrace, read(tokens)?)?;
+                let block = Block::parse(
+                    &mut read_until_match(tokens, Token::OpenBrace, Token::CloseBrace, true)?,
+                    context,
+                )?;
+                expect(Token::CloseBrace, read(tokens)?)?;
+                Ok(StatementNode::Compound(block))
             }
             _ => {
                 match (
@@ -394,15 +435,15 @@ impl ExpressionNode {
                     ExpressionNode::Var(name.to_string())
                 } else {
                     // VALIDATION STEP: Check the variable has been declared
-                    ExpressionNode::Var(
-                        context
-                            .variables
-                            .get(&name)
-                            .ok_or::<Box<dyn Error>>(
-                                format!("Variable used before declaration: {}", name).into(),
-                            )?
-                            .to_string(),
-                    )
+                    ExpressionNode::Var(if let Some(new_name) =
+                        context.current_scope_variables.get(&name)
+                    {
+                        Ok::<String, Box<dyn Error>>(new_name.to_string())
+                    } else if let Some(new_name) = context.outer_scope_variables.get(&name) {
+                        Ok(new_name.to_string())
+                    } else {
+                        Err(format!("Variable used before declaration: {}", name).into())
+                    }?)
                 }
             }
             Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement => {

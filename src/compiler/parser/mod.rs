@@ -18,7 +18,7 @@ pub struct FunctionNode {
     pub body: Block,
 }
 
-type Block = Vec<BlockItemNode>;
+pub type Block = Vec<BlockItemNode>;
 
 #[derive(Debug)]
 pub enum BlockItemNode {
@@ -43,6 +43,7 @@ pub enum StatementNode {
     Label(String, Box<StatementNode>),
     Goto(String),
     Expression(ExpressionNode),
+    Compound(Block),
     // condition, then, else
     If(
         ExpressionNode,
@@ -112,7 +113,8 @@ where
 }
 
 struct ParseContext {
-    variables: HashMap<String, String>,
+    current_scope_variables: HashMap<String, String>,
+    outer_scope_variables: HashMap<String, String>,
     num_variables: usize,
     do_not_validate: bool,
     // labels on declarations are only allowed in C23+
@@ -125,7 +127,8 @@ pub fn parse(
     ProgramNode::parse(
         &mut lexed,
         &mut ParseContext {
-            variables: HashMap::new(),
+            current_scope_variables: HashMap::new(),
+            outer_scope_variables: HashMap::new(),
             num_variables: 0,
             do_not_validate,
         },
