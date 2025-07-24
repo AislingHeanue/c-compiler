@@ -108,6 +108,10 @@ impl Convert for Instructions {
 
         let instructions = Instructions::update_instructions(
             instructions,
+            Instruction::fix_shift_operation_register,
+        );
+        let instructions = Instructions::update_instructions(
+            instructions,
             Instruction::fix_instructions_with_two_stack_entries,
         );
         let instructions = Instructions::update_instructions(
@@ -325,6 +329,33 @@ impl Instruction {
         .into()
     }
 
+    fn fix_shift_operation_register(self) -> VecDeque<Instruction> {
+        match self {
+            Instruction::Binary(BinaryOperator::ShiftLeft, left, right) => {
+                vec![
+                    Instruction::Mov(left, Operand::Reg(Register::CX)),
+                    Instruction::Binary(
+                        BinaryOperator::ShiftLeft,
+                        Operand::Reg(Register::CX),
+                        right,
+                    ),
+                ]
+            }
+            Instruction::Binary(BinaryOperator::ShiftRight, left, right) => {
+                vec![
+                    Instruction::Mov(left, Operand::Reg(Register::CX)),
+                    Instruction::Binary(
+                        BinaryOperator::ShiftRight,
+                        Operand::Reg(Register::CX),
+                        right,
+                    ),
+                ]
+            }
+            _ => vec![self],
+        }
+        .into()
+    }
+
     fn fix_constant_as_dst(self) -> VecDeque<Instruction> {
         match self {
             Instruction::Cmp(left, Operand::Imm(value)) => vec![
@@ -397,13 +428,22 @@ impl Convert for BinaryOperator {
             BirdsBinaryOperatorNode::Add => Ok(BinaryOperator::Add),
             BirdsBinaryOperatorNode::Subtract => Ok(BinaryOperator::Sub),
             BirdsBinaryOperatorNode::Multiply => Ok(BinaryOperator::Mult),
+            BirdsBinaryOperatorNode::BitwiseAnd => Ok(BinaryOperator::BitwiseAnd),
+            BirdsBinaryOperatorNode::BitwiseXor => Ok(BinaryOperator::BitwiseXor),
+            BirdsBinaryOperatorNode::BitwiseOr => Ok(BinaryOperator::BitwiseOr),
+            BirdsBinaryOperatorNode::ShiftLeft => Ok(BinaryOperator::ShiftLeft),
+            BirdsBinaryOperatorNode::ShiftRight => Ok(BinaryOperator::ShiftRight),
             BirdsBinaryOperatorNode::Divide | BirdsBinaryOperatorNode::Mod => {
                 panic!("should not treat mod and divide as binary expressions during codegen")
             }
-            _ if input.is_relational() => {
+            BirdsBinaryOperatorNode::Equal
+            | BirdsBinaryOperatorNode::NotEqual
+            | BirdsBinaryOperatorNode::Less
+            | BirdsBinaryOperatorNode::Greater
+            | BirdsBinaryOperatorNode::LessEqual
+            | BirdsBinaryOperatorNode::GreaterEqual => {
                 panic!("relational expressions should not be treated as binary expressions")
             }
-            _ => unreachable!(),
         }
     }
 }

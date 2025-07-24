@@ -63,6 +63,11 @@ pub enum BirdsBinaryOperatorNode {
     Greater,
     LessEqual,
     GreaterEqual,
+    BitwiseAnd,
+    BitwiseXor,
+    BitwiseOr,
+    ShiftLeft,
+    ShiftRight,
 }
 
 trait Convert

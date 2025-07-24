@@ -251,6 +251,7 @@ impl CodeDisplay for Operand {
                     Register::R10 => "%r10b",
                     Register::DX => "%dl",
                     Register::R11 => "%r11b",
+                    Register::CX => "%cl",
                 }
             } else {
                 match reg {
@@ -258,6 +259,7 @@ impl CodeDisplay for Operand {
                     Register::R10 => "%r10d",
                     Register::DX => "%edx",
                     Register::R11 => "%r11d",
+                    Register::CX => "%ecx",
                 }
             }
             .to_string(),
@@ -286,6 +288,11 @@ impl CodeDisplay for BinaryOperator {
             BinaryOperator::Add => "addl",
             BinaryOperator::Sub => "subl",
             BinaryOperator::Mult => "imull",
+            BinaryOperator::ShiftLeft => "sall",
+            BinaryOperator::ShiftRight => "sarl",
+            BinaryOperator::BitwiseAnd => "and",
+            BinaryOperator::BitwiseXor => "xor",
+            BinaryOperator::BitwiseOr => "or",
         }
         .to_string()
     }

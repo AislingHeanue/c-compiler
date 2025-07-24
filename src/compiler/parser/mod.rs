@@ -94,6 +94,11 @@ pub enum BinaryOperatorNode {
     Greater,
     LessEqual,
     GreaterEqual,
+    BitwiseAnd,
+    BitwiseXor,
+    BitwiseOr,
+    ShiftLeft,
+    ShiftRight,
 }
 
 trait Parse

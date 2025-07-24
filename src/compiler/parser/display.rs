@@ -177,6 +177,11 @@ impl IndentDisplay for BinaryOperatorNode {
             BinaryOperatorNode::Greater => ">",
             BinaryOperatorNode::LessEqual => "<=",
             BinaryOperatorNode::GreaterEqual => ">=",
+            BinaryOperatorNode::BitwiseAnd => "&",
+            BinaryOperatorNode::BitwiseXor => "^",
+            BinaryOperatorNode::BitwiseOr => "|",
+            BinaryOperatorNode::ShiftLeft => "<<",
+            BinaryOperatorNode::ShiftRight => ">>",
         }
         .to_string()
     }

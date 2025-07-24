@@ -58,6 +58,7 @@ enum Register {
     DX, // edx or rdx
     R10,
     R11,
+    CX,
 }
 
 #[derive(Clone)]
@@ -71,6 +72,11 @@ enum BinaryOperator {
     Add,
     Sub,
     Mult,
+    ShiftLeft,
+    ShiftRight,
+    BitwiseAnd,
+    BitwiseXor,
+    BitwiseOr,
 }
 
 enum ConditionCode {

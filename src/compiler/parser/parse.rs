@@ -312,54 +312,44 @@ impl ExpressionNode {
                 | Token::SubtractAssign
                 | Token::MultiplyAssign
                 | Token::DivideAssign
-                | Token::ModAssign => {
+                | Token::ModAssign
+                | Token::AndAssign
+                | Token::XorAssign
+                | Token::OrAssign
+                | Token::ShiftLeftAssign
+                | Token::ShiftRightAssign => {
                     let right = ExpressionNode::parse_with_level(tokens, context, precedence)?;
-                    left = match t {
-                        Token::Assignment => {
-                            ExpressionNode::Assignment(Box::new(left), Box::new(right))
-                        }
-                        Token::AddAssign => ExpressionNode::Assignment(
+                    left = if let Token::Assignment = t {
+                        ExpressionNode::Assignment(Box::new(left), Box::new(right))
+                    } else {
+                        let operator = match t {
+                            Token::AddAssign => BinaryOperatorNode::Add,
+                            Token::SubtractAssign => BinaryOperatorNode::Subtract,
+                            Token::MultiplyAssign => BinaryOperatorNode::Multiply,
+                            Token::DivideAssign => BinaryOperatorNode::Divide,
+                            Token::ModAssign => BinaryOperatorNode::Mod,
+                            Token::AndAssign => BinaryOperatorNode::BitwiseAnd,
+                            Token::XorAssign => BinaryOperatorNode::BitwiseXor,
+                            Token::OrAssign => BinaryOperatorNode::BitwiseOr,
+                            Token::ShiftLeftAssign => BinaryOperatorNode::ShiftLeft,
+                            Token::ShiftRightAssign => BinaryOperatorNode::ShiftRight,
+                            _ => panic!("Can't use {:?} as an assignment operator", t),
+                        };
+                        ExpressionNode::Assignment(
                             Box::new(left.clone()),
                             Box::new(ExpressionNode::Binary(
-                                BinaryOperatorNode::Add,
+                                operator,
                                 Box::new(left),
                                 Box::new(right),
                             )),
-                        ),
-                        Token::SubtractAssign => ExpressionNode::Assignment(
-                            Box::new(left.clone()),
-                            Box::new(ExpressionNode::Binary(
-                                BinaryOperatorNode::Subtract,
-                                Box::new(left),
-                                Box::new(right),
-                            )),
-                        ),
-                        Token::MultiplyAssign => ExpressionNode::Assignment(
-                            Box::new(left.clone()),
-                            Box::new(ExpressionNode::Binary(
-                                BinaryOperatorNode::Multiply,
-                                Box::new(left),
-                                Box::new(right),
-                            )),
-                        ),
-                        Token::DivideAssign => ExpressionNode::Assignment(
-                            Box::new(left.clone()),
-                            Box::new(ExpressionNode::Binary(
-                                BinaryOperatorNode::Divide,
-                                Box::new(left),
-                                Box::new(right),
-                            )),
-                        ),
-                        Token::ModAssign => ExpressionNode::Assignment(
-                            Box::new(left.clone()),
-                            Box::new(ExpressionNode::Binary(
-                                BinaryOperatorNode::Mod,
-                                Box::new(left),
-                                Box::new(right),
-                            )),
-                        ),
-                        _ => unreachable!(),
-                    }
+                        )
+                    };
+                }
+                Token::Increment | Token::Decrement => {
+                    left = ExpressionNode::Unary(
+                        UnaryOperatorNode::parse_as_suffix(&mut vec![t].into(), context)?,
+                        Box::new(left),
+                    );
                 }
                 Token::Question => {
                     // parse this expression with precedence level reset
@@ -389,7 +379,7 @@ impl ExpressionNode {
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         let token = read(tokens)?;
-        let mut expression = match token {
+        let expression = match token {
             Token::IntegerConstant(value) => ExpressionNode::IntegerConstant(value),
             Token::OpenParen => {
                 let expression = ExpressionNode::parse(
@@ -417,36 +407,19 @@ impl ExpressionNode {
             }
             Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement => {
                 let operator = UnaryOperatorNode::parse(&mut vec![token].into(), context)?;
-                // don't evaluate other binary expressions here, unary operations take precedence
-                // over everything
-                let expression = ExpressionNode::parse_factor(tokens, context)?;
+                let precedence = UnaryOperatorNode::precedence(); // all unary operators have the
+                                                                  // same precedence
+                let expression = ExpressionNode::parse_with_level(tokens, context, precedence)?;
                 ExpressionNode::Unary(operator, Box::new(expression))
             }
             t => return Err(format!("Invalid token at start of expression: {:?}", t).into()),
         };
-
-        while let Some(operator) = ExpressionNode::check_suffix_operators(tokens, context) {
-            let _ = read(tokens)?;
-            expression = ExpressionNode::Unary(operator, Box::new(expression));
-        }
 
         Ok(expression)
     }
 
     pub fn is_lvalue(&self) -> bool {
         matches!(self, ExpressionNode::Var(_))
-    }
-
-    fn check_suffix_operators(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Option<UnaryOperatorNode> {
-        match tokens.front() {
-            Some(Token::Increment | Token::Decrement) => {
-                UnaryOperatorNode::parse_as_suffix(tokens, context).ok()
-            }
-            _ => None,
-        }
     }
 }
 
@@ -485,6 +458,10 @@ impl UnaryOperatorNode {
             .into()),
         }
     }
+
+    fn precedence() -> usize {
+        55
+    }
 }
 
 impl Parse for BinaryOperatorNode {
@@ -500,6 +477,9 @@ impl Parse for BinaryOperatorNode {
             Token::Plus => BinaryOperatorNode::Add,
             Token::Hyphen => BinaryOperatorNode::Subtract,
 
+            Token::ShiftLeft => BinaryOperatorNode::ShiftLeft,
+            Token::ShiftRight => BinaryOperatorNode::ShiftRight,
+
             Token::Less => BinaryOperatorNode::Less,
             Token::LessEqual => BinaryOperatorNode::LessEqual,
             Token::Greater => BinaryOperatorNode::Greater,
@@ -507,6 +487,10 @@ impl Parse for BinaryOperatorNode {
 
             Token::Equal => BinaryOperatorNode::Equal,
             Token::NotEqual => BinaryOperatorNode::NotEqual,
+
+            Token::BitwiseAnd => BinaryOperatorNode::BitwiseAnd,
+            Token::BitwiseXor => BinaryOperatorNode::BitwiseXor,
+            Token::BitwiseOr => BinaryOperatorNode::BitwiseOr,
 
             Token::And => BinaryOperatorNode::And,
 
@@ -520,12 +504,18 @@ impl BinaryOperatorNode {
     fn precedence(maybe_token: Option<&Token>) -> Option<usize> {
         if let Some(token) = maybe_token {
             Some(match token {
+                Token::Increment => 60,
+                Token::Decrement => 60,
+
                 Token::Star => 50,
                 Token::Slash => 50,
                 Token::Percent => 50,
 
                 Token::Plus => 45,
                 Token::Hyphen => 45,
+
+                Token::ShiftLeft => 40,
+                Token::ShiftRight => 40,
 
                 Token::Less => 35,
                 Token::LessEqual => 35,
@@ -534,6 +524,10 @@ impl BinaryOperatorNode {
 
                 Token::Equal => 30,
                 Token::NotEqual => 30,
+
+                Token::BitwiseAnd => 25,
+                Token::BitwiseXor => 20,
+                Token::BitwiseOr => 15,
 
                 Token::And => 10,
 
@@ -547,6 +541,11 @@ impl BinaryOperatorNode {
                 Token::MultiplyAssign => 1,
                 Token::DivideAssign => 1,
                 Token::ModAssign => 1,
+                Token::AndAssign => 1,
+                Token::XorAssign => 1,
+                Token::OrAssign => 1,
+                Token::ShiftLeftAssign => 1,
+                Token::ShiftRightAssign => 1,
 
                 _ => return None,
             })

@@ -285,6 +285,11 @@ impl Convert for ExpressionNode {
                     BinaryOperatorNode::Greater => Some(BirdsBinaryOperatorNode::Greater),
                     BinaryOperatorNode::LessEqual => Some(BirdsBinaryOperatorNode::LessEqual),
                     BinaryOperatorNode::GreaterEqual => Some(BirdsBinaryOperatorNode::GreaterEqual),
+                    BinaryOperatorNode::BitwiseAnd => Some(BirdsBinaryOperatorNode::BitwiseAnd),
+                    BinaryOperatorNode::BitwiseXor => Some(BirdsBinaryOperatorNode::BitwiseXor),
+                    BinaryOperatorNode::BitwiseOr => Some(BirdsBinaryOperatorNode::BitwiseOr),
+                    BinaryOperatorNode::ShiftLeft => Some(BirdsBinaryOperatorNode::ShiftLeft),
+                    BinaryOperatorNode::ShiftRight => Some(BirdsBinaryOperatorNode::ShiftRight),
                     // process these in the 'else' block below instead
                     BinaryOperatorNode::And | BinaryOperatorNode::Or => None,
                 };
