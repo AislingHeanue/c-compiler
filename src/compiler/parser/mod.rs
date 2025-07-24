@@ -38,6 +38,8 @@ pub enum Type {
 
 #[derive(Debug)]
 pub enum StatementNode {
+    // labels are tied to a statement, and NOT a declaration
+    // from C23 onwards, they may also be tied to a declaration
     Label(String, Box<StatementNode>),
     Goto(String),
     Expression(ExpressionNode),
@@ -107,14 +109,20 @@ where
 struct ParseContext {
     variables: HashMap<String, String>,
     num_variables: usize,
+    do_not_validate: bool,
+    // labels on declarations are only allowed in C23+
 }
 
-pub fn parse(mut lexed: VecDeque<Token>) -> Result<ProgramNode, Box<dyn Error>> {
+pub fn parse(
+    mut lexed: VecDeque<Token>,
+    do_not_validate: bool,
+) -> Result<ProgramNode, Box<dyn Error>> {
     ProgramNode::parse(
         &mut lexed,
         &mut ParseContext {
             variables: HashMap::new(),
             num_variables: 0,
+            do_not_validate,
         },
     )
 }
@@ -126,8 +134,38 @@ where
     fn validate(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>>;
 }
 
-struct ValidateContext {}
+#[derive(Clone)]
+enum ValidationPass {
+    // variable resolution is covered by parse.rs
+    CheckLvalues,
+    ReadLabels,
+    ValidateLabels,
+}
 
-pub fn validate(parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> {
-    parsed.validate(&mut ValidateContext {})
+struct ValidateContext {
+    pass: ValidationPass,
+    // Function name -> user-defined name -> label name for birds
+    labels: HashMap<String, HashMap<String, String>>,
+    num_labels: usize,
+    function_name: Option<String>,
+}
+
+pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> {
+    let passes: Vec<ValidationPass> = vec![
+        ValidationPass::CheckLvalues,
+        ValidationPass::ReadLabels,
+        ValidationPass::ValidateLabels,
+    ];
+    let mut validate_context = ValidateContext {
+        pass: passes.first().unwrap().clone(),
+        labels: HashMap::new(),
+        function_name: None,
+        num_labels: 0,
+    };
+    for pass in passes {
+        validate_context.pass = pass;
+        parsed = parsed.validate(&mut validate_context)?;
+    }
+
+    Ok(parsed)
 }

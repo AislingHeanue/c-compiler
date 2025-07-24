@@ -31,7 +31,7 @@ pub fn compile(
         return Ok(());
     }
 
-    let parsed = parse(lexed)?;
+    let parsed = parse(lexed, config.only_parse)?;
     if config.only_parse {
         println!("{}", parsed);
         return Ok(());

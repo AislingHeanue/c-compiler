@@ -1,14 +1,25 @@
 use itertools::process_results;
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
 
 use super::{
-    Block, BlockItemNode, DeclarationNode, ExpressionNode, ProgramNode, StatementNode,
-    UnaryOperatorNode, Validate, ValidateContext,
+    Block, BlockItemNode, DeclarationNode, ExpressionNode, FunctionNode, ProgramNode,
+    StatementNode, UnaryOperatorNode, Validate, ValidateContext, ValidationPass,
 };
 
 impl Validate for ProgramNode {
     fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        self.function.body = self.function.body.validate(context)?;
+        self.function = self.function.validate(context)?;
+        Ok(self)
+    }
+}
+
+impl Validate for FunctionNode {
+    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+        if matches!(context.pass, ValidationPass::ReadLabels) {
+            context.labels.insert(self.name.clone(), HashMap::new());
+        }
+        context.function_name = Some(self.name.clone());
+        self.body = self.body.validate(context)?;
         Ok(self)
     }
 }
@@ -35,14 +46,16 @@ impl Validate for DeclarationNode {
 
 impl Validate for StatementNode {
     fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+        if matches!(context.pass, ValidationPass::ReadLabels) {
+            self = Self::read_labels(self, context)?;
+        }
+        if matches!(context.pass, ValidationPass::ValidateLabels) {
+            self = Self::validate_labels(self, context)?;
+        }
         match self {
-            StatementNode::Expression(e) => {
-                self = StatementNode::Expression(e.validate(context)?);
-            }
+            StatementNode::Expression(e) => self = StatementNode::Expression(e.validate(context)?),
             StatementNode::Pass => {}
-            StatementNode::Return(e) => {
-                self = StatementNode::Return(e.validate(context)?);
-            }
+            StatementNode::Return(e) => self = StatementNode::Return(e.validate(context)?),
             StatementNode::If(condition, then, otherwise) => {
                 let new_other = match *otherwise {
                     Some(other) => Some(other.validate(context)?),
@@ -63,10 +76,84 @@ impl Validate for StatementNode {
     }
 }
 
+impl StatementNode {
+    fn read_labels(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+        if let StatementNode::Label(s, statement) = self {
+            let labels_defined = context
+                .labels
+                .get_mut(&context.function_name.clone().unwrap())
+                .unwrap();
+
+            if labels_defined.contains_key(&s) {
+                return Err(format!("Duplicate label name definition: {}", s).into());
+            }
+            context.num_labels += 1;
+            let new_name = format!("{}_user_{}", s, context.num_labels);
+            labels_defined.insert(s.clone(), new_name.clone());
+
+            self = StatementNode::Label(new_name, statement)
+        }
+        Ok(self)
+    }
+
+    fn validate_labels(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+        if let StatementNode::Goto(s) = self {
+            let labels_defined = context
+                .labels
+                .get_mut(&context.function_name.clone().unwrap())
+                .unwrap();
+            let new_name = labels_defined
+                .get(&s)
+                .ok_or(format!("Label not found: {}", s))?;
+            self = StatementNode::Goto(new_name.to_string());
+        }
+
+        Ok(self)
+    }
+}
+
 impl Validate for ExpressionNode {
-    fn validate(mut self, _context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+        if matches!(context.pass, ValidationPass::CheckLvalues) {
+            self = Self::validate_lvalues_are_variables(self, context)?;
+        }
         match self {
             ExpressionNode::IntegerConstant(_) => {}
+            ExpressionNode::Unary(op, src) => {
+                self = ExpressionNode::Unary(op, Box::new(src.validate(context)?))
+            }
+            ExpressionNode::Binary(op, left, right) => {
+                self = ExpressionNode::Binary(
+                    op,
+                    Box::new(left.validate(context)?),
+                    Box::new(right.validate(context)?),
+                )
+            }
+            ExpressionNode::Var(_) => {}
+            ExpressionNode::Assignment(dst, src) => {
+                self = ExpressionNode::Assignment(
+                    Box::new(dst.validate(context)?),
+                    Box::new(src.validate(context)?),
+                )
+            }
+            ExpressionNode::Ternary(condition, then, otherwise) => {
+                self = ExpressionNode::Ternary(
+                    Box::new(condition.validate(context)?),
+                    Box::new(then.validate(context)?),
+                    Box::new(otherwise.validate(context)?),
+                )
+            }
+        }
+        Ok(self)
+    }
+}
+
+impl ExpressionNode {
+    fn validate_lvalues_are_variables(
+        mut self,
+        _context: &mut ValidateContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        match self {
             ExpressionNode::Unary(op, src) => {
                 // VALIDATION: Make sure ++ and -- only operate on variables, not constants or
                 // other expressions
@@ -77,7 +164,7 @@ impl Validate for ExpressionNode {
                     | UnaryOperatorNode::SuffixDecrement => {
                         if !src.is_lvalue() {
                             return Err(format!(
-                                "Can't perform suffix operation on non-variable: {:?}",
+                                "Can't perform increment/decrement operation on non-variable: {:?}",
                                 src,
                             )
                             .into());
@@ -85,29 +172,15 @@ impl Validate for ExpressionNode {
                     }
                     _ => {}
                 }
-                self = ExpressionNode::Unary(op, Box::new(src.validate(_context)?))
+                self = ExpressionNode::Unary(op, src)
             }
-            ExpressionNode::Binary(op, left, right) => {
-                self = ExpressionNode::Binary(
-                    op,
-                    Box::new(left.validate(_context)?),
-                    Box::new(right.validate(_context)?),
-                )
-            }
-            ExpressionNode::Var(_) => {}
             ExpressionNode::Assignment(dst, src) => {
-                self = ExpressionNode::Assignment(
-                    Box::new(dst.validate(_context)?),
-                    Box::new(src.validate(_context)?),
-                )
+                if !dst.is_lvalue() {
+                    return Err(format!("Can't assign to non-variable: {:?}", src,).into());
+                }
+                self = ExpressionNode::Assignment(dst, src)
             }
-            ExpressionNode::Ternary(condition, then, otherwise) => {
-                self = ExpressionNode::Ternary(
-                    Box::new(condition.validate(_context)?),
-                    Box::new(then.validate(_context)?),
-                    Box::new(otherwise.validate(_context)?),
-                )
-            }
+            _ => {}
         }
         Ok(self)
     }

@@ -12,6 +12,9 @@ if [[ -n $VERBOSE ]]; then
 else
 	cargo build --quiet
 fi
+if [[ $? -ne 0 ]]; then
+	exit 1
+fi
 ###
 
 chapter=$1
@@ -29,7 +32,7 @@ for chapter_num in $(seq 1 $chapter); do
 	for i in $test_path/*; do
 
 		j=$(echo $i | rev | cut -d/ -f1 | rev)
-		output=$(echo $results | grep -o "chapter_$chapter_num/$j/[^/]*\.c " | cut -d" " -f1 | rev | cut -d/ -f1 | rev)
+		output=$(echo $results | grep -o "chapter_$chapter_num/$j\(/extra_credit\)\?/[^/]*\.c" | cut -d" " -f1 | cut -d/ -f3-)
 		if [[ -n $output ]]; then
 			if ! $chapter_banner_printed; then
 				echo ==============

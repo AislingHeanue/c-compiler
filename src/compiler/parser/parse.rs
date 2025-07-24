@@ -176,7 +176,7 @@ impl Parse for DeclarationNode {
             ),
         }?;
         // VALIDATION STEP: Make sure this variable has not already been defined 'in this scope'
-        if context.variables.contains_key(&name) {
+        if !context.do_not_validate && context.variables.contains_key(&name) {
             return Err(format!("Duplicate definition of name: {}", name).into());
         }
         context.num_variables += 1;
@@ -313,11 +313,6 @@ impl ExpressionNode {
                 | Token::MultiplyAssign
                 | Token::DivideAssign
                 | Token::ModAssign => {
-                    // VALIDATION STEP: Check to make sure we are not assigning to any expression
-                    // more complex than a single identifier
-                    if !matches!(left, ExpressionNode::Var(_)) {
-                        return Err(format!("Found a non-variable to the left side of an assignment, can't assign to {:?}", left).into());
-                    }
                     let right = ExpressionNode::parse_with_level(tokens, context, precedence)?;
                     left = match t {
                         Token::Assignment => {
@@ -394,7 +389,7 @@ impl ExpressionNode {
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         let token = read(tokens)?;
-        let expression = match token {
+        let mut expression = match token {
             Token::IntegerConstant(value) => ExpressionNode::IntegerConstant(value),
             Token::OpenParen => {
                 let expression = ExpressionNode::parse(
@@ -405,16 +400,20 @@ impl ExpressionNode {
                 expression
             }
             Token::Identifier(name) => {
-                // VALIDATION STEP: Check the variable has been declared
-                ExpressionNode::Var(
-                    context
-                        .variables
-                        .get(&name)
-                        .ok_or::<Box<dyn Error>>(
-                            format!("Variable used before declaration: {}", name).into(),
-                        )?
-                        .to_string(),
-                )
+                if context.do_not_validate {
+                    ExpressionNode::Var(name.to_string())
+                } else {
+                    // VALIDATION STEP: Check the variable has been declared
+                    ExpressionNode::Var(
+                        context
+                            .variables
+                            .get(&name)
+                            .ok_or::<Box<dyn Error>>(
+                                format!("Variable used before declaration: {}", name).into(),
+                            )?
+                            .to_string(),
+                    )
+                }
             }
             Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement => {
                 let operator = UnaryOperatorNode::parse(&mut vec![token].into(), context)?;
@@ -426,14 +425,12 @@ impl ExpressionNode {
             t => return Err(format!("Invalid token at start of expression: {:?}", t).into()),
         };
 
-        match ExpressionNode::check_suffix_operators(tokens, context) {
-            Some(operator) => {
-                // pop the token
-                let _ = read(tokens)?;
-                Ok(ExpressionNode::Unary(operator, Box::new(expression)))
-            }
-            None => Ok(expression),
+        while let Some(operator) = ExpressionNode::check_suffix_operators(tokens, context) {
+            let _ = read(tokens)?;
+            expression = ExpressionNode::Unary(operator, Box::new(expression));
         }
+
+        Ok(expression)
     }
 
     pub fn is_lvalue(&self) -> bool {

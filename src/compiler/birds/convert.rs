@@ -123,8 +123,12 @@ impl Convert for StatementNode {
                     Ok(instructions)
                 }
             }
-            StatementNode::Label(_, _) => todo!(),
-            StatementNode::Goto(_) => todo!(),
+            StatementNode::Label(s, statement) => {
+                let mut instructions = BirdsInstructions(vec![BirdsInstructionNode::Label(s)]);
+                instructions.0.append(&mut statement.convert(context)?.0);
+                Ok(instructions)
+            }
+            StatementNode::Goto(s) => Ok(BirdsInstructions(vec![BirdsInstructionNode::Jump(s)])),
         }
     }
 }
