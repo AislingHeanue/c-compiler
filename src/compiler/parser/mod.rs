@@ -173,14 +173,17 @@ enum ValidationPass {
     CheckLvalues,
     ReadLabels,
     ValidateLabels,
+    LabelLoops,
 }
 
 struct ValidateContext {
     pass: ValidationPass,
     // Function name -> user-defined name -> label name for birds
-    labels: HashMap<String, HashMap<String, String>>,
     num_labels: usize,
-    function_name: Option<String>,
+    num_loops: usize,
+    labels: HashMap<String, HashMap<String, String>>,
+    current_function_name: Option<String>,
+    current_enclosing_loop_name: Option<String>,
 }
 
 pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> {
@@ -188,12 +191,15 @@ pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> 
         ValidationPass::CheckLvalues,
         ValidationPass::ReadLabels,
         ValidationPass::ValidateLabels,
+        ValidationPass::LabelLoops,
     ];
     let mut validate_context = ValidateContext {
         pass: passes.first().unwrap().clone(),
-        labels: HashMap::new(),
-        function_name: None,
         num_labels: 0,
+        num_loops: 0,
+        labels: HashMap::new(),
+        current_function_name: None,
+        current_enclosing_loop_name: None,
     };
     for pass in passes {
         validate_context.pass = pass;

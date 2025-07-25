@@ -3,8 +3,8 @@ use std::error::Error;
 use itertools::process_results;
 
 use crate::compiler::parser::{
-    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, FunctionNode,
-    ProgramNode, StatementNode, UnaryOperatorNode,
+    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
+    FunctionNode, ProgramNode, StatementNode, UnaryOperatorNode,
 };
 
 use super::{
@@ -138,11 +138,131 @@ impl Convert for StatementNode {
             }
             StatementNode::Goto(s) => Ok(BirdsInstructions(vec![BirdsInstructionNode::Jump(s)])),
             StatementNode::Compound(block) => Ok(block.convert(context)?),
-            StatementNode::Break(_) => todo!(),
-            StatementNode::Continue(_) => todo!(),
-            StatementNode::While(_, _, _) => todo!(),
-            StatementNode::DoWhile(_, _, _) => todo!(),
-            StatementNode::For(_, _, _, _, _) => todo!(),
+            StatementNode::Break(label) => Ok(BirdsInstructions(vec![BirdsInstructionNode::Jump(
+                format!(
+                    "break_{}",
+                    label.ok_or::<Box<dyn Error>>("Break has no label".into())?
+                ),
+            )])),
+            StatementNode::Continue(label) => {
+                Ok(BirdsInstructions(vec![BirdsInstructionNode::Jump(
+                    format!(
+                        "continue_{}",
+                        label.ok_or::<Box<dyn Error>>("Continue has no label".into())?
+                    ),
+                )]))
+            }
+            StatementNode::While(expression, body, label) => {
+                let this_loop_label = label.ok_or::<Box<dyn Error>>("While has no label".into())?;
+
+                let mut instructions = BirdsInstructions(vec![BirdsInstructionNode::Label(
+                    format!("continue_{}", this_loop_label),
+                )]);
+                let (mut instructions_from_condition, new_src) = expression.convert(context)?;
+                instructions.0.append(&mut instructions_from_condition.0);
+                instructions.0.push(BirdsInstructionNode::JumpZero(
+                    new_src,
+                    format!("break_{}", this_loop_label),
+                ));
+
+                instructions.0.append(&mut body.convert(context)?.0);
+
+                instructions.0.push(BirdsInstructionNode::Jump(format!(
+                    "continue_{}",
+                    this_loop_label
+                )));
+                instructions.0.push(BirdsInstructionNode::Label(format!(
+                    "break_{}",
+                    this_loop_label
+                )));
+
+                Ok(instructions)
+            }
+            StatementNode::DoWhile(body, expression, label) => {
+                let this_loop_label =
+                    label.ok_or::<Box<dyn Error>>("Do-while has no label".into())?;
+
+                let mut instructions = BirdsInstructions(vec![BirdsInstructionNode::Label(
+                    format!("start_{}", this_loop_label),
+                )]);
+                instructions.0.append(&mut body.convert(context)?.0);
+
+                instructions.0.push(BirdsInstructionNode::Label(format!(
+                    "continue_{}",
+                    this_loop_label
+                )));
+                let (mut instructions_from_condition, new_src) = expression.convert(context)?;
+                instructions.0.append(&mut instructions_from_condition.0);
+
+                instructions.0.push(BirdsInstructionNode::JumpNotZero(
+                    new_src,
+                    format!("start_{}", this_loop_label),
+                ));
+                instructions.0.push(BirdsInstructionNode::Label(format!(
+                    "break_{}",
+                    this_loop_label
+                )));
+
+                Ok(instructions)
+            }
+            StatementNode::For(init, cond, post, body, label) => {
+                let this_loop_label = label.ok_or::<Box<dyn Error>>("For has no label".into())?;
+
+                //init
+                let mut instructions = init.convert(context)?;
+
+                //cond
+                instructions.0.push(BirdsInstructionNode::Label(format!(
+                    "start_{}",
+                    this_loop_label
+                )));
+                let (mut instructions_from_condition, new_condition_option) =
+                    cond.convert(context)?;
+                instructions.0.append(&mut instructions_from_condition.0);
+                //only check the condition... if the condition was specified
+                if let Some(new_condition) = new_condition_option {
+                    instructions.0.push(BirdsInstructionNode::JumpZero(
+                        new_condition,
+                        format!("break_{}", this_loop_label),
+                    ));
+                }
+
+                //body
+                instructions.0.append(&mut body.convert(context)?.0);
+
+                //post
+                instructions.0.push(BirdsInstructionNode::Label(format!(
+                    "continue_{}",
+                    this_loop_label
+                )));
+                let (mut instructions_from_post, _) = post.convert(context)?;
+                instructions.0.append(&mut instructions_from_post.0);
+                instructions.0.push(BirdsInstructionNode::Jump(format!(
+                    "start_{}",
+                    this_loop_label
+                )));
+
+                //exit
+                instructions.0.push(BirdsInstructionNode::Label(format!(
+                    "break_{}",
+                    this_loop_label
+                )));
+
+                Ok(instructions)
+            }
+        }
+    }
+}
+
+impl Convert for ForInitialiserNode {
+    type Output = BirdsInstructions;
+
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+        match self {
+            ForInitialiserNode::Declaration(d) => Ok(d.convert(context)?),
+            ForInitialiserNode::Expression(optional_expression) => {
+                Ok(optional_expression.convert(context)?.0)
+            }
         }
     }
 }
@@ -163,6 +283,22 @@ impl Convert for DeclarationNode {
                 }
                 None => Ok(BirdsInstructions(Vec::new())),
             },
+        }
+    }
+}
+
+impl Convert for Option<ExpressionNode> {
+    // discard the return value of this expression, since they are only
+    // used in for loop expressions which don't need them
+    type Output = (BirdsInstructions, Option<BirdsValueNode>);
+
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+        match self {
+            Some(e) => {
+                let (instructions, value) = e.convert(context)?;
+                Ok((instructions, Some(value)))
+            }
+            None => Ok((BirdsInstructions(Vec::new()), None)),
         }
     }
 }

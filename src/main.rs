@@ -22,6 +22,7 @@ fn main() {
     let mut only_codegen = false;
     let mut assembly_out = false;
     let mut add_comments = false;
+    let mut to_object_file = false;
     for arg in &args[1..] {
         match arg.as_str() {
             "--lex" => only_lex = true,
@@ -31,6 +32,7 @@ fn main() {
             "--codegen" => only_codegen = true,
             "-S" => assembly_out = true,
             "--comments" => add_comments = true,
+            "-c" => to_object_file = true,
             _ => {
                 if !filename.is_empty() {
                     panic!("Unrecognised flag, or more than one filename set")
@@ -45,6 +47,7 @@ fn main() {
     let stripped_filename = filename.strip_suffix(".c").unwrap_or(&filename).to_owned();
     let preprocessed_filename = stripped_filename.clone() + ".i";
     let asm_filename = stripped_filename.clone() + ".s";
+    let object_filename = stripped_filename.clone() + ".o";
 
     // println!("Preprocessing...");
     let res = Command::new("gcc")
@@ -84,7 +87,11 @@ fn main() {
 
     // println!("Outputting to {}", stripped_filename);
     let res = Command::new("gcc")
-        .args([&asm_filename, "-o", &stripped_filename])
+        .args(if to_object_file {
+            vec!["-c", &asm_filename, "-o", &object_filename]
+        } else {
+            vec![&asm_filename, "-o", &stripped_filename]
+        })
         .output()
         .unwrap();
     if res.status.code() != Some(0) {

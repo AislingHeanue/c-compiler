@@ -18,7 +18,7 @@ impl Validate for FunctionNode {
         if matches!(context.pass, ValidationPass::ReadLabels) {
             context.labels.insert(self.name.clone(), HashMap::new());
         }
-        context.function_name = Some(self.name.clone());
+        context.current_function_name = Some(self.name.clone());
         self.body = self.body.validate(context)?;
         Ok(self)
     }
@@ -74,23 +74,69 @@ impl Validate for StatementNode {
             StatementNode::Compound(block) => {
                 self = StatementNode::Compound(block.validate(context)?)
             }
-            StatementNode::Break(_) => {}
-            StatementNode::Continue(_) => {}
+            StatementNode::Break(label) => {
+                if matches!(context.pass, ValidationPass::LabelLoops) {
+                    self = StatementNode::Break(Some(
+                        label
+                            .or(context.current_enclosing_loop_name.clone())
+                            .ok_or::<Box<dyn Error>>("Break is not inside a loop".into())?,
+                    ))
+                } else {
+                    self = StatementNode::Break(label)
+                }
+            }
+            StatementNode::Continue(label) => {
+                if matches!(context.pass, ValidationPass::LabelLoops) {
+                    self = StatementNode::Continue(Some(
+                        label
+                            .or(context.current_enclosing_loop_name.clone())
+                            .ok_or::<Box<dyn Error>>("Continue is not inside a loop".into())?,
+                    ))
+                } else {
+                    self = StatementNode::Continue(label)
+                }
+            }
             StatementNode::While(expression, body, label) => {
+                let previous_loop_name = if matches!(context.pass, ValidationPass::LabelLoops) {
+                    StatementNode::enter_loop(context)
+                } else {
+                    None
+                };
+
                 self = StatementNode::While(
                     expression.validate(context)?,
                     Box::new(body.validate(context)?),
-                    label,
-                )
+                    label.or(context.current_enclosing_loop_name.clone()),
+                );
+
+                if matches!(context.pass, ValidationPass::LabelLoops) {
+                    StatementNode::leave_loop(previous_loop_name, context)
+                }
             }
             StatementNode::DoWhile(body, expression, label) => {
+                let previous_loop_name = if matches!(context.pass, ValidationPass::LabelLoops) {
+                    StatementNode::enter_loop(context)
+                } else {
+                    None
+                };
+
                 self = StatementNode::DoWhile(
                     Box::new(body.validate(context)?),
                     expression.validate(context)?,
-                    label,
-                )
+                    label.or(context.current_enclosing_loop_name.clone()),
+                );
+
+                if matches!(context.pass, ValidationPass::LabelLoops) {
+                    StatementNode::leave_loop(previous_loop_name, context)
+                }
             }
             StatementNode::For(init, cond, post, body, label) => {
+                let previous_loop_name = if matches!(context.pass, ValidationPass::LabelLoops) {
+                    StatementNode::enter_loop(context)
+                } else {
+                    None
+                };
+
                 self = StatementNode::For(
                     init.validate(context)?,
                     process_results(cond.map(|cond| cond.validate(context)), |mut iter| {
@@ -100,8 +146,12 @@ impl Validate for StatementNode {
                         iter.next()
                     })?,
                     Box::new(body.validate(context)?),
-                    label,
-                )
+                    label.or(context.current_enclosing_loop_name.clone()),
+                );
+
+                if matches!(context.pass, ValidationPass::LabelLoops) {
+                    StatementNode::leave_loop(previous_loop_name, context)
+                }
             }
         }
         Ok(self)
@@ -127,7 +177,7 @@ impl StatementNode {
         if let StatementNode::Label(s, statement) = self {
             let labels_defined = context
                 .labels
-                .get_mut(&context.function_name.clone().unwrap())
+                .get_mut(&context.current_function_name.clone().unwrap())
                 .unwrap();
 
             if labels_defined.contains_key(&s) {
@@ -146,7 +196,7 @@ impl StatementNode {
         if let StatementNode::Goto(s) = self {
             let labels_defined = context
                 .labels
-                .get_mut(&context.function_name.clone().unwrap())
+                .get_mut(&context.current_function_name.clone().unwrap())
                 .unwrap();
             let new_name = labels_defined
                 .get(&s)
@@ -155,6 +205,20 @@ impl StatementNode {
         }
 
         Ok(self)
+    }
+
+    fn enter_loop(context: &mut ValidateContext) -> Option<String> {
+        context.num_loops += 1;
+        let new_loops_name = format!("loop_{}", context.num_loops);
+
+        let previous_loop_name = context.current_enclosing_loop_name.clone();
+        context.current_enclosing_loop_name = Some(new_loops_name);
+
+        previous_loop_name
+    }
+
+    fn leave_loop(previous_name: Option<String>, context: &mut ValidateContext) {
+        context.current_enclosing_loop_name = previous_name;
     }
 }
 
@@ -170,7 +234,7 @@ impl Validate for Option<ExpressionNode> {
 impl Validate for ExpressionNode {
     fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
         if matches!(context.pass, ValidationPass::CheckLvalues) {
-            self = Self::validate_lvalues_are_variables(self, context)?;
+            self = ExpressionNode::validate_lvalues_are_variables(self, context)?;
         }
         match self {
             ExpressionNode::IntegerConstant(_) => {}

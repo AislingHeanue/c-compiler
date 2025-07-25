@@ -107,6 +107,21 @@ fn identifier_to_string(token: Token) -> Result<String, Box<dyn Error>> {
     }
 }
 
+fn enter_scope(context: &mut ParseContext) -> HashMap<String, String> {
+    let original_outer_scope_variables = context.outer_scope_variables.clone();
+    context
+        .outer_scope_variables
+        .extend(context.current_scope_variables.clone());
+    context.current_scope_variables = HashMap::new();
+
+    original_outer_scope_variables
+}
+
+fn leave_scope(previous_scope: HashMap<String, String>, context: &mut ParseContext) {
+    context.current_scope_variables = context.outer_scope_variables.clone();
+    context.outer_scope_variables = previous_scope;
+}
+
 impl Parse for ProgramNode {
     fn parse(
         tokens: &mut VecDeque<Token>,
@@ -149,19 +164,14 @@ impl Parse for Block {
     ) -> Result<Self, Box<dyn Error>> {
         // it's a new block it's a new scope
         // (and I'm feeling... good)
-        let original_outer_scope_variables = context.outer_scope_variables.clone();
-        context
-            .outer_scope_variables
-            .extend(context.current_scope_variables.clone());
-        context.current_scope_variables = HashMap::new();
+        let original_outer_scope_variables = enter_scope(context);
 
         let mut items: Vec<BlockItemNode> = Vec::new();
         while !tokens.is_empty() {
             items.push(BlockItemNode::parse(tokens, context)?)
         }
 
-        context.current_scope_variables = context.outer_scope_variables.clone();
-        context.outer_scope_variables = original_outer_scope_variables;
+        leave_scope(original_outer_scope_variables, context);
         Ok(items)
     }
 }
@@ -318,6 +328,10 @@ impl Parse for StatementNode {
             Token::KeywordFor => {
                 expect(Token::KeywordFor, read(tokens)?)?;
                 expect(Token::OpenParen, read(tokens)?)?;
+
+                // create a new scope just for the first line of the 'for' declaration
+                let outer_scope = enter_scope(context);
+
                 let mut tokens_to_read_for_init =
                     read_until_token(tokens, vec![Token::SemiColon], true)?;
                 tokens_to_read_for_init.push_back(read(tokens)?);
@@ -333,6 +347,8 @@ impl Parse for StatementNode {
                 )?;
                 expect(Token::CloseParen, read(tokens)?)?;
                 let body = StatementNode::parse(tokens, context)?;
+
+                leave_scope(outer_scope, context);
                 Ok(StatementNode::For(init, cond, post, Box::new(body), None))
             }
             Token::KeywordDo => {

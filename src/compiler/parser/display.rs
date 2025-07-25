@@ -73,25 +73,28 @@ impl IndentDisplay for StatementNode {
                 "",
                 indent = indent
             ),
-            StatementNode::Break(_) => "break".to_string(),
-            StatementNode::Continue(_) => "break".to_string(),
-            StatementNode::While(expression, body, _) => {
+            StatementNode::Break(s) => format!("break{}", s.fmt_indent(indent, comments)),
+            StatementNode::Continue(s) => format!("continue{}", s.fmt_indent(indent, comments)),
+            StatementNode::While(expression, body, label) => {
                 format!(
-                    "while ({}) {}",
+                    "while{} ({}) {}",
+                    label.fmt_indent(indent, comments),
                     expression.fmt_indent(indent + 4, comments),
                     body.fmt_indent(indent + 4, comments)
                 )
             }
-            StatementNode::DoWhile(body, expression, _) => {
+            StatementNode::DoWhile(body, expression, label) => {
                 format!(
-                    "do {} while ({})",
+                    "do{} {} while ({})",
+                    label.fmt_indent(indent, comments),
                     expression.fmt_indent(indent + 4, comments),
                     body.fmt_indent(indent + 4, comments)
                 )
             }
-            StatementNode::For(init, cond, post, body, _) => {
+            StatementNode::For(init, cond, post, body, label) => {
                 format!(
-                    "for({};{};{}) {}",
+                    "for{}({};{};{}) {}",
+                    label.fmt_indent(indent, comments),
                     init.fmt_indent(indent + 4, comments),
                     cond.fmt_indent(indent + 4, comments),
                     post.fmt_indent(indent + 4, comments),
@@ -133,6 +136,15 @@ impl IndentDisplay for Type {
     fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
         match self {
             Type::Integer => "int".to_string(),
+        }
+    }
+}
+
+impl IndentDisplay for Option<String> {
+    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
+        match self {
+            Some(s) => format!(" ({})", s),
+            None => "".to_string(),
         }
     }
 }

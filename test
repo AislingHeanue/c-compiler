@@ -3,14 +3,14 @@
 ### May change for other devices/languages being used ###
 root_test_path=../../nlsandler/writing-a-c-compiler-tests
 extra_args="--bitwise --increment --compound --goto"
-binary_path=target/debug/c-compiler
+binary_path=target/release/c-compiler
 ###
 
 ### REBUILD BINARY HERE ###
 if [[ -n $VERBOSE ]]; then
-	cargo build
+	cargo build --release
 else
-	cargo build --quiet
+	cargo build --quiet --release
 fi
 if [[ $? -ne 0 ]]; then
 	exit 1
