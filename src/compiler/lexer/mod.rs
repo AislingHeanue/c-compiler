@@ -46,6 +46,7 @@ pub enum Token {
     ShiftRightAssign,
     Question,
     Colon,
+    Comma,
     Identifier(String),
     IntegerConstant(usize),
     KeywordInt,
@@ -116,6 +117,7 @@ lazy_static! {
                 Token::ModAssign => r"%=",
                 Token::Question => r"\?",
                 Token::Colon => r":",
+                Token::Comma => r",",
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
                 Token::IntegerConstant(_) =>r"[0-9]+\b",
                 // small hack to avoid having to use Option<> in this block, use

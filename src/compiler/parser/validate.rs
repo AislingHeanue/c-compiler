@@ -2,24 +2,37 @@ use itertools::process_results;
 use std::{collections::HashMap, error::Error};
 
 use super::{
-    Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode, FunctionNode,
+    Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode, FunctionDeclaration,
     ProgramNode, StatementNode, UnaryOperatorNode, Validate, ValidateContext, ValidationPass,
+    VariableDeclaration,
 };
 
 impl Validate for ProgramNode {
     fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        self.function = self.function.validate(context)?;
+        self.functions = process_results(
+            self.functions.into_iter().map(|f| f.validate(context)),
+            |iter| iter.collect(),
+        )?;
         Ok(self)
     }
 }
 
-impl Validate for FunctionNode {
+impl Validate for FunctionDeclaration {
     fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
         if matches!(context.pass, ValidationPass::ReadLabels) {
             context.labels.insert(self.name.clone(), HashMap::new());
         }
         context.current_function_name = Some(self.name.clone());
         self.body = self.body.validate(context)?;
+        Ok(self)
+    }
+}
+
+impl Validate for Option<Block> {
+    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+        if let Some(b) = self {
+            self = Some(b.validate(context)?)
+        }
         Ok(self)
     }
 }
@@ -161,8 +174,12 @@ impl Validate for StatementNode {
 impl Validate for ForInitialiserNode {
     fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
         match self {
-            ForInitialiserNode::Declaration(d) => {
-                self = ForInitialiserNode::Declaration(d.validate(context)?)
+            ForInitialiserNode::Declaration(v) => {
+                self = ForInitialiserNode::Declaration(VariableDeclaration {
+                    variable_type: v.variable_type,
+                    name: v.name,
+                    init: v.init.validate(context)?,
+                })
             }
             ForInitialiserNode::Expression(e) => {
                 self = ForInitialiserNode::Expression(e.validate(context)?)
@@ -262,6 +279,7 @@ impl Validate for ExpressionNode {
                     Box::new(otherwise.validate(context)?),
                 )
             }
+            ExpressionNode::FunctionCall(_, _) => todo!(),
         }
         Ok(self)
     }

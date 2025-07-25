@@ -41,6 +41,7 @@ for chapter_num in $(seq 1 $chapter); do
 				chapter_banner_printed=true
 			fi
 			passing=false
+			echo
 			echo TESTS FAILED IN \"${j}\":
 			echo -------
 			if [[ -n $VERBOSE ]]; then

@@ -1,147 +1,182 @@
+use itertools::Itertools;
+
 use super::{
-    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
-    FunctionNode, ProgramNode, StatementNode, Type, UnaryOperatorNode,
+    BinaryOperatorNode, Block, BlockItemNode, CodeDisplay, DeclarationNode, DisplayContext,
+    ExpressionNode, ForInitialiserNode, FunctionDeclaration, ProgramNode, StatementNode, Type,
+    UnaryOperatorNode, VariableDeclaration,
 };
-use crate::compiler::IndentDisplay;
 use std::{borrow::Borrow, fmt::Display};
 
 impl Display for ProgramNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.function.fmt_indent(0, self.has_comments))
-    }
-}
-
-impl IndentDisplay for FunctionNode {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
-        format!(
-            // TODO: reformat when functions can have multiple statements
-            "{:indent$}{}() {{{}\n{:indent$}}}",
-            "",
-            self.name,
-            self.body.fmt_indent(indent + 4, comments),
-            "",
-            indent = indent,
+        write!(
+            f,
+            "{}",
+            self.functions.show(&mut DisplayContext { indent: 0 })
         )
     }
 }
 
-impl IndentDisplay for Block {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
-        format!("\n{:indent$}", "", indent = indent)
-            + &self
-                .iter()
-                .map(|item| match item {
-                    BlockItemNode::Statement(s) => s.fmt_indent(indent, comments),
-                    BlockItemNode::Declaration(d) => d.fmt_indent(indent, comments),
-                })
-                .collect::<Vec<String>>()
-                .join(format!("\n{:indent$}", "", indent = indent).as_str())
+impl CodeDisplay for Vec<FunctionDeclaration> {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        self.iter().map(|f| f.show(context)).join("\n\n")
     }
 }
 
-impl IndentDisplay for StatementNode {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
+impl CodeDisplay for Block {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        format!("\n{:indent$}", "", indent = context.indent)
+            + &self
+                .iter()
+                .map(|item| match item {
+                    BlockItemNode::Statement(s) => s.show(context),
+                    BlockItemNode::Declaration(d) => d.show(context),
+                })
+                .collect::<Vec<String>>()
+                .join(format!("\n{:indent$}", "", indent = context.indent).as_str())
+    }
+}
+
+impl CodeDisplay for StatementNode {
+    fn show(&self, context: &mut DisplayContext) -> String {
         match self {
             StatementNode::Return(value) => {
-                format!("Return {}", value.fmt_indent(indent + 4, comments),)
+                format!("Return {}", value.show(&mut context.indent()),)
             }
-            StatementNode::Expression(e) => e.fmt_indent(indent + 4, comments),
+            StatementNode::Expression(e) => e.show(&mut context.indent()),
             StatementNode::Pass => "pass".to_string(),
             StatementNode::If(condition, then, otherwise) => {
                 if let Some(other) = otherwise.borrow() {
                     format!(
                         "if ({}) {} else {}",
-                        condition.fmt_indent(indent + 4, comments),
-                        then.fmt_indent(indent, comments),
-                        other.fmt_indent(indent, comments),
+                        condition.show(&mut context.indent()),
+                        then.show(context),
+                        other.show(context),
                     )
                 } else {
                     format!(
                         "if ({}) {}",
-                        condition.fmt_indent(indent + 4, comments),
-                        then.fmt_indent(indent + 4, comments),
+                        condition.show(&mut context.indent()),
+                        then.show(&mut context.indent()),
                     )
                 }
             }
             StatementNode::Label(s, statement) => {
-                format!("{}: {}", s, statement.fmt_indent(indent, comments))
+                format!("{}: {}", s, statement.show(context))
             }
             StatementNode::Goto(s) => format!("goto {}", s),
             StatementNode::Compound(block) => format!(
                 "{{{}\n{:indent$}}}",
-                block.fmt_indent(indent + 4, comments),
+                block.show(&mut context.indent()),
                 "",
-                indent = indent
+                indent = context.indent
             ),
-            StatementNode::Break(s) => format!("break{}", s.fmt_indent(indent, comments)),
-            StatementNode::Continue(s) => format!("continue{}", s.fmt_indent(indent, comments)),
+            StatementNode::Break(s) => format!("break{}", s.show(context)),
+            StatementNode::Continue(s) => format!("continue{}", s.show(context)),
             StatementNode::While(expression, body, label) => {
                 format!(
                     "while{} ({}) {}",
-                    label.fmt_indent(indent, comments),
-                    expression.fmt_indent(indent + 4, comments),
-                    body.fmt_indent(indent + 4, comments)
+                    label.show(context),
+                    expression.show(&mut context.indent()),
+                    body.show(&mut context.indent())
                 )
             }
             StatementNode::DoWhile(body, expression, label) => {
                 format!(
                     "do{} {} while ({})",
-                    label.fmt_indent(indent, comments),
-                    expression.fmt_indent(indent + 4, comments),
-                    body.fmt_indent(indent + 4, comments)
+                    label.show(context),
+                    expression.show(&mut context.indent()),
+                    body.show(&mut context.indent())
                 )
             }
             StatementNode::For(init, cond, post, body, label) => {
                 format!(
                     "for{}({};{};{}) {}",
-                    label.fmt_indent(indent, comments),
-                    init.fmt_indent(indent + 4, comments),
-                    cond.fmt_indent(indent + 4, comments),
-                    post.fmt_indent(indent + 4, comments),
-                    body.fmt_indent(indent + 4, comments)
+                    label.show(context),
+                    init.show(&mut context.indent()),
+                    cond.show(&mut context.indent()),
+                    post.show(&mut context.indent()),
+                    body.show(&mut context.indent())
                 )
             }
         }
     }
 }
 
-impl IndentDisplay for ForInitialiserNode {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
+impl CodeDisplay for ForInitialiserNode {
+    fn show(&self, context: &mut DisplayContext) -> String {
         match self {
-            ForInitialiserNode::Declaration(d) => d.fmt_indent(indent, comments),
-            ForInitialiserNode::Expression(e) => e.fmt_indent(indent, comments),
+            ForInitialiserNode::Declaration(d) => d.show(context),
+            ForInitialiserNode::Expression(e) => e.show(context),
         }
     }
 }
 
-impl IndentDisplay for DeclarationNode {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
-        match self {
-            DeclarationNode::Declaration(t, s, Some(e)) => {
-                format!(
-                    "{} {} = {}",
-                    t.fmt_indent(indent, comments),
-                    s,
-                    e.fmt_indent(indent + 4, comments),
-                )
-            }
-            DeclarationNode::Declaration(t, s, None) => {
-                format!("{} {}", t.fmt_indent(indent, comments), s,)
-            }
+impl CodeDisplay for VariableDeclaration {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        if let Some(init) = &self.init {
+            format!(
+                "{} {} = {}",
+                self.variable_type.show(context),
+                self.name,
+                init.show(&mut context.indent()),
+            )
+        } else {
+            format!("{} {}", self.variable_type.show(context), self.name,)
         }
     }
 }
 
-impl IndentDisplay for Type {
-    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
+impl CodeDisplay for FunctionDeclaration {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        if let Some(body) = &self.body {
+            format!(
+                "{} {}({}) {{{}\n{:indent$}}}",
+                self.out_type.show(context),
+                self.name,
+                self.params.show(&mut context.indent()),
+                body.show(&mut context.indent()),
+                "",
+                indent = context.indent
+            )
+        } else {
+            format!(
+                "{} {}({});",
+                self.out_type.show(context),
+                self.name,
+                self.params.show(&mut context.indent()),
+            )
+        }
+    }
+}
+
+impl CodeDisplay for Vec<(Type, String)> {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        self.iter()
+            .map(|(t, s)| format!("{} {}", t.show(context), s))
+            .join(", ")
+    }
+}
+
+impl CodeDisplay for DeclarationNode {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        match self {
+            DeclarationNode::Variable(v) => v.show(context),
+            DeclarationNode::Function(f) => f.show(context),
+        }
+    }
+}
+
+impl CodeDisplay for Type {
+    fn show(&self, _context: &mut DisplayContext) -> String {
         match self {
             Type::Integer => "int".to_string(),
         }
     }
 }
 
-impl IndentDisplay for Option<String> {
-    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
+impl CodeDisplay for Option<String> {
+    fn show(&self, _context: &mut DisplayContext) -> String {
         match self {
             Some(s) => format!(" ({})", s),
             None => "".to_string(),
@@ -149,53 +184,61 @@ impl IndentDisplay for Option<String> {
     }
 }
 
-impl IndentDisplay for Option<ExpressionNode> {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
+impl CodeDisplay for Option<ExpressionNode> {
+    fn show(&self, context: &mut DisplayContext) -> String {
         match self {
             None => "".to_string(),
-            Some(e) => e.fmt_indent(indent, comments),
+            Some(e) => e.show(context),
         }
     }
 }
-impl IndentDisplay for ExpressionNode {
-    fn fmt_indent(&self, indent: usize, comments: bool) -> String {
+
+impl CodeDisplay for ExpressionNode {
+    fn show(&self, context: &mut DisplayContext) -> String {
         match self {
             ExpressionNode::IntegerConstant(value) => value.to_string(),
             ExpressionNode::Unary(operator, exp) => {
                 format!(
                     "({}{})",
-                    operator.fmt_indent(indent + 4, comments),
-                    exp.fmt_indent(indent + 4, comments),
+                    operator.show(&mut context.indent()),
+                    exp.show(&mut context.indent()),
                 )
             }
             ExpressionNode::Binary(operator, left, right) => {
                 format!(
                     "({} {} {})",
-                    left.fmt_indent(indent + 4, comments),
-                    operator.fmt_indent(indent + 4, comments),
-                    right.fmt_indent(indent + 4, comments)
+                    left.show(&mut context.indent()),
+                    operator.show(&mut context.indent()),
+                    right.show(&mut context.indent())
                 )
             }
             ExpressionNode::Var(s) => format!("Var({})", s),
-            ExpressionNode::Assignment(l, r) => format!(
-                "{} = {}",
-                l.fmt_indent(indent, comments),
-                r.fmt_indent(indent, comments)
-            ),
+            ExpressionNode::Assignment(l, r) => {
+                format!("{} = {}", l.show(context), r.show(context))
+            }
             ExpressionNode::Ternary(condition, then, otherwise) => {
                 format!(
                     "{} ? {} : {}",
-                    condition.fmt_indent(indent + 4, comments),
-                    then.fmt_indent(indent + 4, comments),
-                    otherwise.fmt_indent(indent, comments),
+                    condition.show(&mut context.indent()),
+                    then.show(&mut context.indent()),
+                    otherwise.show(context),
                 )
+            }
+            ExpressionNode::FunctionCall(name, args) => {
+                format!("{}({})", name, args.show(&mut context.indent()))
             }
         }
     }
 }
 
-impl IndentDisplay for UnaryOperatorNode {
-    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
+impl CodeDisplay for Vec<ExpressionNode> {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        self.iter().map(|e| e.show(context)).join(", ")
+    }
+}
+
+impl CodeDisplay for UnaryOperatorNode {
+    fn show(&self, _context: &mut DisplayContext) -> String {
         match self {
             UnaryOperatorNode::Complement => "~",
             UnaryOperatorNode::Negate => "-",
@@ -209,8 +252,8 @@ impl IndentDisplay for UnaryOperatorNode {
     }
 }
 
-impl IndentDisplay for BinaryOperatorNode {
-    fn fmt_indent(&self, _indent: usize, _comments: bool) -> String {
+impl CodeDisplay for BinaryOperatorNode {
+    fn show(&self, _context: &mut DisplayContext) -> String {
         match self {
             BinaryOperatorNode::Add => "+",
             BinaryOperatorNode::Subtract => "-",

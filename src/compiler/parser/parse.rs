@@ -1,6 +1,7 @@
 use super::{
     BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
-    FunctionNode, Parse, ProgramNode, StatementNode, Type, UnaryOperatorNode,
+    FunctionDeclaration, Parse, ProgramNode, StatementNode, Type, UnaryOperatorNode,
+    VariableDeclaration,
 };
 use crate::compiler::{lexer::Token, parser::ParseContext};
 use std::{
@@ -31,6 +32,7 @@ fn read_until_token(
     tokens: &mut VecDeque<Token>,
     expected: Vec<Token>,
     allow_empty: bool,
+    read_all_if_not_found: bool,
 ) -> Result<VecDeque<Token>, Box<dyn Error>> {
     let mut output = VecDeque::new();
     let discriminants: Vec<Discriminant<Token>> = expected.iter().map(discriminant).collect();
@@ -50,7 +52,11 @@ fn read_until_token(
 
         output.push_back(tokens.pop_front().unwrap());
     }
-    Err(format!("Could not find expected token: {:?}", expected).into())
+    if read_all_if_not_found {
+        Ok(output)
+    } else {
+        Err(format!("Could not find expected token: {:?}", expected).into())
+    }
 }
 
 fn read_until_match(
@@ -127,16 +133,16 @@ impl Parse for ProgramNode {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        let function = FunctionNode::parse(tokens, context)?;
+        let mut functions: Vec<FunctionDeclaration> = Vec::new();
+        while !tokens.is_empty() {
+            functions.push(FunctionDeclaration::parse(tokens, context)?)
+        }
 
-        Ok(ProgramNode {
-            function,
-            has_comments: false,
-        })
+        Ok(ProgramNode { functions })
     }
 }
 
-impl Parse for FunctionNode {
+impl Parse for FunctionDeclaration {
     fn parse(
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
@@ -144,16 +150,82 @@ impl Parse for FunctionNode {
         expect(Token::KeywordInt, read(tokens)?)?;
         let name = identifier_to_string(read(tokens)?)?;
         expect(Token::OpenParen, read(tokens)?)?;
-        expect(Token::KeywordVoid, read(tokens)?)?;
-        expect(Token::CloseParen, read(tokens)?)?;
-        expect(Token::OpenBrace, read(tokens)?)?;
-        let body = Block::parse(
-            &mut read_until_match(tokens, Token::OpenBrace, Token::CloseBrace, true)?,
+        let params = FunctionDeclaration::parse_params(
+            &mut read_until_match(tokens, Token::OpenParen, Token::CloseParen, false)?,
             context,
         )?;
-        expect(Token::CloseBrace, read_last(tokens)?)?;
+        expect(Token::CloseParen, read(tokens)?)?;
 
-        Ok(FunctionNode { name, body })
+        match read(tokens)? {
+            Token::SemiColon => Ok(FunctionDeclaration {
+                out_type: Type::Integer,
+                name,
+                params,
+                body: None,
+            }),
+            Token::OpenBrace => {
+                let body = Block::parse(
+                    &mut read_until_match(tokens, Token::OpenBrace, Token::CloseBrace, true)?,
+                    context,
+                )?;
+                expect(Token::CloseBrace, read(tokens)?)?;
+
+                Ok(FunctionDeclaration {
+                    out_type: Type::Integer,
+                    name,
+                    params,
+                    body: Some(body),
+                })
+            }
+            t => Err(format!("Unexpected token in function declaration: {:?}", t).into()),
+        }
+    }
+}
+
+impl FunctionDeclaration {
+    fn parse_params(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Vec<(Type, String)>, Box<dyn Error>> {
+        if tokens.len() == 1 && matches!(tokens[0], Token::KeywordVoid) {
+            return Ok(Vec::new());
+        } else if tokens.len() < 2 {
+            return Err(
+                "too few tokens in function parameters, expected at least 2, or 'void'".into(),
+            );
+        }
+
+        let mut params: Vec<(Type, String)> =
+            vec![FunctionDeclaration::parse_param(tokens, context)?];
+
+        while !tokens.is_empty() {
+            expect(Token::Comma, read(tokens)?)?;
+            params.push(FunctionDeclaration::parse_param(tokens, context)?)
+        }
+
+        Ok(Vec::new())
+    }
+
+    fn parse_param(
+        tokens: &mut VecDeque<Token>,
+        _context: &mut ParseContext,
+    ) -> Result<(Type, String), Box<dyn Error>> {
+        if tokens.len() < 2 {
+            return Err(
+                "too few tokens in function parameters, expected at least 2, or 'void'".into(),
+            );
+        }
+        let out_type = match tokens.pop_front().unwrap() {
+            Token::KeywordInt => Type::Integer,
+            t => return Err(format!("Invalid type in parameter: {:?}", t).into()),
+        };
+
+        let name = match tokens.pop_front().unwrap() {
+            Token::Identifier(s) => s.to_string(),
+            t => return Err(format!("Invalid name in parameter: {:?}", t).into()),
+        };
+
+        Ok((out_type, name))
     }
 }
 
@@ -201,12 +273,12 @@ impl Parse for ForInitialiserNode {
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         match tokens.front().unwrap() {
-            Token::KeywordInt => Ok(ForInitialiserNode::Declaration(DeclarationNode::parse(
+            Token::KeywordInt => Ok(ForInitialiserNode::Declaration(VariableDeclaration::parse(
                 tokens, context,
             )?)),
             _ => {
                 let expression = ForInitialiserNode::Expression(Option::<ExpressionNode>::parse(
-                    &mut read_until_token(tokens, vec![Token::SemiColon], true)?,
+                    &mut read_until_token(tokens, vec![Token::SemiColon], true, false)?,
                     context,
                 )?);
                 // pop the extra semi-colon off of tokens, since expressions themselves don't
@@ -223,7 +295,36 @@ impl Parse for DeclarationNode {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
+        //read first 3 tokens to determine if it's a function()
+        if tokens.len() < 3 {
+            return Err(format!("Declaration found with fewer than 3 tokens: {:?}", tokens).into());
+        }
+        if !matches!(tokens[1], Token::Identifier(_)) {
+            return Err(format!(
+                "Second token in a declaration is not an identifier: {:?}",
+                tokens[1]
+            )
+            .into());
+        }
+        match tokens[2] {
+            Token::OpenParen => Ok(DeclarationNode::Function(FunctionDeclaration::parse(
+                tokens, context,
+            )?)),
+            _ => Ok(DeclarationNode::Variable(VariableDeclaration::parse(
+                tokens, context,
+            )?)),
+        }
+    }
+}
+
+impl Parse for VariableDeclaration {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        let variable_type = Type::Integer;
         expect(Token::KeywordInt, read(tokens)?)?;
+
         let t = read(tokens)?;
         let name = match t {
             Token::Identifier(name) => Ok(name),
@@ -247,22 +348,22 @@ impl Parse for DeclarationNode {
             .current_scope_variables
             .insert(name.to_string(), new_name.clone());
         match read(tokens)? {
-            Token::SemiColon => Ok(DeclarationNode::Declaration(
-                Type::Integer,
-                new_name.clone(),
-                None,
-            )),
+            Token::SemiColon => Ok(VariableDeclaration {
+                variable_type,
+                name: new_name.clone(),
+                init: None,
+            }),
             Token::Assignment => {
                 let expression = ExpressionNode::parse(
-                    &mut read_until_token(tokens, vec![Token::SemiColon], false)?,
+                    &mut read_until_token(tokens, vec![Token::SemiColon], false, false)?,
                     context,
                 )?;
                 expect(Token::SemiColon, read(tokens)?)?;
-                Ok(DeclarationNode::Declaration(
-                    Type::Integer,
-                    new_name.clone(),
-                    Some(expression),
-                ))
+                Ok(VariableDeclaration {
+                    variable_type,
+                    name: new_name.clone(),
+                    init: Some(expression),
+                })
             }
             t => Err(format!("Unexpected token in declaration of {}: {:?}", name, t).into()),
         }
@@ -278,7 +379,7 @@ impl Parse for StatementNode {
             Token::KeywordReturn => {
                 expect(Token::KeywordReturn, read(tokens)?)?;
                 let expression = ExpressionNode::parse(
-                    &mut read_until_token(tokens, vec![Token::SemiColon], false)?,
+                    &mut read_until_token(tokens, vec![Token::SemiColon], false, false)?,
                     context,
                 )?;
                 expect(Token::SemiColon, read(tokens)?)?;
@@ -333,11 +434,11 @@ impl Parse for StatementNode {
                 let outer_scope = enter_scope(context);
 
                 let mut tokens_to_read_for_init =
-                    read_until_token(tokens, vec![Token::SemiColon], true)?;
+                    read_until_token(tokens, vec![Token::SemiColon], true, false)?;
                 tokens_to_read_for_init.push_back(read(tokens)?);
                 let init = ForInitialiserNode::parse(&mut tokens_to_read_for_init, context)?;
                 let cond = Option::<ExpressionNode>::parse(
-                    &mut read_until_token(tokens, vec![Token::SemiColon], true)?,
+                    &mut read_until_token(tokens, vec![Token::SemiColon], true, false)?,
                     context,
                 )?;
                 expect(Token::SemiColon, read(tokens)?)?;
@@ -400,7 +501,7 @@ impl Parse for StatementNode {
                     }
                     _ => {
                         let expression = ExpressionNode::parse(
-                            &mut read_until_token(tokens, vec![Token::SemiColon], false)?,
+                            &mut read_until_token(tokens, vec![Token::SemiColon], false, false)?,
                             context,
                         )?;
                         expect(Token::SemiColon, read(tokens)?)?;
@@ -539,19 +640,60 @@ impl ExpressionNode {
                 expression
             }
             Token::Identifier(name) => {
-                if context.do_not_validate {
-                    ExpressionNode::Var(name.to_string())
-                } else {
-                    // VALIDATION STEP: Check the variable has been declared
-                    ExpressionNode::Var(if let Some(new_name) =
-                        context.current_scope_variables.get(&name)
-                    {
-                        Ok::<String, Box<dyn Error>>(new_name.to_string())
-                    } else if let Some(new_name) = context.outer_scope_variables.get(&name) {
-                        Ok(new_name.to_string())
-                    } else {
-                        Err(format!("Variable used before declaration: {}", name).into())
-                    }?)
+                match tokens.front() {
+                    Some(Token::OpenParen) => {
+                        expect(Token::OpenParen, read(tokens)?)?;
+                        let tokens_in_parens = &mut read_until_match(
+                            tokens,
+                            Token::OpenParen,
+                            Token::CloseParen,
+                            true,
+                        )?;
+                        let mut arguments: Vec<ExpressionNode> = Vec::new();
+                        if !tokens_in_parens.is_empty() {
+                            arguments.push(ExpressionNode::parse(
+                                &mut read_until_token(
+                                    tokens_in_parens,
+                                    vec![Token::Comma],
+                                    false,
+                                    true,
+                                )?,
+                                context,
+                            )?);
+                        }
+                        while !tokens_in_parens.is_empty() {
+                            expect(Token::Comma, read(tokens_in_parens)?)?;
+                            arguments.push(ExpressionNode::parse(
+                                &mut read_until_token(
+                                    tokens_in_parens,
+                                    vec![Token::Comma],
+                                    false,
+                                    true,
+                                )?,
+                                context,
+                            )?);
+                        }
+                        expect(Token::CloseParen, read(tokens)?)?;
+
+                        ExpressionNode::FunctionCall(name, arguments)
+                    }
+                    _ => {
+                        if context.do_not_validate {
+                            ExpressionNode::Var(name.to_string())
+                        } else {
+                            // VALIDATION STEP: Check the variable has been declared
+                            ExpressionNode::Var(if let Some(new_name) =
+                                context.current_scope_variables.get(&name)
+                            {
+                                Ok::<String, Box<dyn Error>>(new_name.to_string())
+                            } else if let Some(new_name) = context.outer_scope_variables.get(&name)
+                            {
+                                Ok(new_name.to_string())
+                            } else {
+                                Err(format!("Variable used before declaration: {}", name).into())
+                            }?)
+                        }
+                    }
                 }
             }
             Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement => {

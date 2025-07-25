@@ -9,13 +9,22 @@ mod parse;
 mod validate;
 
 pub struct ProgramNode {
-    pub function: FunctionNode,
-    has_comments: bool,
+    pub functions: Vec<FunctionDeclaration>,
 }
 
-pub struct FunctionNode {
+#[derive(Debug)]
+pub struct FunctionDeclaration {
+    pub out_type: Type,
     pub name: String,
-    pub body: Block,
+    pub params: Vec<(Type, String)>,
+    pub body: Option<Block>,
+}
+
+#[derive(Debug)]
+pub struct VariableDeclaration {
+    pub variable_type: Type,
+    pub name: String,
+    pub init: Option<ExpressionNode>,
 }
 
 pub type Block = Vec<BlockItemNode>;
@@ -28,7 +37,8 @@ pub enum BlockItemNode {
 
 #[derive(Debug)]
 pub enum DeclarationNode {
-    Declaration(Type, String, Option<ExpressionNode>),
+    Variable(VariableDeclaration),
+    Function(FunctionDeclaration),
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +85,7 @@ pub enum StatementNode {
 
 #[derive(Debug)]
 pub enum ForInitialiserNode {
-    Declaration(DeclarationNode),
+    Declaration(VariableDeclaration),
     Expression(Option<ExpressionNode>),
 }
 
@@ -92,6 +102,8 @@ pub enum ExpressionNode {
         Box<ExpressionNode>,
         Box<ExpressionNode>,
     ),
+    // function name, args...
+    FunctionCall(String, Vec<ExpressionNode>),
 }
 
 #[derive(Clone, Debug)]
@@ -207,4 +219,21 @@ pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> 
     }
 
     Ok(parsed)
+}
+
+trait CodeDisplay {
+    fn show(&self, context: &mut DisplayContext) -> String;
+}
+
+#[derive(Clone)]
+pub struct DisplayContext {
+    indent: usize,
+}
+
+impl DisplayContext {
+    fn indent(&mut self) -> DisplayContext {
+        let mut s = self.clone();
+        s.indent += 4;
+        s
+    }
 }

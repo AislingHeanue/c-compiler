@@ -4,7 +4,7 @@ use itertools::process_results;
 
 use crate::compiler::parser::{
     BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
-    FunctionNode, ProgramNode, StatementNode, UnaryOperatorNode,
+    FunctionDeclaration, ProgramNode, StatementNode, UnaryOperatorNode, VariableDeclaration,
 };
 
 use super::{
@@ -17,24 +17,30 @@ impl Convert for ProgramNode {
 
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         Ok(BirdsProgramNode {
-            function: self.function.convert(context)?,
+            function: process_results(
+                self.functions.into_iter().map(|f| f.convert(context)),
+                // TODO: multiple functions
+                |mut iter| iter.next().unwrap(),
+            )?,
         })
     }
 }
 
-impl Convert for FunctionNode {
+impl Convert for FunctionDeclaration {
     type Output = BirdsFunctionNode;
 
     fn convert(self, context: &mut ConvertContext) -> Result<BirdsFunctionNode, Box<dyn Error>> {
         let name = self.name;
-        let mut instructions = self.body.convert(context)?;
-
-        // add an extra "return 0" at the end because the C standard dictates that if main() exits
-        // without a return statement, then it must actually return 0. If a return statement is
-        // otherwise present, this instruction will never be run (dead code).
-        instructions.0.push(BirdsInstructionNode::Return(
-            BirdsValueNode::IntegerConstant(0),
-        ));
+        let mut instructions: BirdsInstructions = BirdsInstructions(Vec::new());
+        if let Some(body) = self.body {
+            instructions = body.convert(context)?;
+            // add an extra "return 0" at the end because the C standard dictates that if main() exits
+            // without a return statement, then it must actually return 0. If a return statement is
+            // otherwise present, this instruction will never be run (dead code).
+            instructions.0.push(BirdsInstructionNode::Return(
+                BirdsValueNode::IntegerConstant(0),
+            ));
+        }
 
         Ok(BirdsFunctionNode { name, instructions })
     }
@@ -66,6 +72,17 @@ impl Convert for Block {
             }),
             |iter| iter.flatten().collect(),
         )
+    }
+}
+
+impl Convert for DeclarationNode {
+    type Output = BirdsInstructions;
+
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+        match self {
+            DeclarationNode::Variable(v) => Ok(v.convert(context)?),
+            DeclarationNode::Function(_f) => todo!(),
+        }
     }
 }
 
@@ -267,22 +284,20 @@ impl Convert for ForInitialiserNode {
     }
 }
 
-impl Convert for DeclarationNode {
+impl Convert for VariableDeclaration {
     type Output = BirdsInstructions;
 
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
-        match self {
-            DeclarationNode::Declaration(_type, name, expression) => match expression {
-                Some(e) => {
-                    let assignment_expression = ExpressionNode::Assignment(
-                        Box::new(ExpressionNode::Var(name)),
-                        Box::new(e),
-                    );
-                    let (instructions, _new_src) = assignment_expression.convert(context)?;
-                    Ok(instructions)
-                }
-                None => Ok(BirdsInstructions(Vec::new())),
-            },
+        match self.init {
+            Some(e) => {
+                let assignment_expression = ExpressionNode::Assignment(
+                    Box::new(ExpressionNode::Var(self.name)),
+                    Box::new(e),
+                );
+                let (instructions, _new_src) = assignment_expression.convert(context)?;
+                Ok(instructions)
+            }
+            None => Ok(BirdsInstructions(Vec::new())),
         }
     }
 }
@@ -546,6 +561,7 @@ impl Convert for ExpressionNode {
 
                 Ok((instructions, new_dst))
             }
+            ExpressionNode::FunctionCall(_, _) => todo!(),
         }
     }
 }
