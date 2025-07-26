@@ -1,6 +1,6 @@
 use crate::compiler::birds::{
-    BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsInstructions, BirdsProgramNode,
-    BirdsUnaryOperatorNode, BirdsValueNode,
+    BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsProgramNode, BirdsUnaryOperatorNode,
+    BirdsValueNode,
 };
 use itertools::process_results;
 use std::{
@@ -64,16 +64,15 @@ impl Convert for Program {
 }
 
 impl Convert for Instructions {
-    type Input = BirdsInstructions;
+    type Input = Vec<BirdsInstructionNode>;
     type Output = Self;
     fn convert(
-        input: BirdsInstructions,
+        input: Vec<BirdsInstructionNode>,
         config: &mut ConvertContext,
     ) -> Result<Instructions, Box<dyn Error>> {
         // FIRST PASS: create a bunch of mock registers to be replaced with stack entries later
         let instructions: VecDeque<Instruction> = process_results(
             input
-                .0
                 .into_iter()
                 .map(|instruction| Instruction::convert(instruction, config)),
             |iter| iter.flatten().collect(),

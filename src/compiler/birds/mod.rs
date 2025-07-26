@@ -12,11 +12,8 @@ pub struct BirdsProgramNode {
 #[derive(Debug)]
 pub struct BirdsFunctionNode {
     pub name: String,
-    pub instructions: BirdsInstructions,
+    pub instructions: Vec<BirdsInstructionNode>,
 }
-
-#[derive(Debug)]
-pub struct BirdsInstructions(pub Vec<BirdsInstructionNode>);
 
 #[derive(Debug)]
 pub enum BirdsInstructionNode {
