@@ -81,9 +81,20 @@ pub enum StatementNode {
         Box<StatementNode>,
         Option<String>,
     ),
-    Switch(ExpressionNode, Box<StatementNode>, Option<String>),
-    Case(ExpressionNode, Box<StatementNode>),
-    Default(Box<StatementNode>),
+    Switch(
+        ExpressionNode,
+        Box<StatementNode>,
+        Option<String>,
+        Option<HashMap<SwitchMapKey, String>>,
+    ),
+    Case(ExpressionNode, Box<StatementNode>, Option<String>),
+    Default(Box<StatementNode>, Option<String>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SwitchMapKey {
+    Default,
+    Expression(ExpressionNode),
 }
 
 #[derive(Debug)]
@@ -92,7 +103,7 @@ pub enum ForInitialiserNode {
     Expression(Option<ExpressionNode>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ExpressionNode {
     IntegerConstant(usize),
     Unary(UnaryOperatorNode, Box<ExpressionNode>),
@@ -109,7 +120,7 @@ pub enum ExpressionNode {
     FunctionCall(String, Vec<ExpressionNode>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UnaryOperatorNode {
     Complement,
     Negate,
@@ -120,7 +131,7 @@ pub enum UnaryOperatorNode {
     SuffixDecrement,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BinaryOperatorNode {
     Add,
     Subtract,
@@ -182,23 +193,32 @@ where
     fn validate(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum ValidationPass {
     // variable resolution is covered by parse.rs
     CheckLvalues,
     ReadLabels,
     ValidateLabels,
     LabelLoops,
+    ConstantCases,
 }
 
+#[derive(Debug)]
 struct ValidateContext {
     pass: ValidationPass,
     // Function name -> user-defined name -> label name for birds
     num_labels: usize,
     num_loops: usize,
+    num_switches: usize,
+    num_switch_labels: usize,
     labels: HashMap<String, HashMap<String, String>>,
     current_function_name: Option<String>,
-    current_enclosing_loop_name: Option<String>,
+    // all loops + switch
+    current_enclosing_loop_name_for_break: Option<String>,
+    // all loops (not switch)
+    current_enclosing_loop_name_for_case: Option<String>,
+    current_enclosing_loop_name_for_continue: Option<String>,
+    current_switch_labels: Option<HashMap<SwitchMapKey, String>>,
 }
 
 pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> {
@@ -207,14 +227,20 @@ pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> 
         ValidationPass::ReadLabels,
         ValidationPass::ValidateLabels,
         ValidationPass::LabelLoops,
+        ValidationPass::ConstantCases,
     ];
     let mut validate_context = ValidateContext {
         pass: passes.first().unwrap().clone(),
         num_labels: 0,
         num_loops: 0,
+        num_switches: 0,
+        num_switch_labels: 0,
         labels: HashMap::new(),
         current_function_name: None,
-        current_enclosing_loop_name: None,
+        current_enclosing_loop_name_for_break: None,
+        current_enclosing_loop_name_for_case: None,
+        current_enclosing_loop_name_for_continue: None,
+        current_switch_labels: None,
     };
     for pass in passes {
         validate_context.pass = pass;

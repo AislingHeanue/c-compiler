@@ -122,14 +122,14 @@ impl CodeDisplay for StatementNode {
                     body.show(context)
                 )
             }
-            StatementNode::Switch(expression, body, label) => format!(
+            StatementNode::Switch(expression, body, label, _) => format!(
                 "{}switch{}({}) {}",
                 context.new_line_start(),
                 label.show(context),
                 expression.show(&mut context.indent()),
                 body.show(context)
             ),
-            StatementNode::Case(expression, statement) => {
+            StatementNode::Case(expression, statement, _) => {
                 *context = context.unindent();
                 let out = format!(
                     "{}case {}:{}",
@@ -140,7 +140,7 @@ impl CodeDisplay for StatementNode {
                 *context = context.indent();
                 out
             }
-            StatementNode::Default(statement) => {
+            StatementNode::Default(statement, _) => {
                 *context = context.unindent();
                 let out = format!(
                     "{}default:{}",

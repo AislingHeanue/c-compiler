@@ -3,8 +3,8 @@ use std::{collections::HashMap, error::Error};
 
 use super::{
     Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode, FunctionDeclaration,
-    ProgramNode, StatementNode, UnaryOperatorNode, Validate, ValidateContext, ValidationPass,
-    VariableDeclaration,
+    ProgramNode, StatementNode, SwitchMapKey, UnaryOperatorNode, Validate, ValidateContext,
+    ValidationPass, VariableDeclaration,
 };
 
 impl Validate for ProgramNode {
@@ -65,6 +65,14 @@ impl Validate for StatementNode {
         if matches!(context.pass, ValidationPass::ValidateLabels) {
             self = Self::validate_labels(self, context)?;
         }
+        // LabelLoops covers the context required by
+        // all loops, switch, break, continue, case, default
+        if matches!(context.pass, ValidationPass::LabelLoops) {
+            self = Self::label_loops(self, context)?;
+        }
+        if matches!(context.pass, ValidationPass::LabelLoops) {
+            self = Self::validate_constant_cases(self, context)?;
+        }
         match self {
             StatementNode::Expression(e) => self = StatementNode::Expression(e.validate(context)?),
             StatementNode::Pass => {}
@@ -87,56 +95,36 @@ impl Validate for StatementNode {
             StatementNode::Compound(block) => {
                 self = StatementNode::Compound(block.validate(context)?)
             }
-            StatementNode::Break(label) => {
-                if matches!(context.pass, ValidationPass::LabelLoops) {
-                    self = StatementNode::Break(Some(
-                        label
-                            .or(context.current_enclosing_loop_name.clone())
-                            .ok_or::<Box<dyn Error>>("Break is not inside a loop".into())?,
-                    ))
-                } else {
-                    self = StatementNode::Break(label)
-                }
-            }
-            StatementNode::Continue(label) => {
-                if matches!(context.pass, ValidationPass::LabelLoops) {
-                    self = StatementNode::Continue(Some(
-                        label
-                            .or(context.current_enclosing_loop_name.clone())
-                            .ok_or::<Box<dyn Error>>("Continue is not inside a loop".into())?,
-                    ))
-                } else {
-                    self = StatementNode::Continue(label)
-                }
-            }
+            StatementNode::Break(_) => {}
+            StatementNode::Continue(_) => {}
             StatementNode::While(expression, body, label) => {
-                let previous_loop_name = if matches!(context.pass, ValidationPass::LabelLoops) {
+                let previous_loop_names = if matches!(context.pass, ValidationPass::LabelLoops) {
                     StatementNode::enter_loop(context)
                 } else {
-                    None
+                    (None, None)
                 };
 
                 self = StatementNode::While(
                     expression.validate(context)?,
                     Box::new(body.validate(context)?),
-                    label.or(context.current_enclosing_loop_name.clone()),
+                    label.or(context.current_enclosing_loop_name_for_break.clone()),
                 );
 
                 if matches!(context.pass, ValidationPass::LabelLoops) {
-                    StatementNode::leave_loop(previous_loop_name, context)
+                    StatementNode::leave_loop(previous_loop_names, context)
                 }
             }
             StatementNode::DoWhile(body, expression, label) => {
                 let previous_loop_name = if matches!(context.pass, ValidationPass::LabelLoops) {
                     StatementNode::enter_loop(context)
                 } else {
-                    None
+                    (None, None)
                 };
 
                 self = StatementNode::DoWhile(
                     Box::new(body.validate(context)?),
                     expression.validate(context)?,
-                    label.or(context.current_enclosing_loop_name.clone()),
+                    label.or(context.current_enclosing_loop_name_for_break.clone()),
                 );
 
                 if matches!(context.pass, ValidationPass::LabelLoops) {
@@ -147,7 +135,7 @@ impl Validate for StatementNode {
                 let previous_loop_name = if matches!(context.pass, ValidationPass::LabelLoops) {
                     StatementNode::enter_loop(context)
                 } else {
-                    None
+                    (None, None)
                 };
 
                 self = StatementNode::For(
@@ -159,28 +147,47 @@ impl Validate for StatementNode {
                         iter.next()
                     })?,
                     Box::new(body.validate(context)?),
-                    label.or(context.current_enclosing_loop_name.clone()),
+                    label.or(context.current_enclosing_loop_name_for_break.clone()),
                 );
 
                 if matches!(context.pass, ValidationPass::LabelLoops) {
                     StatementNode::leave_loop(previous_loop_name, context)
                 }
             }
-            StatementNode::Switch(expression, body, label) => {
-                self = StatementNode::Switch(
+            StatementNode::Switch(expression, body, label, map) => {
+                let previous_loop_names = if matches!(context.pass, ValidationPass::LabelLoops) {
+                    StatementNode::enter_switch(context)
+                } else {
+                    (None, None, None)
+                };
+
+                if matches!(context.pass, ValidationPass::LabelLoops) {
+                    let body_inner = body.validate(context)?;
+                    self = StatementNode::Switch(
+                        expression.validate(context)?,
+                        Box::new(body_inner),
+                        label.or(context.current_enclosing_loop_name_for_break.clone()),
+                        context.current_switch_labels.take(),
+                    );
+                    StatementNode::leave_switch(previous_loop_names, context)
+                } else {
+                    self = StatementNode::Switch(
+                        expression.validate(context)?,
+                        Box::new(body.validate(context)?),
+                        label.or(context.current_enclosing_loop_name_for_break.clone()),
+                        map,
+                    );
+                }
+            }
+            StatementNode::Case(expression, body, label) => {
+                self = StatementNode::Case(
                     expression.validate(context)?,
                     Box::new(body.validate(context)?),
                     label,
                 )
             }
-            StatementNode::Case(expression, body) => {
-                self = StatementNode::Case(
-                    expression.validate(context)?,
-                    Box::new(body.validate(context)?),
-                )
-            }
-            StatementNode::Default(body) => {
-                self = StatementNode::Default(Box::new(body.validate(context)?))
+            StatementNode::Default(body, label) => {
+                self = StatementNode::Default(Box::new(body.validate(context)?), label)
             }
         }
         Ok(self)
@@ -240,18 +247,146 @@ impl StatementNode {
         Ok(self)
     }
 
-    fn enter_loop(context: &mut ValidateContext) -> Option<String> {
+    fn label_loops(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+        match self {
+            StatementNode::Break(label) => {
+                self = StatementNode::Break(Some(
+                    label
+                        .or(context.current_enclosing_loop_name_for_break.clone())
+                        .ok_or::<Box<dyn Error>>("Break is not inside a loop or switch".into())?,
+                ))
+            }
+            StatementNode::Continue(label) => {
+                self = StatementNode::Continue(Some(
+                    label
+                        .or(context.current_enclosing_loop_name_for_continue.clone())
+                        .ok_or::<Box<dyn Error>>("Continue is not inside a loop".into())?,
+                ))
+            }
+            StatementNode::Case(expression, body, label) => {
+                let switch_label = label
+                    .or(context.current_enclosing_loop_name_for_case.clone())
+                    .ok_or::<Box<dyn Error>>("Case is not inside a switch".into())?;
+
+                context.num_switch_labels += 1;
+                let new_case_name = format!("{}_case_{}", switch_label, context.num_switch_labels);
+
+                let already_present = context
+                    .current_switch_labels
+                    .as_mut()
+                    .ok_or("Switch label map not found")?
+                    .insert(
+                        SwitchMapKey::Expression(expression.clone()),
+                        new_case_name.clone(),
+                    );
+
+                if already_present.is_some() {
+                    return Err(
+                        format!("Duplicate case expression in switch: {:?}", expression).into(),
+                    );
+                }
+
+                self = StatementNode::Case(expression, body, Some(new_case_name))
+            }
+            StatementNode::Default(body, label) => {
+                let switch_label = label
+                    .or(context.current_enclosing_loop_name_for_case.clone())
+                    .ok_or::<Box<dyn Error>>("Default is not inside a switch".into())?;
+
+                let new_name = format!("{}_default", switch_label);
+
+                let already_present = context
+                    .current_switch_labels
+                    .as_mut()
+                    .ok_or("Switch label map not found")?
+                    .insert(SwitchMapKey::Default, new_name.clone());
+
+                if already_present.is_some() {
+                    return Err("Duplicate default in switch".into());
+                }
+
+                self = StatementNode::Default(body, Some(new_name))
+            }
+            _ => {}
+        };
+        Ok(self)
+    }
+
+    fn validate_constant_cases(
+        mut self,
+        _context: &mut ValidateContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        if let StatementNode::Case(expression, body, label) = self {
+            if let ExpressionNode::IntegerConstant(i) = expression {
+                self = StatementNode::Case(ExpressionNode::IntegerConstant(i), body, label);
+                Ok(self)
+            } else {
+                Err(format!("Case expression must be constant, got {:?}", expression).into())
+            }
+        } else {
+            Ok(self)
+        }
+    }
+
+    fn enter_loop(context: &mut ValidateContext) -> (Option<String>, Option<String>) {
         context.num_loops += 1;
         let new_loops_name = format!("loop_{}", context.num_loops);
 
-        let previous_loop_name = context.current_enclosing_loop_name.clone();
-        context.current_enclosing_loop_name = Some(new_loops_name);
+        let previous_loop_name_for_break = context.current_enclosing_loop_name_for_break.clone();
+        context.current_enclosing_loop_name_for_break = Some(new_loops_name.clone());
 
-        previous_loop_name
+        let previous_loop_name_for_continue =
+            context.current_enclosing_loop_name_for_continue.clone();
+        context.current_enclosing_loop_name_for_continue = Some(new_loops_name);
+
+        (
+            previous_loop_name_for_break,
+            previous_loop_name_for_continue,
+        )
     }
 
-    fn leave_loop(previous_name: Option<String>, context: &mut ValidateContext) {
-        context.current_enclosing_loop_name = previous_name;
+    fn enter_switch(
+        context: &mut ValidateContext,
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Option<HashMap<SwitchMapKey, String>>,
+    ) {
+        context.num_switches += 1;
+        let new_switch_name = format!("switch_{}", context.num_switches);
+
+        let previous_loop_name_for_break = context.current_enclosing_loop_name_for_break.clone();
+        context.current_enclosing_loop_name_for_break = Some(new_switch_name.clone());
+
+        let previous_loop_name_for_case = context.current_enclosing_loop_name_for_case.clone();
+        context.current_enclosing_loop_name_for_case = Some(new_switch_name);
+
+        let previous_switch_labels = context.current_switch_labels.clone();
+        context.current_switch_labels = Some(HashMap::new());
+
+        (
+            previous_loop_name_for_break,
+            previous_loop_name_for_case,
+            previous_switch_labels,
+        )
+    }
+
+    fn leave_loop(previous_names: (Option<String>, Option<String>), context: &mut ValidateContext) {
+        context.current_enclosing_loop_name_for_break = previous_names.0;
+        context.current_enclosing_loop_name_for_continue = previous_names.1;
+    }
+
+    fn leave_switch(
+        previous_names: (
+            Option<String>,
+            Option<String>,
+            Option<HashMap<SwitchMapKey, String>>,
+        ),
+        context: &mut ValidateContext,
+    ) {
+        context.current_enclosing_loop_name_for_break = previous_names.0;
+        context.current_enclosing_loop_name_for_case = previous_names.1;
+        context.current_switch_labels = previous_names.2;
     }
 }
 

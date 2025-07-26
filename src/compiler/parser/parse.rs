@@ -401,6 +401,7 @@ impl Parse for StatementNode {
                     expression,
                     Box::new(StatementNode::parse(tokens, context)?),
                     None,
+                    None,
                 ))
             }
             Token::KeywordCase => {
@@ -410,14 +411,16 @@ impl Parse for StatementNode {
                 Ok(StatementNode::Case(
                     expression,
                     Box::new(StatementNode::parse(tokens, context)?),
+                    None,
                 ))
             }
             Token::KeywordDefault => {
                 expect(tokens, Token::KeywordDefault)?;
                 expect(tokens, Token::Colon)?;
-                Ok(StatementNode::Default(Box::new(StatementNode::parse(
-                    tokens, context,
-                )?)))
+                Ok(StatementNode::Default(
+                    Box::new(StatementNode::parse(tokens, context)?),
+                    None,
+                ))
             }
             _ => {
                 match (
