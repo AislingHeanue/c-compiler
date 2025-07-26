@@ -36,7 +36,7 @@ tacky)
 codegen)
 	bash -c "$binary $file --codegen"
 	;;
-all)
+run)
 	output_name=${file%.c}
 	bash -c "$binary $file"
 	# Run the outputted binary (if it exists)

@@ -4,7 +4,8 @@ use itertools::process_results;
 
 use crate::compiler::parser::{
     BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
-    FunctionDeclaration, ProgramNode, StatementNode, UnaryOperatorNode, VariableDeclaration,
+    FunctionDeclaration, ProgramNode, StatementNode, SwitchMapKey, UnaryOperatorNode,
+    VariableDeclaration,
 };
 
 use super::{
@@ -267,9 +268,62 @@ impl Convert for StatementNode {
 
                 Ok(instructions)
             }
-            StatementNode::Switch(_, _, _, _) => todo!(),
-            StatementNode::Case(_, _, _) => todo!(),
-            StatementNode::Default(_, _) => todo!(),
+            StatementNode::Switch(expression, body, label, map) => {
+                let mut label_map = map.ok_or::<Box<dyn Error>>("Switch missing map".into())?;
+                let this_name = label.ok_or::<Box<dyn Error>>("Switch missing label".into())?;
+                let last_jump = match label_map.remove(&SwitchMapKey::Default) {
+                    Some(name) => BirdsInstructionNode::Jump(name),
+                    None => BirdsInstructionNode::Jump(format!("break_{}", this_name)),
+                };
+
+                let (mut instructions, new_src) = expression.convert(context)?;
+
+                context.last_stack_number += 1;
+                let new_tmp_results =
+                    BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
+
+                for (k, v) in label_map {
+                    if let SwitchMapKey::Expression(e) = k {
+                        let (mut instructions_from_expression, result) = e.convert(context)?;
+                        instructions.0.append(&mut instructions_from_expression.0);
+                        instructions.0.append(&mut vec![
+                            BirdsInstructionNode::Binary(
+                                BirdsBinaryOperatorNode::Equal,
+                                new_src.clone(),
+                                result,
+                                new_tmp_results.clone(),
+                            ),
+                            BirdsInstructionNode::JumpNotZero(new_tmp_results.clone(), v.clone()),
+                        ])
+                    } else {
+                        return Err(format!("Unexpected key in switch case map: {:?}", k).into());
+                    }
+                }
+                instructions.0.push(last_jump);
+
+                instructions.0.append(&mut body.convert(context)?.0);
+                instructions
+                    .0
+                    .push(BirdsInstructionNode::Label(format!("break_{}", this_name)));
+
+                Ok(instructions)
+            }
+            StatementNode::Case(_, statement, label) => {
+                let mut instructions = BirdsInstructions(vec![BirdsInstructionNode::Label(
+                    label.ok_or("Case missing label")?,
+                )]);
+                instructions.0.append(&mut statement.convert(context)?.0);
+
+                Ok(instructions)
+            }
+            StatementNode::Default(statement, label) => {
+                let mut instructions = BirdsInstructions(vec![BirdsInstructionNode::Label(
+                    label.ok_or("Default missing label")?,
+                )]);
+                instructions.0.append(&mut statement.convert(context)?.0);
+
+                Ok(instructions)
+            }
         }
     }
 }
