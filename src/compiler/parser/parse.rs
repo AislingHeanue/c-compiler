@@ -11,6 +11,7 @@ use std::{
 };
 
 fn expect(expected: Token, input: Token) -> Result<(), Box<dyn Error>> {
+    // println!("{:?}", expected);
     if discriminant(&expected) != discriminant(&input) {
         return Err(format!(
             "Unexpected token, got: {:?}, expecting {:?}",
@@ -156,7 +157,10 @@ impl Parse for FunctionDeclaration {
         )?;
         expect(Token::CloseParen, read(tokens)?)?;
 
-        match read(tokens)? {
+        match tokens
+            .front()
+            .ok_or("Ran out of tokens in function declaration")?
+        {
             Token::SemiColon => Ok(FunctionDeclaration {
                 out_type: Type::Integer,
                 name,
@@ -164,6 +168,7 @@ impl Parse for FunctionDeclaration {
                 body: None,
             }),
             Token::OpenBrace => {
+                expect(Token::OpenBrace, read(tokens)?)?;
                 let body = Block::parse(
                     &mut read_until_match(tokens, Token::OpenBrace, Token::CloseBrace, true)?,
                     context,
@@ -177,6 +182,7 @@ impl Parse for FunctionDeclaration {
                     body: Some(body),
                 })
             }
+
             t => Err(format!("Unexpected token in function declaration: {:?}", t).into()),
         }
     }
@@ -343,10 +349,16 @@ impl Parse for VariableDeclaration {
         }
 
         context.num_variables += 1;
-        let new_name = format!("{}:{}", name, context.num_variables);
-        context
-            .current_scope_variables
-            .insert(name.to_string(), new_name.clone());
+        let new_name;
+        if context.do_not_validate {
+            new_name = name.clone();
+        } else {
+            new_name = format!("{}:{}", name, context.num_variables);
+            context
+                .current_scope_variables
+                .insert(name, new_name.clone());
+        }
+
         match read(tokens)? {
             Token::SemiColon => Ok(VariableDeclaration {
                 variable_type,
@@ -365,7 +377,7 @@ impl Parse for VariableDeclaration {
                     init: Some(expression),
                 })
             }
-            t => Err(format!("Unexpected token in declaration of {}: {:?}", name, t).into()),
+            t => Err(format!("Unexpected token in declaration of {}: {:?}", new_name, t).into()),
         }
     }
 }
@@ -485,6 +497,39 @@ impl Parse for StatementNode {
                 expect(Token::KeywordContinue, read(tokens)?)?;
                 expect(Token::SemiColon, read(tokens)?)?;
                 Ok(StatementNode::Continue(None))
+            }
+            Token::KeywordSwitch => {
+                expect(Token::KeywordSwitch, read(tokens)?)?;
+                expect(Token::OpenParen, read(tokens)?)?;
+                let expression = ExpressionNode::parse(
+                    &mut read_until_match(tokens, Token::OpenParen, Token::CloseParen, false)?,
+                    context,
+                )?;
+                expect(Token::CloseParen, read(tokens)?)?;
+                Ok(StatementNode::Switch(
+                    expression,
+                    Box::new(StatementNode::parse(tokens, context)?),
+                    None,
+                ))
+            }
+            Token::KeywordCase => {
+                expect(Token::KeywordCase, read(tokens)?)?;
+                let expression = ExpressionNode::parse(
+                    &mut read_until_token(tokens, vec![Token::Colon], false, false)?,
+                    context,
+                )?;
+                expect(Token::Colon, read(tokens)?)?;
+                Ok(StatementNode::Case(
+                    expression,
+                    Box::new(StatementNode::parse(tokens, context)?),
+                ))
+            }
+            Token::KeywordDefault => {
+                expect(Token::KeywordDefault, read(tokens)?)?;
+                expect(Token::Colon, read(tokens)?)?;
+                Ok(StatementNode::Default(Box::new(StatementNode::parse(
+                    tokens, context,
+                )?)))
             }
             _ => {
                 match (

@@ -81,6 +81,9 @@ pub enum StatementNode {
         Box<StatementNode>,
         Option<String>,
     ),
+    Switch(ExpressionNode, Box<StatementNode>, Option<String>),
+    Case(ExpressionNode, Box<StatementNode>),
+    Default(Box<StatementNode>),
 }
 
 #[derive(Debug)]
@@ -235,5 +238,13 @@ impl DisplayContext {
         let mut s = self.clone();
         s.indent += 4;
         s
+    }
+    fn unindent(&mut self) -> DisplayContext {
+        let mut s = self.clone();
+        s.indent -= 4;
+        s
+    }
+    fn new_line_start(&self) -> String {
+        format!("\n{:indent$}", "", indent = self.indent)
     }
 }

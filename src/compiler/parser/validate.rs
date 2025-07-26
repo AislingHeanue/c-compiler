@@ -166,6 +166,22 @@ impl Validate for StatementNode {
                     StatementNode::leave_loop(previous_loop_name, context)
                 }
             }
+            StatementNode::Switch(expression, body, label) => {
+                self = StatementNode::Switch(
+                    expression.validate(context)?,
+                    Box::new(body.validate(context)?),
+                    label,
+                )
+            }
+            StatementNode::Case(expression, body) => {
+                self = StatementNode::Case(
+                    expression.validate(context)?,
+                    Box::new(body.validate(context)?),
+                )
+            }
+            StatementNode::Default(body) => {
+                self = StatementNode::Default(Box::new(body.validate(context)?))
+            }
         }
         Ok(self)
     }

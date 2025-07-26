@@ -60,6 +60,9 @@ pub enum Token {
     KeywordFor,
     KeywordBreak,
     KeywordContinue,
+    KeywordSwitch,
+    KeywordCase,
+    KeywordDefault,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -133,6 +136,9 @@ lazy_static! {
                 Token::KeywordFor => "",
                 Token::KeywordBreak => "",
                 Token::KeywordContinue => "",
+                Token::KeywordSwitch => "",
+                Token::KeywordCase => "",
+                Token::KeywordDefault => "",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -160,6 +166,9 @@ impl Token {
                 "for" => Token::KeywordFor,
                 "break" => Token::KeywordBreak,
                 "continue" => Token::KeywordContinue,
+                "switch" => Token::KeywordSwitch,
+                "case" => Token::KeywordCase,
+                "default" => Token::KeywordDefault,
                 _ => Token::Identifier(text.to_string()),
             },
             Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<usize>().unwrap()),

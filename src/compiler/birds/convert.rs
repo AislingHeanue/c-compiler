@@ -267,6 +267,9 @@ impl Convert for StatementNode {
 
                 Ok(instructions)
             }
+            StatementNode::Switch(_, _, _) => todo!(),
+            StatementNode::Case(_, _) => todo!(),
+            StatementNode::Default(_) => todo!(),
         }
     }
 }

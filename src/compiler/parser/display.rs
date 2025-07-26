@@ -25,57 +25,78 @@ impl CodeDisplay for Vec<FunctionDeclaration> {
 
 impl CodeDisplay for Block {
     fn show(&self, context: &mut DisplayContext) -> String {
-        format!("\n{:indent$}", "", indent = context.indent)
-            + &self
-                .iter()
-                .map(|item| match item {
-                    BlockItemNode::Statement(s) => s.show(context),
-                    BlockItemNode::Declaration(d) => d.show(context),
-                })
-                .collect::<Vec<String>>()
-                .join(format!("\n{:indent$}", "", indent = context.indent).as_str())
+        // "\n".to_string()
+        self.iter()
+            .map(|item| match item {
+                BlockItemNode::Statement(s) => s.show(context),
+                BlockItemNode::Declaration(d) => {
+                    context.new_line_start().to_string() + &d.show(context)
+                }
+            })
+            .collect::<Vec<String>>()
+            // .join(format!("\n{:indent$}", "", indent = context.indent).as_str())
+            .join("")
     }
 }
 
 impl CodeDisplay for StatementNode {
     fn show(&self, context: &mut DisplayContext) -> String {
-        match self {
+        let var_name = match self {
             StatementNode::Return(value) => {
-                format!("Return {}", value.show(&mut context.indent()),)
+                format!(
+                    "{}return {}",
+                    context.new_line_start(),
+                    value.show(&mut context.indent()),
+                )
             }
-            StatementNode::Expression(e) => e.show(&mut context.indent()),
+            StatementNode::Expression(e) => format!(
+                "{}{}",
+                context.new_line_start(),
+                e.show(&mut context.indent())
+            ),
             StatementNode::Pass => "pass".to_string(),
             StatementNode::If(condition, then, otherwise) => {
                 if let Some(other) = otherwise.borrow() {
                     format!(
-                        "if ({}) {} else {}",
+                        "{}if ({}) {} else {}",
+                        context.new_line_start(),
                         condition.show(&mut context.indent()),
                         then.show(context),
                         other.show(context),
                     )
                 } else {
                     format!(
-                        "if ({}) {}",
+                        "{}if ({}) {}",
+                        context.new_line_start(),
                         condition.show(&mut context.indent()),
-                        then.show(&mut context.indent()),
+                        then.show(context),
                     )
                 }
             }
             StatementNode::Label(s, statement) => {
-                format!("{}: {}", s, statement.show(context))
+                format!(
+                    "{}{}: {}",
+                    context.new_line_start(),
+                    s,
+                    statement.show(context)
+                )
             }
-            StatementNode::Goto(s) => format!("goto {}", s),
-            StatementNode::Compound(block) => format!(
-                "{{{}\n{:indent$}}}",
-                block.show(&mut context.indent()),
-                "",
-                indent = context.indent
-            ),
-            StatementNode::Break(s) => format!("break{}", s.show(context)),
+            StatementNode::Goto(s) => format!("{}goto {}", context.new_line_start(), s),
+            StatementNode::Compound(block) => {
+                format!(
+                    "{{{}{}}}",
+                    block.show(&mut context.indent()),
+                    context.new_line_start()
+                )
+            }
+            StatementNode::Break(s) => {
+                format!("{}break{}", context.new_line_start(), s.show(context))
+            }
             StatementNode::Continue(s) => format!("continue{}", s.show(context)),
             StatementNode::While(expression, body, label) => {
                 format!(
-                    "while{} ({}) {}",
+                    "{}while{} ({}) {}",
+                    context.new_line_start(),
                     label.show(context),
                     expression.show(&mut context.indent()),
                     body.show(&mut context.indent())
@@ -83,7 +104,8 @@ impl CodeDisplay for StatementNode {
             }
             StatementNode::DoWhile(body, expression, label) => {
                 format!(
-                    "do{} {} while ({})",
+                    "{}do{} {} while ({})",
+                    context.new_line_start(),
                     label.show(context),
                     expression.show(&mut context.indent()),
                     body.show(&mut context.indent())
@@ -91,15 +113,45 @@ impl CodeDisplay for StatementNode {
             }
             StatementNode::For(init, cond, post, body, label) => {
                 format!(
-                    "for{}({};{};{}) {}",
+                    "{}for{}({}; {}; {}) {}",
+                    context.new_line_start(),
                     label.show(context),
                     init.show(&mut context.indent()),
                     cond.show(&mut context.indent()),
                     post.show(&mut context.indent()),
-                    body.show(&mut context.indent())
+                    body.show(context)
                 )
             }
-        }
+            StatementNode::Switch(expression, body, label) => format!(
+                "{}switch{}({}) {}",
+                context.new_line_start(),
+                label.show(context),
+                expression.show(&mut context.indent()),
+                body.show(context)
+            ),
+            StatementNode::Case(expression, statement) => {
+                *context = context.unindent();
+                let out = format!(
+                    "{}case {}:{}",
+                    context.new_line_start(),
+                    expression.show(context),
+                    statement.show(&mut context.indent()),
+                );
+                *context = context.indent();
+                out
+            }
+            StatementNode::Default(statement) => {
+                *context = context.unindent();
+                let out = format!(
+                    "{}default:{}",
+                    context.new_line_start(),
+                    statement.show(&mut context.indent()),
+                );
+                *context = context.indent();
+                out
+            }
+        };
+        var_name
     }
 }
 
@@ -212,7 +264,7 @@ impl CodeDisplay for ExpressionNode {
                     right.show(&mut context.indent())
                 )
             }
-            ExpressionNode::Var(s) => format!("Var({})", s),
+            ExpressionNode::Var(s) => s.to_string(),
             ExpressionNode::Assignment(l, r) => {
                 format!("{} = {}", l.show(context), r.show(context))
             }
