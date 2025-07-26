@@ -95,12 +95,15 @@ impl Parse for FunctionDeclaration {
             .front()
             .ok_or("Ran out of tokens in function declaration")?
         {
-            Token::SemiColon => Ok(FunctionDeclaration {
-                out_type: Type::Integer,
-                name,
-                params,
-                body: None,
-            }),
+            Token::SemiColon => {
+                expect(tokens, Token::SemiColon)?;
+                Ok(FunctionDeclaration {
+                    out_type: Type::Integer,
+                    name,
+                    params,
+                    body: None,
+                })
+            }
             Token::OpenBrace => {
                 let body = Block::parse(tokens, context)?;
 
