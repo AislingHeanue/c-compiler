@@ -91,10 +91,7 @@ impl Parse for FunctionDeclaration {
         let params = FunctionDeclaration::parse_params(tokens, context)?;
         expect(tokens, Token::CloseParen)?;
 
-        match tokens
-            .front()
-            .ok_or("Ran out of tokens in function declaration")?
-        {
+        match peek(tokens)? {
             Token::SemiColon => {
                 expect(tokens, Token::SemiColon)?;
                 Ok(FunctionDeclaration {
@@ -189,7 +186,7 @@ impl Parse for BlockItemNode {
         if tokens.is_empty() {
             return Err("Block item has no tokens".into());
         }
-        match tokens.front().unwrap() {
+        match peek(tokens)? {
             Token::KeywordInt => Ok(BlockItemNode::Declaration(DeclarationNode::parse(
                 tokens, context,
             )?)),
@@ -205,7 +202,7 @@ impl Parse for ForInitialiserNode {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        match tokens.front().unwrap() {
+        match peek(tokens)? {
             Token::KeywordInt => Ok(ForInitialiserNode::Declaration(VariableDeclaration::parse(
                 tokens, context,
             )?)),
@@ -310,7 +307,7 @@ impl Parse for StatementNode {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        match tokens.front().ok_or("Statement has no tokens")? {
+        match peek(tokens)? {
             Token::KeywordReturn => {
                 expect(tokens, Token::KeywordReturn)?;
                 let expression = ExpressionNode::parse(tokens, context)?;
@@ -323,8 +320,8 @@ impl Parse for StatementNode {
                 let condition = ExpressionNode::parse(tokens, context)?;
                 expect(tokens, Token::CloseParen)?;
                 let then = StatementNode::parse(tokens, context)?;
-                let otherwise = match tokens.front() {
-                    Some(Token::KeywordElse) => {
+                let otherwise = match peek(tokens)? {
+                    Token::KeywordElse => {
                         expect(tokens, Token::KeywordElse)?;
                         Some(StatementNode::parse(tokens, context)?)
                     }
@@ -425,26 +422,26 @@ impl Parse for StatementNode {
                     None,
                 ))
             }
-            _ => {
-                match (
-                    tokens.front().unwrap().clone(),
-                    tokens.get(1).ok_or("Statement has only one token")?,
-                ) {
-                    (Token::Identifier(s), Token::Colon) => {
-                        expect(tokens, Token::Identifier("".to_string()))?;
-                        expect(tokens, Token::Colon)?;
-                        Ok(StatementNode::Label(
-                            s.to_string(),
-                            Box::new(StatementNode::parse(tokens, context)?),
-                        ))
-                    }
-                    _ => {
-                        let expression = ExpressionNode::parse(tokens, context)?;
-                        expect(tokens, Token::SemiColon)?;
-                        Ok(StatementNode::Expression(expression))
-                    }
+            _ => match (
+                peek(tokens)?,
+                tokens
+                    .get(1)
+                    .ok_or::<Box<dyn Error>>("Statement node only has one token".into())?,
+            ) {
+                (Token::Identifier(s), Token::Colon) => {
+                    expect(tokens, Token::Identifier("".to_string()))?;
+                    expect(tokens, Token::Colon)?;
+                    Ok(StatementNode::Label(
+                        s.to_string(),
+                        Box::new(StatementNode::parse(tokens, context)?),
+                    ))
                 }
-            }
+                _ => {
+                    let expression = ExpressionNode::parse(tokens, context)?;
+                    expect(tokens, Token::SemiColon)?;
+                    Ok(StatementNode::Expression(expression))
+                }
+            },
         }
     }
 }
@@ -484,15 +481,11 @@ impl ExpressionNode {
             return Ok(None);
         }
         let mut left = maybe_left.unwrap();
-        while let Some(precedence) = BinaryOperatorNode::precedence(tokens.front()) {
+        while let Some(precedence) = BinaryOperatorNode::precedence(tokens)? {
             if precedence < level {
                 break;
             }
-            let t = tokens
-                .front()
-                .ok_or::<Box<dyn Error>>("Ran out of tokens parsing expression".into())?
-                .clone();
-            match t {
+            match peek(tokens)? {
                 Token::Assignment
                 | Token::AddAssign
                 | Token::SubtractAssign
@@ -507,7 +500,7 @@ impl ExpressionNode {
                     let operator_token = read(tokens)?;
                     let right =
                         ExpressionNode::parse_with_level(tokens, context, precedence, false)?;
-                    left = if let Token::Assignment = t {
+                    left = if let Token::Assignment = operator_token {
                         ExpressionNode::Assignment(Box::new(left), Box::new(right.unwrap()))
                     } else {
                         let operator = match operator_token {
@@ -521,7 +514,10 @@ impl ExpressionNode {
                             Token::OrAssign => BinaryOperatorNode::BitwiseOr,
                             Token::ShiftLeftAssign => BinaryOperatorNode::ShiftLeft,
                             Token::ShiftRightAssign => BinaryOperatorNode::ShiftRight,
-                            _ => unreachable!("Can't use {:?} as an assignment operator", t),
+                            _ => unreachable!(
+                                "Can't use {:?} as an assignment operator",
+                                operator_token
+                            ),
                         };
                         ExpressionNode::Assignment(
                             Box::new(left.clone()),
@@ -731,56 +727,52 @@ impl Parse for BinaryOperatorNode {
     }
 }
 impl BinaryOperatorNode {
-    fn precedence(maybe_token: Option<&Token>) -> Option<usize> {
-        if let Some(token) = maybe_token {
-            Some(match token {
-                Token::Increment => 60,
-                Token::Decrement => 60,
+    fn precedence(tokens: &mut VecDeque<Token>) -> Result<Option<usize>, Box<dyn Error>> {
+        Ok(Some(match peek(tokens)? {
+            Token::Increment => 60,
+            Token::Decrement => 60,
 
-                Token::Star => 50,
-                Token::Slash => 50,
-                Token::Percent => 50,
+            Token::Star => 50,
+            Token::Slash => 50,
+            Token::Percent => 50,
 
-                Token::Plus => 45,
-                Token::Hyphen => 45,
+            Token::Plus => 45,
+            Token::Hyphen => 45,
 
-                Token::ShiftLeft => 40,
-                Token::ShiftRight => 40,
+            Token::ShiftLeft => 40,
+            Token::ShiftRight => 40,
 
-                Token::Less => 35,
-                Token::LessEqual => 35,
-                Token::Greater => 35,
-                Token::GreaterEqual => 35,
+            Token::Less => 35,
+            Token::LessEqual => 35,
+            Token::Greater => 35,
+            Token::GreaterEqual => 35,
 
-                Token::Equal => 30,
-                Token::NotEqual => 30,
+            Token::Equal => 30,
+            Token::NotEqual => 30,
 
-                Token::BitwiseAnd => 25,
-                Token::BitwiseXor => 20,
-                Token::BitwiseOr => 15,
+            Token::BitwiseAnd => 25,
+            Token::BitwiseXor => 20,
+            Token::BitwiseOr => 15,
 
-                Token::And => 10,
+            Token::And => 10,
 
-                Token::Or => 5,
+            Token::Or => 5,
 
-                Token::Question => 3,
+            Token::Question => 3,
 
-                Token::Assignment => 1,
-                Token::AddAssign => 1,
-                Token::SubtractAssign => 1,
-                Token::MultiplyAssign => 1,
-                Token::DivideAssign => 1,
-                Token::ModAssign => 1,
-                Token::AndAssign => 1,
-                Token::XorAssign => 1,
-                Token::OrAssign => 1,
-                Token::ShiftLeftAssign => 1,
-                Token::ShiftRightAssign => 1,
+            Token::Assignment => 1,
+            Token::AddAssign => 1,
+            Token::SubtractAssign => 1,
+            Token::MultiplyAssign => 1,
+            Token::DivideAssign => 1,
+            Token::ModAssign => 1,
+            Token::AndAssign => 1,
+            Token::XorAssign => 1,
+            Token::OrAssign => 1,
+            Token::ShiftLeftAssign => 1,
+            Token::ShiftRightAssign => 1,
 
-                _ => return None,
-            })
-        } else {
-            None
-        }
+            _ => return Ok(None),
+        }))
     }
 }
