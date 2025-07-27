@@ -185,7 +185,7 @@ impl FunctionDeclaration {
             params.push(FunctionDeclaration::parse_param(tokens, context)?)
         }
 
-        Ok(Vec::new())
+        Ok(params)
     }
 
     fn parse_param(

@@ -41,9 +41,10 @@ pub enum DeclarationNode {
     Function(FunctionDeclaration),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Integer,
+    Function(Box<Type>, Vec<Type>),
 }
 
 #[derive(Debug)]
@@ -203,6 +204,7 @@ enum ValidationPass {
     ValidateLabels,
     LabelLoops,
     ConstantCases,
+    TypeChecking,
 }
 
 #[derive(Debug)]
@@ -221,6 +223,13 @@ struct ValidateContext {
     current_enclosing_loop_name_for_case: Option<String>,
     current_enclosing_loop_name_for_continue: Option<String>,
     current_switch_labels: Option<HashMap<SwitchMapKey, String>>,
+    types: HashMap<String, TypeInfo>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct TypeInfo {
+    t: Type,
+    is_defined: bool,
 }
 
 pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> {
@@ -230,6 +239,7 @@ pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> 
         ValidationPass::ValidateLabels,
         ValidationPass::LabelLoops,
         ValidationPass::ConstantCases,
+        ValidationPass::TypeChecking,
     ];
     let mut validate_context = ValidateContext {
         pass: passes.first().unwrap().clone(),
@@ -243,6 +253,7 @@ pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> 
         current_enclosing_loop_name_for_case: None,
         current_enclosing_loop_name_for_continue: None,
         current_switch_labels: None,
+        types: HashMap::new(),
     };
     for pass in passes {
         validate_context.pass = pass;

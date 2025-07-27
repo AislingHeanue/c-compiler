@@ -220,10 +220,19 @@ impl CodeDisplay for DeclarationNode {
 }
 
 impl CodeDisplay for Type {
-    fn show(&self, _context: &mut DisplayContext) -> String {
+    fn show(&self, context: &mut DisplayContext) -> String {
         match self {
             Type::Integer => "int".to_string(),
+            Type::Function(output, inputs) => {
+                format!("func ({}) {}", inputs.show(context), output.show(context))
+            }
         }
+    }
+}
+
+impl CodeDisplay for Vec<Type> {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        self.iter().map(|a| a.show(context)).join(", ")
     }
 }
 

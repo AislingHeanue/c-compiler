@@ -8,13 +8,13 @@ if [[ -n "$COMMENTS" ]]; then
 	binary="$binary --comments"
 fi
 
-# chapter=$1
+chapter=$1
 stage=$2
 name=$(echo "$3" | cut -d. -f1)
 
-file=$(find "$root_test_path/tests/" -mindepth 3 -maxdepth 4 -name "$name.c")
+file=$(find "$root_test_path/tests/chapter_$chapter" -mindepth 2 -maxdepth 3 -name "$name.c")
 
-if [ -z $file ]; then
+if [[ -z $file ]]; then
 	echo file not found
 	exit 1
 fi
@@ -26,7 +26,7 @@ lex)
 	;;
 parse)
 	# Pretty print the output tree as something like C.
-	bash -c "$binary $file --validate > out && bat -l c < out; rm out"
+	bash -c "$binary $file --parse > out && bat -l c < out; rm out"
 	;;
 validate)
 	# Pretty print the output tree as something like C.
