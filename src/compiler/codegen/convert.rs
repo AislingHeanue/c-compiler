@@ -1,16 +1,13 @@
 use crate::compiler::birds::{
-    BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsProgramNode, BirdsUnaryOperatorNode,
-    BirdsValueNode,
+    BirdsBinaryOperatorNode, BirdsFunctionNode, BirdsInstructionNode, BirdsProgramNode,
+    BirdsUnaryOperatorNode, BirdsValueNode,
 };
 use itertools::process_results;
-use std::{
-    collections::{HashMap, VecDeque},
-    error::Error,
-};
+use std::{cmp::min, collections::HashMap, error::Error};
 
 use super::{
-    BinaryOperator, ConditionCode, Convert, ConvertContext, DisplayContext, ExtraStrings, Function,
-    Instruction, Instructions, Operand, Program, Register, UnaryOperator,
+    BinaryOperator, ConditionCode, Convert, ConvertContext, DisplayContext, Function, Instruction,
+    Operand, Program, Register, UnaryOperator, FUNCTION_PARAM_REGISTERS,
 };
 
 struct StackContext {
@@ -27,56 +24,71 @@ impl Convert for Program {
         config: &mut ConvertContext,
     ) -> Result<Self, Box<dyn Error>> {
         Ok(Program {
-            function: Function {
-                header: if config.comments {
-                    ExtraStrings(vec![
-                        "# make the function name accessible globally".to_string(),
-                        format!(".globl {}", parsed.function.name),
-                    ])
-                } else {
-                    ExtraStrings(vec![format!(".globl {}", parsed.function.name)])
-                },
-                name: parsed.function.name,
-                instructions: Instructions::convert(parsed.function.instructions, config)?,
-            },
-            footer: if config.is_linux {
-                // linux security thing: tell the program we do not need the stack to be
-                // executable.
-                if config.comments {
-                    ExtraStrings(vec![
-                        "# Tell the program we don't need an executable stack".to_string(),
-                        ".section .note.GNU-stack,\"\",@progbits".to_string(),
-                    ])
-                } else {
-                    ExtraStrings(vec![".section .note.GNU-stack,\"\",@progbits".to_string()])
-                }
-            } else {
-                ExtraStrings(Vec::new())
-            },
+            body: Vec::<Function>::convert(parsed.body, config)?,
             displaying_context: DisplayContext {
                 comments: config.comments,
                 indent: 0,
                 word_length_bytes: 4,
+                is_linux: config.is_linux,
                 is_mac: config.is_mac,
+                types: config.types.clone(),
             },
         })
     }
 }
 
-impl Convert for Instructions {
-    type Input = Vec<BirdsInstructionNode>;
+impl Convert for Vec<Function> {
+    type Input = Vec<BirdsFunctionNode>;
     type Output = Self;
+
     fn convert(
-        input: Vec<BirdsInstructionNode>,
+        parsed: Self::Input,
         config: &mut ConvertContext,
-    ) -> Result<Instructions, Box<dyn Error>> {
+    ) -> Result<Self::Output, Box<dyn Error>> {
+        process_results(
+            parsed
+                .into_iter()
+                .map(|function| Function::convert(function, config)),
+            |iter| iter.collect(),
+        )
+    }
+}
+
+impl Convert for Function {
+    type Input = BirdsFunctionNode;
+    type Output = Self;
+
+    fn convert(
+        parsed: Self::Input,
+        config: &mut ConvertContext,
+    ) -> Result<Self::Output, Box<dyn Error>> {
+        let mut instructions: Vec<Instruction> = Vec::new();
+
+        // ZEROTH PASS: Copy all the params out of registers onto the stack.
+        let params = parsed.params;
+        for (i, param) in params.iter().enumerate() {
+            if i < 6 {
+                instructions.push(Instruction::Mov(
+                    Operand::Reg(FUNCTION_PARAM_REGISTERS[i].clone()),
+                    Operand::MockReg(param.to_string()),
+                ));
+            } else {
+                let unsigned_i: i32 = i.try_into().unwrap();
+                instructions.push(Instruction::Mov(
+                    Operand::Stack(8 * (unsigned_i - 4)), // +24 as in, this is copying from the CALLER's frame
+                    Operand::MockReg(param.to_string()),
+                ));
+            }
+        }
+
         // FIRST PASS: create a bunch of mock registers to be replaced with stack entries later
-        let instructions: VecDeque<Instruction> = process_results(
-            input
+        instructions.append(&mut process_results(
+            parsed
+                .instructions
                 .into_iter()
                 .map(|instruction| Instruction::convert(instruction, config)),
             |iter| iter.flatten().collect(),
-        )?;
+        )?);
 
         // SECOND PASS: replace every mock register with an entry on the stack, making sure to keep
         // a map from register names to stack locations
@@ -85,7 +97,7 @@ impl Convert for Instructions {
             stack_locations: HashMap::new(),
         };
 
-        let instructions = Instructions::update_instructions_with_context(
+        let instructions = Function::update_instructions_with_context(
             instructions,
             Instruction::replace_mock_registers,
             &mut stack_context,
@@ -93,53 +105,66 @@ impl Convert for Instructions {
 
         // THIRD PASS: use the value of current_max_pointer to add an instruction to the start of
         // the function
-        let instructions: VecDeque<Instruction> = vec![
+        let instructions: Vec<Instruction> = vec![
             // push the address of RBP to the stack (at RSP).
             Instruction::Custom("pushq %rbp".to_string()),
             // move RBP to RSP's current location.
             Instruction::Custom("movq %rsp, %rbp".to_string()),
             // allocate space for local variables in the space before RSP in the stack.
-            Instruction::AllocateStack(-stack_context.current_min_pointer),
+            Instruction::AllocateStack(
+                (-stack_context.current_min_pointer)
+                    + ((16 + stack_context.current_min_pointer) % 16),
+            ),
         ]
         .into_iter()
         .chain(instructions)
         .collect();
 
-        let instructions = Instructions::update_instructions(
-            instructions,
-            Instruction::fix_shift_operation_register,
-        );
-        let instructions = Instructions::update_instructions(
+        let instructions =
+            Function::update_instructions(instructions, Instruction::fix_shift_operation_register);
+        let instructions = Function::update_instructions(
             instructions,
             Instruction::fix_instructions_with_two_stack_entries,
         );
-        let instructions = Instructions::update_instructions(
+        let instructions = Function::update_instructions(
             instructions,
             Instruction::fix_immediate_values_in_bad_places,
         );
         let instructions =
-            Instructions::update_instructions(instructions, Instruction::fix_memory_address_as_dst);
+            Function::update_instructions(instructions, Instruction::fix_memory_address_as_dst);
 
         let instructions =
-            Instructions::update_instructions(instructions, Instruction::fix_constant_as_dst);
+            Function::update_instructions(instructions, Instruction::fix_constant_as_dst);
 
-        Ok(Instructions(instructions))
+        Ok(Function {
+            header: if config.comments {
+                vec![
+                    "# make the function name accessible globally".to_string(),
+                    format!(".globl {}", parsed.name),
+                ]
+            } else {
+                vec![format!(".globl {}", parsed.name)]
+            },
+            name: parsed.name,
+            // stack_size: -stack_context.current_min_pointer,
+            instructions,
+        })
     }
 }
 
-impl Instructions {
+impl Function {
     fn update_instructions(
-        instructions: VecDeque<Instruction>,
-        f: fn(Instruction) -> VecDeque<Instruction>,
-    ) -> VecDeque<Instruction> {
+        instructions: Vec<Instruction>,
+        f: fn(Instruction) -> Vec<Instruction>,
+    ) -> Vec<Instruction> {
         instructions.into_iter().flat_map(f).collect()
     }
 
     fn update_instructions_with_context<C>(
-        instructions: VecDeque<Instruction>,
-        f: fn(Instruction, &mut C) -> VecDeque<Instruction>,
+        instructions: Vec<Instruction>,
+        f: fn(Instruction, &mut C) -> Vec<Instruction>,
         context: &mut C,
-    ) -> VecDeque<Instruction> {
+    ) -> Vec<Instruction> {
         instructions
             .into_iter()
             .flat_map(|instruction| f(instruction, context))
@@ -149,12 +174,12 @@ impl Instructions {
 
 impl Convert for Instruction {
     type Input = BirdsInstructionNode;
-    type Output = VecDeque<Instruction>;
+    type Output = Vec<Instruction>;
 
     fn convert(
         input: BirdsInstructionNode,
         config: &mut ConvertContext,
-    ) -> Result<VecDeque<Instruction>, Box<dyn Error>> {
+    ) -> Result<Vec<Instruction>, Box<dyn Error>> {
         Ok(match input {
             BirdsInstructionNode::Return(src) => vec![
                 Instruction::Mov(Operand::convert(src, config)?, Operand::Reg(Register::AX)),
@@ -238,13 +263,64 @@ impl Convert for Instruction {
                 Instruction::JmpCondition(ConditionCode::Ne, s),
             ],
             BirdsInstructionNode::Label(s) => vec![Instruction::Label(s)],
-        }
-        .into())
+            BirdsInstructionNode::FunctionCall(name, args, dst) => {
+                let mut instructions = Vec::new();
+                let (register_args, stack_args) = split(args, 6);
+                let stack_padding: usize = if stack_args.len() % 2 == 1 { 8 } else { 0 };
+
+                if stack_padding != 0 {
+                    instructions.push(Instruction::AllocateStack(
+                        stack_padding.try_into().unwrap(),
+                    ));
+                }
+
+                for (i, arg) in register_args.iter().enumerate() {
+                    instructions.push(Instruction::Mov(
+                        Operand::convert(arg.clone(), config)?,
+                        Operand::Reg(FUNCTION_PARAM_REGISTERS[i].clone()),
+                    ));
+                }
+
+                for arg in stack_args.iter().rev() {
+                    let converted_arg = Operand::convert(arg.clone(), config)?;
+                    if !matches!(converted_arg, Operand::Reg(_) | Operand::Imm(_)) {
+                        instructions.push(Instruction::Mov(
+                            converted_arg.clone(),
+                            Operand::Reg(Register::AX),
+                        ));
+                        instructions.push(Instruction::Push(Operand::Reg(Register::AX)));
+                    } else {
+                        instructions.push(Instruction::Push(converted_arg));
+                    }
+                }
+
+                instructions.push(Instruction::Call(name));
+
+                let callee_stack_size = 8 * stack_args.len() + stack_padding;
+                if callee_stack_size != 0 {
+                    instructions.push(Instruction::FreeStack(
+                        callee_stack_size.try_into().unwrap(),
+                    ));
+                }
+                instructions.push(Instruction::Mov(
+                    Operand::Reg(Register::AX),
+                    Operand::convert(dst.clone(), config)?,
+                ));
+
+                instructions
+            }
+        })
     }
 }
 
+fn split<T>(vec: Vec<T>, index: usize) -> (Vec<T>, Vec<T>) {
+    let mut right = vec;
+    let left = right.drain(..min(index, right.len())).collect();
+    (left, right)
+}
+
 impl Instruction {
-    fn replace_mock_registers(mut self, context: &mut StackContext) -> VecDeque<Instruction> {
+    fn replace_mock_registers(mut self, context: &mut StackContext) -> Vec<Instruction> {
         match self {
             Instruction::Mov(ref mut src, ref mut dst) => {
                 src.replace_mock_register(context);
@@ -274,11 +350,16 @@ impl Instruction {
             Instruction::AllocateStack(_) => {}
             Instruction::Ret => {}
             Instruction::Custom(_) => {}
+            Instruction::FreeStack(_) => {}
+            Instruction::Push(ref mut src) => {
+                src.replace_mock_register(context);
+            }
+            Instruction::Call(_) => {}
         };
-        vec![self].into()
+        vec![self]
     }
 
-    fn fix_instructions_with_two_stack_entries(self) -> VecDeque<Instruction> {
+    fn fix_instructions_with_two_stack_entries(self) -> Vec<Instruction> {
         match self {
             Instruction::Mov(Operand::Stack(src), Operand::Stack(dst)) => vec![
                 Instruction::Mov(Operand::Stack(src), Operand::Reg(Register::R10)),
@@ -294,10 +375,9 @@ impl Instruction {
             ],
             _ => vec![self],
         }
-        .into()
     }
 
-    fn fix_immediate_values_in_bad_places(self) -> VecDeque<Instruction> {
+    fn fix_immediate_values_in_bad_places(self) -> Vec<Instruction> {
         match self {
             Instruction::Idiv(Operand::Imm(value)) => vec![
                 Instruction::Mov(
@@ -309,10 +389,9 @@ impl Instruction {
             ],
             _ => vec![self],
         }
-        .into()
     }
 
-    fn fix_memory_address_as_dst(self) -> VecDeque<Instruction> {
+    fn fix_memory_address_as_dst(self) -> Vec<Instruction> {
         match self {
             Instruction::Binary(BinaryOperator::Mult, src, Operand::Stack(value)) => vec![
                 Instruction::Mov(Operand::Stack(value), Operand::Reg(Register::R11)),
@@ -325,10 +404,9 @@ impl Instruction {
             ],
             _ => vec![self],
         }
-        .into()
     }
 
-    fn fix_shift_operation_register(self) -> VecDeque<Instruction> {
+    fn fix_shift_operation_register(self) -> Vec<Instruction> {
         match self {
             Instruction::Binary(BinaryOperator::ShiftLeft, left, right) => {
                 vec![
@@ -352,10 +430,9 @@ impl Instruction {
             }
             _ => vec![self],
         }
-        .into()
     }
 
-    fn fix_constant_as_dst(self) -> VecDeque<Instruction> {
+    fn fix_constant_as_dst(self) -> Vec<Instruction> {
         match self {
             Instruction::Cmp(left, Operand::Imm(value)) => vec![
                 Instruction::Mov(Operand::Imm(value), Operand::Reg(Register::R11)),
@@ -363,7 +440,6 @@ impl Instruction {
             ],
             _ => vec![self],
         }
-        .into()
     }
 }
 

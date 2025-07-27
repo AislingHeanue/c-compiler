@@ -18,32 +18,39 @@ impl Convert for ProgramNode {
 
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         Ok(BirdsProgramNode {
-            function: process_results(
+            body: process_results(
                 self.functions.into_iter().map(|f| f.convert(context)),
-                // TODO: multiple functions
-                |mut iter| iter.next().unwrap(),
+                |iter| iter.flatten().collect(),
             )?,
         })
     }
 }
 
 impl Convert for FunctionDeclaration {
-    type Output = BirdsFunctionNode;
+    type Output = Option<BirdsFunctionNode>;
 
-    fn convert(self, context: &mut ConvertContext) -> Result<BirdsFunctionNode, Box<dyn Error>> {
+    fn convert(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Option<BirdsFunctionNode>, Box<dyn Error>> {
         let name = self.name;
-        let mut instructions: Vec<BirdsInstructionNode> = Vec::new();
+        let params = self.params.iter().map(|param| param.1.clone()).collect();
         if let Some(body) = self.body {
-            instructions = body.convert(context)?;
-            // add an extra "return 0" at the end because the C standard dictates that if main() exits
+            let mut instructions = body.convert(context)?;
+            // add an extra "" at the end because the C standard dictates that if main() exits
             // without a return statement, then it must actually return 0. If a return statement is
             // otherwise present, this instruction will never be run (dead code).
             instructions.push(BirdsInstructionNode::Return(
                 BirdsValueNode::IntegerConstant(0),
             ));
+            Ok(Some(BirdsFunctionNode {
+                name,
+                params,
+                instructions,
+            }))
+        } else {
+            Ok(None)
         }
-
-        Ok(BirdsFunctionNode { name, instructions })
     }
 }
 
@@ -67,7 +74,11 @@ impl Convert for DeclarationNode {
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         match self {
             DeclarationNode::Variable(v) => Ok(v.convert(context)?),
-            DeclarationNode::Function(_f) => todo!(),
+            // function declaration at the top scope does not use this path, since it is read
+            // directly in ProgramNode.
+            // function declarations without a body do not emit instructions, so this branch is
+            // ignored entirely.
+            DeclarationNode::Function(_f) => Ok(Vec::new()),
         }
     }
 }
@@ -205,13 +216,12 @@ impl Convert for StatementNode {
                     "start_{}",
                     this_loop_label
                 )));
-                let (mut instructions_from_condition, new_condition_option) =
-                    cond.convert(context)?;
-                instructions.append(&mut instructions_from_condition);
+                let new_condition_option = cond.convert(context)?;
                 //only check the condition... if the condition was specified
-                if let Some(new_condition) = new_condition_option {
+                if let Some(mut new_condition) = new_condition_option {
+                    instructions.append(&mut new_condition.0);
                     instructions.push(BirdsInstructionNode::JumpZero(
-                        new_condition,
+                        new_condition.1,
                         format!("break_{}", this_loop_label),
                     ));
                 }
@@ -224,8 +234,10 @@ impl Convert for StatementNode {
                     "continue_{}",
                     this_loop_label
                 )));
-                let (mut instructions_from_post, _) = post.convert(context)?;
-                instructions.append(&mut instructions_from_post);
+                let maybe_post = post.convert(context)?;
+                if let Some(mut post) = maybe_post {
+                    instructions.append(&mut post.0);
+                }
                 instructions.push(BirdsInstructionNode::Jump(format!(
                     "start_{}",
                     this_loop_label
@@ -303,9 +315,8 @@ impl Convert for ForInitialiserNode {
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         match self {
             ForInitialiserNode::Declaration(d) => Ok(d.convert(context)?),
-            ForInitialiserNode::Expression(optional_expression) => {
-                Ok(optional_expression.convert(context)?.0)
-            }
+            ForInitialiserNode::Expression(Some(expression)) => Ok(expression.convert(context)?.0),
+            ForInitialiserNode::Expression(None) => Ok(Vec::new()),
         }
     }
 }
@@ -328,19 +339,35 @@ impl Convert for VariableDeclaration {
     }
 }
 
-impl Convert for Option<ExpressionNode> {
-    // discard the return value of this expression, since they are only
-    // used in for loop expressions which don't need them
-    type Output = (Vec<BirdsInstructionNode>, Option<BirdsValueNode>);
+impl<T, U, V> Convert for Option<T>
+where
+    T: Convert<Output = (U, V)>,
+{
+    type Output = Option<(U, V)>;
 
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         match self {
             Some(e) => {
                 let (instructions, value) = e.convert(context)?;
-                Ok((instructions, Some(value)))
+                Ok(Some((instructions, value)))
             }
-            None => Ok((Vec::new(), None)),
+            None => Ok(None),
         }
+    }
+}
+impl Convert for Vec<ExpressionNode> {
+    type Output = (Vec<BirdsInstructionNode>, Vec<BirdsValueNode>);
+
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+        let results: Vec<(Vec<BirdsInstructionNode>, BirdsValueNode)> =
+            process_results(self.into_iter().map(|a| a.convert(context)), |iter| {
+                iter.collect()
+            })?;
+
+        let values = results.iter().map(|a| a.1.clone()).collect();
+        let instructions = results.into_iter().flat_map(|a| a.0).collect();
+
+        Ok((instructions, values))
     }
 }
 
@@ -570,7 +597,18 @@ impl Convert for ExpressionNode {
 
                 Ok((instructions, new_dst))
             }
-            ExpressionNode::FunctionCall(_, _) => todo!(),
+            ExpressionNode::FunctionCall(name, args) => {
+                let (mut instructions, values) = args.convert(context)?;
+                context.last_stack_number += 1;
+                let new_dst = BirdsValueNode::Var(format!("stack.{}", context.last_stack_number));
+                instructions.push(BirdsInstructionNode::FunctionCall(
+                    name,
+                    values,
+                    new_dst.clone(),
+                ));
+
+                Ok((instructions, new_dst))
+            }
         }
     }
 }

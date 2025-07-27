@@ -1,27 +1,23 @@
-use std::{collections::VecDeque, error::Error};
+use std::{collections::HashMap, error::Error};
 
-use super::birds::BirdsProgramNode;
+use super::{birds::BirdsProgramNode, parser::TypeInfo};
 
 mod convert;
 mod display;
 
 pub struct Program {
-    function: Function,
-    footer: ExtraStrings,
+    body: Vec<Function>,
     displaying_context: DisplayContext,
 }
 
-struct ExtraStrings(Vec<String>);
-
 struct Function {
-    header: ExtraStrings,
+    header: Vec<String>,
     name: String,
-    instructions: Instructions,
+    instructions: Vec<Instruction>,
 }
 
-struct Instructions(VecDeque<Instruction>);
-
 enum Instruction {
+    // Mov src, dst
     Mov(Operand, Operand),
     Unary(UnaryOperator, Operand), // Operand here is both the src and dst.
     // op src, dst. dst is the *first* number in the operation
@@ -40,6 +36,9 @@ enum Instruction {
     // named label to jump to. Follows different indentation rules to others.
     Label(String),
     AllocateStack(i32), // number of bytes to allocate
+    FreeStack(i32),
+    Push(Operand),
+    Call(String),
     Ret,
     Custom(String), // custom assembly strings, so I can avoid templating them in at a later stage
 }
@@ -55,11 +54,24 @@ enum Operand {
 #[derive(Clone)]
 enum Register {
     AX, // eax or rax
+    CX,
     DX, // edx or rdx
+    DI,
+    SI,
+    R8,
+    R9,
     R10,
     R11,
-    CX,
 }
+
+static FUNCTION_PARAM_REGISTERS: [Register; 6] = [
+    Register::DI,
+    Register::SI,
+    Register::DX,
+    Register::CX,
+    Register::R8,
+    Register::R9,
+];
 
 #[derive(Clone)]
 enum UnaryOperator {
@@ -104,6 +116,7 @@ pub struct ConvertContext {
     comments: bool,
     is_mac: bool,
     is_linux: bool,
+    types: HashMap<String, TypeInfo>,
 }
 
 trait CodeDisplay {
@@ -114,26 +127,32 @@ trait CodeDisplay {
 pub struct DisplayContext {
     comments: bool,
     indent: usize,
+    is_linux: bool,
     is_mac: bool,
     word_length_bytes: usize,
-    // is_linux: bool,
+    types: HashMap<String, TypeInfo>,
 }
 
 impl DisplayContext {
-    fn indent(&mut self) -> DisplayContext {
-        let mut s = self.clone();
-        s.indent += 4;
-        s
+    fn indent(&mut self) -> &mut DisplayContext {
+        self.indent += 4;
+        self
     }
-    fn unindent(&mut self) -> DisplayContext {
-        let mut s = self.clone();
-        s.indent -= 4;
-        s
+    fn unindent(&mut self) -> &mut DisplayContext {
+        self.indent -= 4;
+        self
     }
-    fn short(&mut self) -> DisplayContext {
-        let mut s = self.clone();
-        s.word_length_bytes = 1;
-        s
+    fn short(&mut self) -> &mut DisplayContext {
+        self.word_length_bytes = 1;
+        self
+    }
+    fn regular(&mut self) -> &mut DisplayContext {
+        self.word_length_bytes = 4;
+        self
+    }
+    fn long(&mut self) -> &mut DisplayContext {
+        self.word_length_bytes = 8;
+        self
     }
 }
 
@@ -142,6 +161,7 @@ pub fn codegen(
     comments: bool,
     linux: bool,
     mac: bool,
+    types: HashMap<String, TypeInfo>,
 ) -> Result<Program, Box<dyn Error>> {
     Program::convert(
         parsed,
@@ -149,6 +169,7 @@ pub fn codegen(
             comments,
             is_linux: linux,
             is_mac: mac,
+            types,
         },
     )
 }

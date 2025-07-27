@@ -12,11 +12,18 @@ chapter=$1
 stage=$2
 name=$(echo "$3" | cut -d. -f1)
 
-file=$(find "$root_test_path/tests/chapter_$chapter" -mindepth 2 -maxdepth 3 -name "$name.c")
+first_file=$(find "$root_test_path/tests/chapter_$chapter" -mindepth 2 -maxdepth 4 -name "$name.c")
+clone_file=${first_file/.c/_client.c}
 
-if [[ -z $file ]]; then
+if [[ -z $first_file ]]; then
 	echo file not found
 	exit 1
+fi
+
+if [ -f $clone_file ]; then
+	file=$(echo "$first_file $clone_file")
+else
+	file=$first_file
 fi
 bat $file
 
@@ -39,16 +46,15 @@ codegen)
 	bash -c "$binary $file --codegen"
 	;;
 run)
-	output_name=${file%.c}
-	bash -c "$binary $file"
+	output_name=${first_file%.c}
+	result=$(bash -c "$binary $file")
 	# Run the outputted binary (if it exists)
 	$output_name
 	# Store the return code
 	result_code=$?
-
-	echo "Result of $name:"
-	echo $result_code
 	echo
+	echo "Result of $name: $result_code"
+
 	echo "Code:"
 	# Print the generated assembly code
 	bash -c "$binary $file -S" | bat -l asm --paging=never

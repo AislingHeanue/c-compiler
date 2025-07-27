@@ -7,11 +7,12 @@ mod display;
 // BIRDS: Bodacious Intermediate Representation Design Spec
 #[derive(Debug)]
 pub struct BirdsProgramNode {
-    pub function: BirdsFunctionNode,
+    pub body: Vec<BirdsFunctionNode>,
 }
 
 pub struct BirdsFunctionNode {
     pub name: String,
+    pub params: Vec<String>,
     pub instructions: Vec<BirdsInstructionNode>,
 }
 
@@ -32,6 +33,8 @@ pub enum BirdsInstructionNode {
     JumpZero(BirdsValueNode, String),
     JumpNotZero(BirdsValueNode, String),
     Label(String),
+    // name, args, dst
+    FunctionCall(String, Vec<BirdsValueNode>, BirdsValueNode),
 }
 
 #[derive(Clone, Debug)]

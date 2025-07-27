@@ -33,7 +33,7 @@ pub fn compile(
         return Ok(());
     }
 
-    let parsed = validate(parsed)?;
+    let (parsed, types) = validate(parsed)?;
     if config.only_validate {
         println!("{}", parsed);
         return Ok(());
@@ -45,7 +45,7 @@ pub fn compile(
         return Ok(());
     }
 
-    let code = codegen(birds_output, config.add_comments, IS_LINUX, IS_MAC)?;
+    let code = codegen(birds_output, config.add_comments, IS_LINUX, IS_MAC, types)?;
     if config.only_codegen {
         return Ok(());
     }

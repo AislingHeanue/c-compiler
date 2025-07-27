@@ -226,13 +226,15 @@ struct ValidateContext {
     types: HashMap<String, TypeInfo>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct TypeInfo {
-    t: Type,
-    is_defined: bool,
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct TypeInfo {
+    pub t: Type,
+    pub is_defined: bool,
 }
 
-pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> {
+pub fn validate(
+    mut parsed: ProgramNode,
+) -> Result<(ProgramNode, HashMap<String, TypeInfo>), Box<dyn Error>> {
     let passes: Vec<ValidationPass> = vec![
         ValidationPass::CheckLvalues,
         ValidationPass::ReadLabels,
@@ -260,7 +262,7 @@ pub fn validate(mut parsed: ProgramNode) -> Result<ProgramNode, Box<dyn Error>> 
         parsed = parsed.validate(&mut validate_context)?;
     }
 
-    Ok(parsed)
+    Ok((parsed, validate_context.types))
 }
 
 trait CodeDisplay {

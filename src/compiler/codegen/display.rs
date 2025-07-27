@@ -1,18 +1,44 @@
+use itertools::Itertools;
+
 use super::{
-    BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, ExtraStrings, Function,
-    Instruction, Instructions, Operand, Program, Register, UnaryOperator,
+    BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, Function, Instruction, Operand,
+    Program, Register, UnaryOperator,
 };
 use std::fmt::Display;
+
+impl<T> CodeDisplay for Vec<T>
+where
+    T: CodeDisplay,
+{
+    fn show(&self, context: &mut DisplayContext) -> String {
+        self.iter().map(|f| f.show(context)).join("\n")
+    }
+}
 
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let context = &mut self.displaying_context.clone();
-        write!(
-            f,
-            "{}\n{}\n",
-            self.function.show(context),
-            self.footer.show(&mut context.indent())
-        )
+        write!(f, "{}", self.body.show(context))?;
+        context.indent();
+        if context.is_linux {
+            if context.comments {
+                write!(
+                    f,
+                    "{}",
+                    "# Tell the program we don't need an executable stack"
+                        .to_string()
+                        .show(context)
+                )?;
+            }
+            write!(
+                f,
+                "{}",
+                ".section .note.GNU-stack,\"\",@progbits\n"
+                    .to_string()
+                    .show(context)
+            )?;
+        };
+        Ok(())
     }
 }
 
@@ -24,37 +50,26 @@ impl CodeDisplay for Function {
             self.name.clone()
         };
 
-        format!(
-            "{}\n{:indent$}{}:\n{}",
-            self.header.show(&mut context.indent()),
+        context.indent();
+        let mut out = format!("{}\n", self.header.show(context));
+        context.unindent();
+        out += format!(
+            "{:indent$}{}:\n",
             "",
             function_name,
-            self.instructions.show(&mut context.indent()),
             indent = context.indent
         )
-    }
-}
-
-impl CodeDisplay for ExtraStrings {
-    fn show(&self, context: &mut DisplayContext) -> String {
-        let mut out = format!("{:indent$}", "", indent = context.indent);
-        out += &self
-            .0
-            .join(format!("\n{:indent$}", "", indent = context.indent).as_str())
-            .to_string();
-
+        .as_str();
+        context.indent();
+        out += &self.instructions.show(context);
+        context.unindent();
         out
     }
 }
 
-impl CodeDisplay for Instructions {
+impl CodeDisplay for String {
     fn show(&self, context: &mut DisplayContext) -> String {
-        self.0
-            .iter()
-            .map(|instruction| instruction.show(context))
-            .collect::<Vec<String>>()
-            .join("\n")
-            .to_string()
+        format!("\n{:indent$}{}", "", self, indent = context.indent)
     }
 }
 
@@ -216,23 +231,59 @@ impl CodeDisplay for Instruction {
                 )
             }
             Instruction::SetCondition(c, dst) => {
-                format!(
+                context.short();
+                let out = format!(
                     "{:indent$}set{} {}",
                     "",
                     c.show(context),
-                    dst.show(&mut context.short()),
+                    dst.show(context),
                     indent = context.indent,
-                )
+                );
+                context.regular();
+                out
             }
             Instruction::Label(s) => {
-                let context = context.unindent();
+                context.unindent();
                 let label_start = if context.is_mac { "L" } else { ".L" };
-                format!(
+                let out = format!(
                     "{:indent$}{}{}:",
                     "",
                     label_start,
                     s,
                     indent = context.indent,
+                );
+                context.indent();
+                out
+            }
+            Instruction::FreeStack(num) => {
+                format!("{:indent$}addq ${}, %rsp", "", num, indent = context.indent)
+            }
+            Instruction::Push(o) => {
+                context.long();
+                let out = format!(
+                    "{:indent$}pushq {}",
+                    "",
+                    o.show(context),
+                    indent = context.indent
+                );
+                context.regular();
+                out
+            }
+            Instruction::Call(s) => {
+                let function_name = if context.is_mac {
+                    "_".to_string() + s
+                } else if context.is_linux && !context.types.get(s).unwrap().is_defined {
+                    // if a function isn't defined in this file, call it from another file (ie
+                    // externally link it)
+                    s.to_string() + "@PLT"
+                } else {
+                    s.to_string()
+                };
+                format!(
+                    "{:indent$}call {}",
+                    "",
+                    function_name,
+                    indent = context.indent
                 )
             }
         }
@@ -245,22 +296,41 @@ impl CodeDisplay for Operand {
             Operand::Imm(int) => {
                 format!("${}", int)
             }
-            Operand::Reg(reg) => if context.word_length_bytes == 1 {
-                match reg {
+            Operand::Reg(reg) => match context.word_length_bytes {
+                1 => match reg {
                     Register::AX => "%al",
-                    Register::R10 => "%r10b",
-                    Register::DX => "%dl",
-                    Register::R11 => "%r11b",
                     Register::CX => "%cl",
-                }
-            } else {
-                match reg {
+                    Register::DI => "%dil",
+                    Register::DX => "%dl",
+                    Register::SI => "%sil",
+                    Register::R8 => "%r8b",
+                    Register::R9 => "%r9b",
+                    Register::R10 => "%r10b",
+                    Register::R11 => "%r11b",
+                },
+                4 => match reg {
                     Register::AX => "%eax",
-                    Register::R10 => "%r10d",
-                    Register::DX => "%edx",
-                    Register::R11 => "%r11d",
                     Register::CX => "%ecx",
-                }
+                    Register::DI => "%edi",
+                    Register::DX => "%edx",
+                    Register::SI => "%esi",
+                    Register::R8 => "%r8d",
+                    Register::R9 => "%r9d",
+                    Register::R10 => "%r10d",
+                    Register::R11 => "%r11d",
+                },
+                8 => match reg {
+                    Register::AX => "%rax",
+                    Register::CX => "%rcx",
+                    Register::DI => "%rdi",
+                    Register::DX => "%rdx",
+                    Register::SI => "%rsi",
+                    Register::R8 => "%r8",
+                    Register::R9 => "%r9",
+                    Register::R10 => "%r10",
+                    Register::R11 => "%r11",
+                },
+                _ => panic!("Invalid word length: {}", context.word_length_bytes),
             }
             .to_string(),
             Operand::MockReg(name) => panic!(
