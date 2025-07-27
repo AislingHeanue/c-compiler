@@ -33,8 +33,8 @@ where
 
 impl Validate for ProgramNode {
     fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        self.functions = process_results(
-            self.functions.into_iter().map(|f| f.validate(context)),
+        self.declarations = process_results(
+            self.declarations.into_iter().map(|f| f.validate(context)),
             |iter| iter.collect(),
         )?;
         Ok(self)
@@ -107,7 +107,7 @@ impl Validate for VariableDeclaration {
             context.types.insert(
                 self.name.clone(),
                 TypeInfo {
-                    t: self.variable_type.clone(),
+                    t: self.out_type.clone(),
                     is_defined: false,
                 },
             );

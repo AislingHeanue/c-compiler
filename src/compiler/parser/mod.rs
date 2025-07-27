@@ -9,7 +9,7 @@ mod parse;
 mod validate;
 
 pub struct ProgramNode {
-    pub functions: Vec<FunctionDeclaration>,
+    pub declarations: Vec<DeclarationNode>,
 }
 
 #[derive(Debug)]
@@ -18,13 +18,21 @@ pub struct FunctionDeclaration {
     pub name: String,
     pub params: Vec<(Type, String)>,
     pub body: Option<Block>,
+    pub storage_class: Option<StorageClass>,
 }
 
 #[derive(Debug)]
 pub struct VariableDeclaration {
-    pub variable_type: Type,
+    pub out_type: Type,
     pub name: String,
     pub init: Option<ExpressionNode>,
+    pub storage_class: Option<StorageClass>,
+}
+
+#[derive(Debug)]
+pub enum StorageClass {
+    Static,
+    Extern,
 }
 
 pub type Block = Vec<BlockItemNode>;
@@ -170,7 +178,8 @@ struct ParseContext {
     outer_scope_identifiers: HashMap<String, (String, bool)>,
     num_variables: usize,
     do_not_validate: bool,
-    current_block_is_function_body: bool, // labels on declarations are only allowed in C23+
+    // this prevent creating an extra new scope entering function bodies
+    current_block_is_function_body: bool,
 }
 
 pub fn parse(

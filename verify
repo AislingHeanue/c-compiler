@@ -25,7 +25,7 @@ if [ -f $clone_file ]; then
 else
 	file=$first_file
 fi
-bat $file
+bat $file --paging=never
 
 case $stage in
 lex)
@@ -33,11 +33,11 @@ lex)
 	;;
 parse)
 	# Pretty print the output tree as something like C.
-	bash -c "$binary $file --parse > out && bat -l c < out; rm out"
+	bash -c "$binary $file --parse > out && bat -l c --paging=never < out || cat out; rm out"
 	;;
 validate)
 	# Pretty print the output tree as something like C.
-	bash -c "$binary $file --validate > out && bat -l c < out; rm out"
+	bash -c "$binary $file --validate > out && bat -l c --paging=never < out || cat out; rm out"
 	;;
 tacky)
 	bash -c "$binary $file --tacky"

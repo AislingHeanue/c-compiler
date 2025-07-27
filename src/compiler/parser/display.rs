@@ -12,12 +12,12 @@ impl Display for ProgramNode {
         write!(
             f,
             "{}",
-            self.functions.show(&mut DisplayContext { indent: 0 })
+            self.declarations.show(&mut DisplayContext { indent: 0 })
         )
     }
 }
 
-impl CodeDisplay for Vec<FunctionDeclaration> {
+impl CodeDisplay for Vec<DeclarationNode> {
     fn show(&self, context: &mut DisplayContext) -> String {
         self.iter().map(|f| f.show(context)).join("\n\n")
     }
@@ -169,12 +169,12 @@ impl CodeDisplay for VariableDeclaration {
         if let Some(init) = &self.init {
             format!(
                 "{} {} = {}",
-                self.variable_type.show(context),
+                self.out_type.show(context),
                 self.name,
                 init.show(&mut context.indent()),
             )
         } else {
-            format!("{} {}", self.variable_type.show(context), self.name,)
+            format!("{} {}", self.out_type.show(context), self.name,)
         }
     }
 }

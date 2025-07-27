@@ -1,6 +1,6 @@
 use super::{
     BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
-    FunctionDeclaration, Parse, ProgramNode, StatementNode, Type, UnaryOperatorNode,
+    FunctionDeclaration, Parse, ProgramNode, StatementNode, StorageClass, Type, UnaryOperatorNode,
     VariableDeclaration,
 };
 use crate::compiler::{lexer::Token, parser::ParseContext};
@@ -64,6 +64,7 @@ fn new_identifier(
 
     if !context.do_not_validate {
         if let Some((_new_name, other_is_external)) = context.current_scope_identifiers.get(&name) {
+            println!("{} and {}", other_is_external, is_external);
             if !(*other_is_external && is_external) {
                 return Err(format!(
                     "Identifier named {} already exists in the current scope",
@@ -109,61 +110,12 @@ impl Parse for ProgramNode {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        let mut functions: Vec<FunctionDeclaration> = Vec::new();
+        let mut declarations: Vec<DeclarationNode> = Vec::new();
         while !tokens.is_empty() {
-            functions.push(FunctionDeclaration::parse(tokens, context)?)
+            declarations.push(DeclarationNode::parse(tokens, context)?)
         }
 
-        Ok(ProgramNode { functions })
-    }
-}
-
-impl Parse for FunctionDeclaration {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        let out_type = Type::Integer;
-        expect(tokens, Token::KeywordInt)?;
-
-        let name = new_identifier(tokens, true, context)?;
-
-        let original_outer_scope_variables = enter_scope(context);
-
-        // resolve parameters in a new scope
-        expect(tokens, Token::OpenParen)?;
-        let params = FunctionDeclaration::parse_params(tokens, context)?;
-        expect(tokens, Token::CloseParen)?;
-
-        let output_function = match peek(tokens)? {
-            Token::SemiColon => {
-                expect(tokens, Token::SemiColon)?;
-                FunctionDeclaration {
-                    out_type,
-                    name,
-                    params,
-                    body: None,
-                }
-            }
-            Token::OpenBrace => {
-                context.current_block_is_function_body = true;
-                // parse block in a new scope (as usual)
-                let body = Block::parse(tokens, context)?;
-
-                FunctionDeclaration {
-                    out_type,
-                    name,
-                    params,
-                    body: Some(body),
-                }
-            }
-
-            t => return Err(format!("Unexpected token in function declaration: {:?}", t).into()),
-        };
-
-        leave_scope(original_outer_scope_variables, context);
-
-        Ok(output_function)
+        Ok(ProgramNode { declarations })
     }
 }
 
@@ -201,11 +153,6 @@ impl FunctionDeclaration {
 
         Ok((out_type, name))
     }
-
-    // fn get_signature(&self) -> (String, Type, Vec<Type>) {
-    //     let types: Vec<Type> = self.params.iter().map(|(t, _)| t.clone()).collect();
-    //     (self.name.clone(), self.out_type.clone(), types)
-    // }
 }
 
 impl Parse for Block {
@@ -249,9 +196,15 @@ impl Parse for BlockItemNode {
             return Err("Block item has no tokens".into());
         }
         match peek(tokens)? {
-            Token::KeywordInt => Ok(BlockItemNode::Declaration(DeclarationNode::parse(
-                tokens, context,
-            )?)),
+            Token::KeywordInt | Token::KeywordStatic | Token::KeywordExtern => {
+                let declaration = DeclarationNode::parse(tokens, context)?;
+                if let DeclarationNode::Function(ref f) = declaration {
+                    if f.body.is_some() && !context.do_not_validate {
+                        return Err("Block-scope function declaration may not have a body".into());
+                    }
+                }
+                Ok(BlockItemNode::Declaration(declaration))
+            }
             _ => Ok(BlockItemNode::Statement(StatementNode::parse(
                 tokens, context,
             )?)),
@@ -265,9 +218,14 @@ impl Parse for ForInitialiserNode {
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         match peek(tokens)? {
-            Token::KeywordInt => Ok(ForInitialiserNode::Declaration(VariableDeclaration::parse(
-                tokens, context,
-            )?)),
+            Token::KeywordInt | Token::KeywordExtern | Token::KeywordStatic => {
+                let declaration = DeclarationNode::parse(tokens, context)?;
+                if let DeclarationNode::Variable(v) = declaration {
+                    Ok(ForInitialiserNode::Declaration(v))
+                } else {
+                    Err("Unexpected function declaration in the initialiser of a for loop".into())
+                }
+            }
             _ => {
                 let expression = ForInitialiserNode::Expression(Option::<ExpressionNode>::parse(
                     tokens, context,
@@ -286,62 +244,93 @@ impl Parse for DeclarationNode {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        //read first 3 tokens to determine if it's a function()
-        if tokens.len() < 3 {
-            return Err(format!("Declaration found with fewer than 3 tokens: {:?}", tokens).into());
-        }
-        if !matches!(tokens.get(1).unwrap(), Token::Identifier(_)) {
+        let (out_type, storage_class) = <(Type, Option<StorageClass>)>::parse(tokens, context)?;
+
+        //read first 2 tokens to determine if it's a function()
+        if tokens.len() < 2 {
             return Err(format!(
-                "Second token in a declaration is not an identifier: {:?}",
+                "Declaration found with fewer than 2 tokens after specifier: {:?}",
+                tokens
+            )
+            .into());
+        }
+
+        if !matches!(peek(tokens)?, Token::Identifier(_)) {
+            return Err(format!(
+                "First token in a declaration is not an identifier: {:?}",
                 tokens.get(1).unwrap()
             )
             .into());
         }
-        match tokens.get(2).unwrap() {
-            Token::OpenParen => {
-                let local_function_declaration = FunctionDeclaration::parse(tokens, context)?;
-                if !context.do_not_validate && local_function_declaration.body.is_some() {
-                    return Err(format!(
-                        "Local function {} cannot have a body",
-                        local_function_declaration.name
-                    )
-                    .into());
-                }
-                Ok(DeclarationNode::Function(local_function_declaration))
-            }
-            _ => Ok(DeclarationNode::Variable(VariableDeclaration::parse(
-                tokens, context,
-            )?)),
-        }
-    }
-}
 
-impl Parse for VariableDeclaration {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        let variable_type = Type::Integer;
-        expect(tokens, Token::KeywordInt)?;
-
-        let name = new_identifier(tokens, false, context)?;
+        // let name = ;
+        let name_token = read(tokens)?;
 
         match read(tokens)? {
-            Token::SemiColon => Ok(VariableDeclaration {
-                variable_type,
-                name,
-                init: None,
-            }),
+            Token::OpenParen => {
+                let name = new_identifier(&mut vec![name_token].into(), true, context)?;
+                let original_outer_scope_variables = enter_scope(context);
+                let params = FunctionDeclaration::parse_params(tokens, context)?;
+                expect(tokens, Token::CloseParen)?;
+
+                let output_function = match peek(tokens)? {
+                    Token::SemiColon => {
+                        expect(tokens, Token::SemiColon)?;
+                        FunctionDeclaration {
+                            out_type,
+                            name,
+                            params,
+                            body: None,
+                            storage_class,
+                        }
+                    }
+                    Token::OpenBrace => {
+                        context.current_block_is_function_body = true;
+                        // parse block in *not* a new scope
+                        let body = Block::parse(tokens, context)?;
+
+                        FunctionDeclaration {
+                            out_type,
+                            name,
+                            params,
+                            body: Some(body),
+                            storage_class,
+                        }
+                    }
+                    t => {
+                        return Err(
+                            format!("Unexpected token parsing expression, got {:?}", t).into()
+                        )
+                    }
+                };
+                leave_scope(original_outer_scope_variables, context);
+                Ok(DeclarationNode::Function(output_function))
+            }
+            Token::SemiColon => {
+                let name = new_identifier(&mut vec![name_token].into(), false, context)?;
+                Ok(DeclarationNode::Variable(VariableDeclaration {
+                    out_type,
+                    name,
+                    init: None,
+                    storage_class,
+                }))
+            }
             Token::Assignment => {
+                let name = new_identifier(&mut vec![name_token].into(), false, context)?;
                 let expression = ExpressionNode::parse(tokens, context)?;
                 expect(tokens, Token::SemiColon)?;
-                Ok(VariableDeclaration {
-                    variable_type,
+                Ok(DeclarationNode::Variable(VariableDeclaration {
+                    out_type,
                     name,
                     init: Some(expression),
-                })
+                    storage_class,
+                }))
             }
-            t => Err(format!("Unexpected token in declaration of {}: {:?}", name, t).into()),
+            t => Err(format!(
+                "Unexpected token in declaration of {:?}: {:?}",
+                name_token, t
+            )
+            .into()),
         }
     }
 }
@@ -833,5 +822,52 @@ impl BinaryOperatorNode {
 
             _ => return Ok(None),
         }))
+    }
+}
+
+impl Parse for (Type, Option<StorageClass>) {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        _context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        // Specifiers may be one of "static", "int" or "extern"
+        // ... and there may be any non-zero amount of them
+        let mut storage_classes = Vec::new();
+        let mut types = Vec::new();
+        while matches!(
+            peek(tokens)?,
+            Token::KeywordInt | Token::KeywordStatic | Token::KeywordExtern
+        ) {
+            if matches!(peek(tokens)?, Token::KeywordInt) {
+                types.push(read(tokens)?);
+            } else {
+                storage_classes.push(read(tokens)?);
+            }
+        }
+
+        if storage_classes.len() > 1 {
+            return Err(format!(
+                "Got multiple storage classes in declaration: {:?}",
+                storage_classes
+            )
+            .into());
+        }
+
+        if types.len() != 1 {
+            return Err(format!("Incorrect number of types in declaration: {:?}", types).into());
+        }
+
+        let storage = storage_classes.first().map(|t| match t {
+            Token::KeywordStatic => StorageClass::Static,
+            Token::KeywordExtern => StorageClass::Extern,
+            _ => unreachable!(),
+        });
+
+        let this_type = match types.first().unwrap() {
+            Token::KeywordInt => Type::Integer,
+            _ => unreachable!(),
+        };
+
+        Ok((this_type, storage))
     }
 }

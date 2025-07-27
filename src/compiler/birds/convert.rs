@@ -18,10 +18,11 @@ impl Convert for ProgramNode {
 
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         Ok(BirdsProgramNode {
-            body: process_results(
-                self.functions.into_iter().map(|f| f.convert(context)),
-                |iter| iter.flatten().collect(),
-            )?,
+            body: todo!(),
+            //process_results(
+            //     self.declarations.into_iter().map(|f| f.convert(context)),
+            //     |iter| iter.flatten().collect(),
+            // )?,
         })
     }
 }

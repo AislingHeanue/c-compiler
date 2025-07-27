@@ -63,6 +63,8 @@ pub enum Token {
     KeywordSwitch,
     KeywordCase,
     KeywordDefault,
+    KeywordExtern,
+    KeywordStatic,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -139,6 +141,8 @@ lazy_static! {
                 Token::KeywordSwitch => "",
                 Token::KeywordCase => "",
                 Token::KeywordDefault => "",
+                Token::KeywordExtern => "",
+                Token::KeywordStatic => "",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -169,6 +173,8 @@ impl Token {
                 "switch" => Token::KeywordSwitch,
                 "case" => Token::KeywordCase,
                 "default" => Token::KeywordDefault,
+                "extern" => Token::KeywordExtern,
+                "static" => Token::KeywordStatic,
                 _ => Token::Identifier(text.to_string()),
             },
             Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<usize>().unwrap()),
