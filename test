@@ -37,7 +37,7 @@ for chapter_num in $(seq 1 $chapter); do
 	for i in $test_path/*; do
 
 		j=$(echo $i | rev | cut -d/ -f1 | rev)
-		output=$(echo $results | grep -o "chapter_$chapter_num/$j\(/extra_credit\)\?/[^/^\.]*" | cut -d" " -f1 | cut -d/ -f3- | uniq)
+		output=$(echo $results | grep -o "chapter_$chapter_num/$j/[^\.]*" | cut -d" " -f1 | cut -d/ -f3- | uniq)
 		if [[ -n $output ]]; then
 			if ! $chapter_banner_printed; then
 				echo ==============
@@ -50,9 +50,16 @@ for chapter_num in $(seq 1 $chapter); do
 			echo TESTS FAILED IN \"${j}\":
 			echo -------
 			if [[ -n $VERBOSE ]]; then
-				echo "$output" | xargs -I{} bat $test_path/$j/{}
+				echo "$output" | xargs -I{} bat $test_path/$j/{}.c
 			else
-				echo "$output"
+				max_num_slashes=$(echo "$output" | awk -F/ '{print NF}' | sort -n | tail -1)
+				output=$(echo "$output" | awk -F/ -v max=$max_num_slashes '{
+					slashes = "";
+					for (i=NF+1; i<=max; i++)
+						slashes = slashes "/";
+					print slashes $0
+				}')
+				printf "%s\n" "${output}" | column -t -s "/"
 			fi
 		fi
 	done
