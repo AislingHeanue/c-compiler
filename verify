@@ -2,17 +2,17 @@
 
 ### May change for other devices/languages being used ###
 root_test_path="../../nlsandler/writing-a-c-compiler-tests"
-binary="cargo run --quiet --"
+binary="target/release/c-compiler"
 ###
 if [[ -n "$COMMENTS" ]]; then
-	binary="cargo run --quiet -- --comments"
+	binary="$binary --comments"
 fi
 
-chapter=$1
+# chapter=$1
 stage=$2
 name=$(echo "$3" | cut -d. -f1)
 
-file=$(find "$root_test_path/tests/chapter_$chapter" -mindepth 2 -maxdepth 3 -name "$name.c")
+file=$(find "$root_test_path/tests/" -mindepth 3 -maxdepth 4 -name "$name.c")
 
 if [ -z $file ]; then
 	echo file not found
@@ -25,10 +25,12 @@ lex)
 	bash -c "$binary $file --lex"
 	;;
 parse)
-	bash -c "$binary $file --parse"
+	# Pretty print the output tree as something like C.
+	bash -c "$binary $file --validate > out && bat -l c < out; rm out"
 	;;
 validate)
-	bash -c "$binary $file --validate"
+	# Pretty print the output tree as something like C.
+	bash -c "$binary $file --validate > out && bat -l c < out; rm out"
 	;;
 tacky)
 	bash -c "$binary $file --tacky"

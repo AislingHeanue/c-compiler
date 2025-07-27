@@ -2,6 +2,7 @@ use super::parser::ProgramNode;
 use std::error::Error;
 
 mod convert;
+mod display;
 
 // BIRDS: Bodacious Intermediate Representation Design Spec
 #[derive(Debug)]
@@ -9,7 +10,6 @@ pub struct BirdsProgramNode {
     pub function: BirdsFunctionNode,
 }
 
-#[derive(Debug)]
 pub struct BirdsFunctionNode {
     pub name: String,
     pub instructions: Vec<BirdsInstructionNode>,

@@ -41,7 +41,7 @@ pub fn compile(
 
     let birds_output = birds(parsed)?;
     if config.only_birds {
-        println!("{:?}", birds_output);
+        println!("{:#?}", birds_output);
         return Ok(());
     }
 

@@ -38,32 +38,70 @@ fn peek(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
         .clone())
 }
 
-fn identifier_to_string(token: Token) -> Result<String, Box<dyn Error>> {
-    if let Token::Identifier(string) = token {
-        Ok(string)
+fn new_identifier(
+    tokens: &mut VecDeque<Token>,
+    is_external: bool,
+    context: &mut ParseContext,
+) -> Result<String, Box<dyn Error>> {
+    let t = read(tokens)?;
+    let name = if let Token::Identifier(string) = t {
+        Ok::<String, Box<dyn Error>>(string)
     } else {
         Err(format!(
             "Wrong token received, expected: {:?} got: {:?}",
             Token::Identifier(String::new()),
-            token
+            t
         )
         .into())
+    }?;
+
+    let new_name = if is_external || context.do_not_validate {
+        name.clone()
+    } else {
+        context.num_variables += 1;
+        format!("{}:{}", name, context.num_variables)
+    };
+
+    if !context.do_not_validate {
+        if let Some((_new_name, other_is_external)) = context.current_scope_identifiers.get(&name) {
+            if !(*other_is_external && is_external) {
+                return Err(format!(
+                    "Identifier named {} already exists in the current scope",
+                    name
+                )
+                .into());
+            }
+        }
+        // not entirely sure how this is compatible with the future type-checking step, but okay
+        context
+            .current_scope_identifiers
+            .insert(name.clone(), (new_name.clone(), is_external));
     }
+
+    Ok(new_name)
 }
 
-fn enter_scope(context: &mut ParseContext) -> HashMap<String, String> {
-    let original_outer_scope_variables = context.outer_scope_variables.clone();
+fn enter_scope(context: &mut ParseContext) -> HashMap<String, (String, bool)> {
+    // println!(
+    //     "enter {:?} {:?}",
+    //     context.outer_scope_identifiers, context.current_scope_identifiers
+    // );
+    let original_outer_scope_variables = context.outer_scope_identifiers.clone();
     context
-        .outer_scope_variables
-        .extend(context.current_scope_variables.clone());
-    context.current_scope_variables = HashMap::new();
+        .outer_scope_identifiers
+        .extend(context.current_scope_identifiers.clone());
+    context.current_scope_identifiers = HashMap::new();
 
     original_outer_scope_variables
 }
 
-fn leave_scope(previous_scope: HashMap<String, String>, context: &mut ParseContext) {
-    context.current_scope_variables = context.outer_scope_variables.clone();
-    context.outer_scope_variables = previous_scope;
+fn leave_scope(previous_scope: HashMap<String, (String, bool)>, context: &mut ParseContext) {
+    context.current_scope_identifiers = context.outer_scope_identifiers.clone();
+    context.outer_scope_identifiers = previous_scope;
+    // println!(
+    //     "leave {:?} {:?}",
+    //     context.outer_scope_identifiers, context.current_scope_identifiers
+    // );
 }
 
 impl Parse for ProgramNode {
@@ -85,35 +123,47 @@ impl Parse for FunctionDeclaration {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
+        let out_type = Type::Integer;
         expect(tokens, Token::KeywordInt)?;
-        let name = identifier_to_string(read(tokens)?)?;
+
+        let name = new_identifier(tokens, true, context)?;
+
+        let original_outer_scope_variables = enter_scope(context);
+
+        // resolve parameters in a new scope
         expect(tokens, Token::OpenParen)?;
         let params = FunctionDeclaration::parse_params(tokens, context)?;
         expect(tokens, Token::CloseParen)?;
 
-        match peek(tokens)? {
+        let output_function = match peek(tokens)? {
             Token::SemiColon => {
                 expect(tokens, Token::SemiColon)?;
-                Ok(FunctionDeclaration {
-                    out_type: Type::Integer,
+                FunctionDeclaration {
+                    out_type,
                     name,
                     params,
                     body: None,
-                })
+                }
             }
             Token::OpenBrace => {
+                context.current_block_is_function_body = true;
+                // parse block in a new scope (as usual)
                 let body = Block::parse(tokens, context)?;
 
-                Ok(FunctionDeclaration {
-                    out_type: Type::Integer,
+                FunctionDeclaration {
+                    out_type,
                     name,
                     params,
                     body: Some(body),
-                })
+                }
             }
 
-            t => Err(format!("Unexpected token in function declaration: {:?}", t).into()),
-        }
+            t => return Err(format!("Unexpected token in function declaration: {:?}", t).into()),
+        };
+
+        leave_scope(original_outer_scope_variables, context);
+
+        Ok(output_function)
     }
 }
 
@@ -140,20 +190,22 @@ impl FunctionDeclaration {
 
     fn parse_param(
         tokens: &mut VecDeque<Token>,
-        _context: &mut ParseContext,
+        context: &mut ParseContext,
     ) -> Result<(Type, String), Box<dyn Error>> {
         let out_type = match read(tokens)? {
             Token::KeywordInt => Type::Integer,
             t => return Err(format!("Invalid type in parameter: {:?}", t).into()),
         };
 
-        let name = match read(tokens)? {
-            Token::Identifier(s) => s.to_string(),
-            t => return Err(format!("Invalid name in parameter: {:?}", t).into()),
-        };
+        let name = new_identifier(tokens, false, context)?;
 
         Ok((out_type, name))
     }
+
+    // fn get_signature(&self) -> (String, Type, Vec<Type>) {
+    //     let types: Vec<Type> = self.params.iter().map(|(t, _)| t.clone()).collect();
+    //     (self.name.clone(), self.out_type.clone(), types)
+    // }
 }
 
 impl Parse for Block {
@@ -165,12 +217,22 @@ impl Parse for Block {
 
         // it's a new block it's a new scope
         // (and I'm feeling... good)
-        let original_outer_scope_variables = enter_scope(context);
+        let mut original_outer_scope_variables = None;
+        // if this is a function body, this is not in fact a new scope, since the actual new scope
+        // should also include the parameter list
+        if !context.current_block_is_function_body {
+            original_outer_scope_variables = Some(enter_scope(context));
+        }
+        context.current_block_is_function_body = false;
+
         let mut items: Vec<BlockItemNode> = Vec::new();
         while !matches!(peek(tokens)?, Token::CloseBrace) {
             items.push(BlockItemNode::parse(tokens, context)?)
         }
-        leave_scope(original_outer_scope_variables, context);
+
+        if let Some(original) = original_outer_scope_variables {
+            leave_scope(original, context);
+        }
 
         expect(tokens, Token::CloseBrace)?;
 
@@ -228,17 +290,25 @@ impl Parse for DeclarationNode {
         if tokens.len() < 3 {
             return Err(format!("Declaration found with fewer than 3 tokens: {:?}", tokens).into());
         }
-        if !matches!(tokens[1], Token::Identifier(_)) {
+        if !matches!(tokens.get(1).unwrap(), Token::Identifier(_)) {
             return Err(format!(
                 "Second token in a declaration is not an identifier: {:?}",
-                tokens[1]
+                tokens.get(1).unwrap()
             )
             .into());
         }
-        match tokens[2] {
-            Token::OpenParen => Ok(DeclarationNode::Function(FunctionDeclaration::parse(
-                tokens, context,
-            )?)),
+        match tokens.get(2).unwrap() {
+            Token::OpenParen => {
+                let local_function_declaration = FunctionDeclaration::parse(tokens, context)?;
+                if !context.do_not_validate && local_function_declaration.body.is_some() {
+                    return Err(format!(
+                        "Local function {} cannot have a body",
+                        local_function_declaration.name
+                    )
+                    .into());
+                }
+                Ok(DeclarationNode::Function(local_function_declaration))
+            }
             _ => Ok(DeclarationNode::Variable(VariableDeclaration::parse(
                 tokens, context,
             )?)),
@@ -254,38 +324,12 @@ impl Parse for VariableDeclaration {
         let variable_type = Type::Integer;
         expect(tokens, Token::KeywordInt)?;
 
-        let t = read(tokens)?;
-        let name = match t {
-            Token::Identifier(name) => Ok(name),
-            _ => Err::<String, Box<dyn Error>>(
-                format!(
-                    "Expected a string identifier reading a declaration name, got {:?}",
-                    t
-                )
-                .into(),
-            ),
-        }?;
-
-        // VALIDATION STEP: Make sure this variable has not already been defined 'in this scope'
-        if !context.do_not_validate && context.current_scope_variables.contains_key(&name) {
-            return Err(format!("Duplicate definition of name: {}", name).into());
-        }
-
-        context.num_variables += 1;
-        let new_name;
-        if context.do_not_validate {
-            new_name = name.clone();
-        } else {
-            new_name = format!("{}:{}", name, context.num_variables);
-            context
-                .current_scope_variables
-                .insert(name, new_name.clone());
-        }
+        let name = new_identifier(tokens, false, context)?;
 
         match read(tokens)? {
             Token::SemiColon => Ok(VariableDeclaration {
                 variable_type,
-                name: new_name.clone(),
+                name,
                 init: None,
             }),
             Token::Assignment => {
@@ -293,11 +337,11 @@ impl Parse for VariableDeclaration {
                 expect(tokens, Token::SemiColon)?;
                 Ok(VariableDeclaration {
                     variable_type,
-                    name: new_name.clone(),
+                    name,
                     init: Some(expression),
                 })
             }
-            t => Err(format!("Unexpected token in declaration of {}: {:?}", new_name, t).into()),
+            t => Err(format!("Unexpected token in declaration of {}: {:?}", name, t).into()),
         }
     }
 }
@@ -339,7 +383,10 @@ impl Parse for StatementNode {
             }
             Token::KeywordGoto => {
                 expect(tokens, Token::KeywordGoto)?;
-                let s = identifier_to_string(read(tokens)?)?;
+                let s = match read(tokens)? {
+                    Token::Identifier(s) => Ok::<String, Box<dyn Error>>(s),
+                    t => Err(format!("unexpected token in goto: {:?}", t).into()),
+                }?;
                 expect(tokens, Token::SemiColon)?;
                 Ok(StatementNode::Goto(s))
             }
@@ -589,6 +636,9 @@ impl ExpressionNode {
                 match peek(tokens)? {
                     // this is a function call !!
                     Token::OpenParen => {
+                        let (new_name, _external_link) =
+                            ExpressionNode::resolve_identifier(&name, context)?;
+
                         expect(tokens, Token::OpenParen)?;
                         let mut arguments: Vec<ExpressionNode> = Vec::new();
                         if !matches!(peek(tokens)?, Token::CloseParen) {
@@ -600,24 +650,14 @@ impl ExpressionNode {
                         }
                         expect(tokens, Token::CloseParen)?;
 
-                        Some(ExpressionNode::FunctionCall(name, arguments))
+                        Some(ExpressionNode::FunctionCall(new_name, arguments))
                     }
                     _ => {
-                        if context.do_not_validate {
-                            Some(ExpressionNode::Var(name.to_string()))
-                        } else {
-                            // VALIDATION STEP: Check the variable has been declared
-                            Some(ExpressionNode::Var(if let Some(new_name) =
-                                context.current_scope_variables.get(&name)
-                            {
-                                Ok::<String, Box<dyn Error>>(new_name.to_string())
-                            } else if let Some(new_name) = context.outer_scope_variables.get(&name)
-                            {
-                                Ok(new_name.to_string())
-                            } else {
-                                Err(format!("Variable used before declaration: {}", name).into())
-                            }?))
-                        }
+                        // VALIDATION STEP: Check the variable has been declared
+                        let (new_name, _external_link) =
+                            ExpressionNode::resolve_identifier(&name, context)?;
+
+                        Some(ExpressionNode::Var(new_name))
                     }
                 }
             }
@@ -646,6 +686,25 @@ impl ExpressionNode {
 
     pub fn is_lvalue(&self) -> bool {
         matches!(self, ExpressionNode::Var(_))
+    }
+
+    fn resolve_identifier(
+        name: &str,
+        context: &mut ParseContext,
+    ) -> Result<(String, bool), Box<dyn Error>> {
+        // println!(
+        //     "resolve {:?} {:?}",
+        //     context.outer_scope_identifiers, context.current_scope_identifiers
+        // );
+        if context.do_not_validate {
+            Ok((name.to_string(), false))
+        } else if let Some(new_name) = context.current_scope_identifiers.get(name) {
+            Ok(new_name.clone())
+        } else if let Some(new_name) = context.outer_scope_identifiers.get(name) {
+            Ok(new_name.clone())
+        } else {
+            Err(format!("Identifier used before declaration: {}", name).into())
+        }
     }
 }
 

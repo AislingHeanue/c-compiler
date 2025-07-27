@@ -164,11 +164,12 @@ where
 }
 
 struct ParseContext {
-    current_scope_variables: HashMap<String, String>,
-    outer_scope_variables: HashMap<String, String>,
+    // map from string to sting-as-seen-in-assembly and is-externally-linked
+    current_scope_identifiers: HashMap<String, (String, bool)>,
+    outer_scope_identifiers: HashMap<String, (String, bool)>,
     num_variables: usize,
     do_not_validate: bool,
-    // labels on declarations are only allowed in C23+
+    current_block_is_function_body: bool, // labels on declarations are only allowed in C23+
 }
 
 pub fn parse(
@@ -178,10 +179,11 @@ pub fn parse(
     ProgramNode::parse(
         &mut lexed,
         &mut ParseContext {
-            current_scope_variables: HashMap::new(),
-            outer_scope_variables: HashMap::new(),
+            current_scope_identifiers: HashMap::new(),
+            outer_scope_identifiers: HashMap::new(),
             num_variables: 0,
             do_not_validate,
+            current_block_is_function_body: false,
         },
     )
 }
