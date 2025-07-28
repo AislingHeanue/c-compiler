@@ -1,19 +1,20 @@
 use std::{collections::HashMap, error::Error};
 
-use super::{birds::BirdsProgramNode, parser::TypeInfo};
+use super::{birds::BirdsProgramNode, parser::SymbolInfo};
 
 mod convert;
 mod display;
 
 pub struct Program {
-    body: Vec<Function>,
+    body: Vec<TopLevel>,
     displaying_context: DisplayContext,
 }
 
-struct Function {
-    header: Vec<String>,
-    name: String,
-    instructions: Vec<Instruction>,
+enum TopLevel {
+    // header instructions, name, body, global
+    Function(String, Vec<Instruction>, bool),
+    // name init global
+    StaticVariable(String, usize, bool),
 }
 
 enum Instruction {
@@ -49,6 +50,7 @@ enum Operand {
     Reg(Register),   // register in assembly
     MockReg(String), // mocked register for temporary use.
     Stack(i32),      // Stack entry whose value is the offset from RSP.
+    Data(String),    // used for static and global variables
 }
 
 #[derive(Clone)]
@@ -108,7 +110,7 @@ where
     type Output;
     fn convert(
         parsed: Self::Input,
-        config: &mut ConvertContext,
+        context: &mut ConvertContext,
     ) -> Result<Self::Output, Box<dyn Error>>;
 }
 
@@ -116,7 +118,7 @@ pub struct ConvertContext {
     comments: bool,
     is_mac: bool,
     is_linux: bool,
-    types: HashMap<String, TypeInfo>,
+    symbols: HashMap<String, SymbolInfo>,
 }
 
 trait CodeDisplay {
@@ -130,7 +132,7 @@ pub struct DisplayContext {
     is_linux: bool,
     is_mac: bool,
     word_length_bytes: usize,
-    types: HashMap<String, TypeInfo>,
+    symbols: HashMap<String, SymbolInfo>,
 }
 
 impl DisplayContext {
@@ -161,7 +163,7 @@ pub fn codegen(
     comments: bool,
     linux: bool,
     mac: bool,
-    types: HashMap<String, TypeInfo>,
+    types: HashMap<String, SymbolInfo>,
 ) -> Result<Program, Box<dyn Error>> {
     Program::convert(
         parsed,
@@ -169,7 +171,7 @@ pub fn codegen(
             comments,
             is_linux: linux,
             is_mac: mac,
-            types,
+            symbols: types,
         },
     )
 }

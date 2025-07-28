@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
 
-use super::BirdsFunctionNode;
+use super::BirdsTopLevel;
 
 struct WithoutAlternate<T>(T);
 
@@ -21,11 +21,22 @@ impl<'a, T: Debug> Debug for List<'a, T> {
     }
 }
 
-impl Debug for BirdsFunctionNode {
+impl Debug for BirdsTopLevel {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BirdsFunctionNode")
-            .field("name", &self.name)
-            .field("instructions", &List(&self.instructions))
-            .finish()
+        match self {
+            BirdsTopLevel::Function(name, params, instructions, global) => f
+                .debug_struct("BirdsTopLevel::Function")
+                .field("name", name)
+                .field("params", params)
+                .field("instructions", &List(instructions))
+                .field("global", global)
+                .finish(),
+            BirdsTopLevel::StaticVariable(name, init, global) => f
+                .debug_struct("BirdTopLevel::StaticVariable")
+                .field("name", name)
+                .field("init", init)
+                .field("global", global)
+                .finish(),
+        }
     }
 }

@@ -39,33 +39,33 @@ fn peek(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
 }
 
 fn new_identifier(
-    tokens: &mut VecDeque<Token>,
-    is_external: bool,
+    token: Token,
+    is_file_scope: bool,
     context: &mut ParseContext,
+    storage_class: Option<StorageClass>,
 ) -> Result<String, Box<dyn Error>> {
-    let t = read(tokens)?;
-    let name = if let Token::Identifier(string) = t {
+    let name = if let Token::Identifier(string) = token {
         Ok::<String, Box<dyn Error>>(string)
     } else {
         Err(format!(
             "Wrong token received, expected: {:?} got: {:?}",
             Token::Identifier(String::new()),
-            t
+            token
         )
         .into())
     }?;
+    let is_linked = is_file_scope || matches!(storage_class, Some(StorageClass::Extern));
 
-    let new_name = if is_external || context.do_not_validate {
+    let new_name = if is_linked || context.do_not_validate {
         name.clone()
     } else {
         context.num_variables += 1;
-        format!("{}:{}", name, context.num_variables)
+        format!("{}.{}", name, context.num_variables)
     };
 
     if !context.do_not_validate {
-        if let Some((_new_name, other_is_external)) = context.current_scope_identifiers.get(&name) {
-            println!("{} and {}", other_is_external, is_external);
-            if !(*other_is_external && is_external) {
+        if let Some((_new_name, other_has_linkage)) = context.current_scope_identifiers.get(&name) {
+            if !(*other_has_linkage && is_linked) {
                 return Err(format!(
                     "Identifier named {} already exists in the current scope",
                     name
@@ -76,7 +76,7 @@ fn new_identifier(
         // not entirely sure how this is compatible with the future type-checking step, but okay
         context
             .current_scope_identifiers
-            .insert(name.clone(), (new_name.clone(), is_external));
+            .insert(name.clone(), (new_name.clone(), is_linked));
     }
 
     Ok(new_name)
@@ -149,7 +149,7 @@ impl FunctionDeclaration {
             t => return Err(format!("Invalid type in parameter: {:?}", t).into()),
         };
 
-        let name = new_identifier(tokens, false, context)?;
+        let name = new_identifier(read(tokens)?, false, context, None)?;
 
         Ok((out_type, name))
     }
@@ -169,7 +169,10 @@ impl Parse for Block {
         // should also include the parameter list
         if !context.current_block_is_function_body {
             original_outer_scope_variables = Some(enter_scope(context));
+        } else {
+            context.current_scope_is_file = false;
         }
+
         context.current_block_is_function_body = false;
 
         let mut items: Vec<BlockItemNode> = Vec::new();
@@ -179,6 +182,8 @@ impl Parse for Block {
 
         if let Some(original) = original_outer_scope_variables {
             leave_scope(original, context);
+        } else {
+            context.current_scope_is_file = true;
         }
 
         expect(tokens, Token::CloseBrace)?;
@@ -202,6 +207,11 @@ impl Parse for BlockItemNode {
                     if f.body.is_some() && !context.do_not_validate {
                         return Err("Block-scope function declaration may not have a body".into());
                     }
+                    if matches!(f.storage_class, Some(StorageClass::Static))
+                        && !context.do_not_validate
+                    {
+                        return Err("Block-scope function declaration may not be static".into());
+                    }
                 }
                 Ok(BlockItemNode::Declaration(declaration))
             }
@@ -219,9 +229,18 @@ impl Parse for ForInitialiserNode {
     ) -> Result<Self, Box<dyn Error>> {
         match peek(tokens)? {
             Token::KeywordInt | Token::KeywordExtern | Token::KeywordStatic => {
-                let declaration = DeclarationNode::parse(tokens, context)?;
-                if let DeclarationNode::Variable(v) = declaration {
+                let block_item = BlockItemNode::parse(tokens, context)?;
+                if let BlockItemNode::Declaration(DeclarationNode::Variable(v)) = block_item {
+                    if !context.do_not_validate && v.storage_class.is_some() {
+                        return Err(
+                            "For initialiser must not be declared as static or extern".into()
+                        );
+                    }
                     Ok(ForInitialiserNode::Declaration(v))
+                } else if let BlockItemNode::Statement(StatementNode::Expression(expression)) =
+                    block_item
+                {
+                    Ok(ForInitialiserNode::Expression(Some(expression)))
                 } else {
                     Err("Unexpected function declaration in the initialiser of a for loop".into())
                 }
@@ -268,7 +287,7 @@ impl Parse for DeclarationNode {
 
         match read(tokens)? {
             Token::OpenParen => {
-                let name = new_identifier(&mut vec![name_token].into(), true, context)?;
+                let name = new_identifier(name_token, true, context, storage_class.clone())?;
                 let original_outer_scope_variables = enter_scope(context);
                 let params = FunctionDeclaration::parse_params(tokens, context)?;
                 expect(tokens, Token::CloseParen)?;
@@ -307,7 +326,13 @@ impl Parse for DeclarationNode {
                 Ok(DeclarationNode::Function(output_function))
             }
             Token::SemiColon => {
-                let name = new_identifier(&mut vec![name_token].into(), false, context)?;
+                // file scope variable = linkage
+                let name = new_identifier(
+                    name_token,
+                    context.current_scope_is_file,
+                    context,
+                    storage_class.clone(),
+                )?;
                 Ok(DeclarationNode::Variable(VariableDeclaration {
                     out_type,
                     name,
@@ -316,7 +341,13 @@ impl Parse for DeclarationNode {
                 }))
             }
             Token::Assignment => {
-                let name = new_identifier(&mut vec![name_token].into(), false, context)?;
+                // file scope variable = linkage
+                let name = new_identifier(
+                    name_token,
+                    context.current_scope_is_file,
+                    context,
+                    storage_class.clone(),
+                )?;
                 let expression = ExpressionNode::parse(tokens, context)?;
                 expect(tokens, Token::SemiColon)?;
                 Ok(DeclarationNode::Variable(VariableDeclaration {
@@ -487,11 +518,7 @@ impl Parse for Option<ExpressionNode> {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        if tokens.is_empty() {
-            Ok(None)
-        } else {
-            Ok(ExpressionNode::parse_with_level(tokens, context, 0, true)?)
-        }
+        ExpressionNode::parse_with_level(tokens, context, 0, true)
     }
 }
 

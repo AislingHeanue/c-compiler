@@ -33,19 +33,19 @@ pub fn compile(
         return Ok(());
     }
 
-    let (parsed, types) = validate(parsed)?;
+    let (parsed, symbols) = validate(parsed)?;
     if config.only_validate {
         println!("{}", parsed);
         return Ok(());
     }
 
-    let birds_output = birds(parsed)?;
+    let (birds_output, symbols) = birds(parsed, symbols)?;
     if config.only_birds {
         println!("{:#?}", birds_output);
         return Ok(());
     }
 
-    let code = codegen(birds_output, config.add_comments, IS_LINUX, IS_MAC, types)?;
+    let code = codegen(birds_output, config.add_comments, IS_LINUX, IS_MAC, symbols)?;
     if config.only_codegen {
         return Ok(());
     }

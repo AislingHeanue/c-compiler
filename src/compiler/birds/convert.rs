@@ -4,12 +4,12 @@ use itertools::process_results;
 
 use crate::compiler::parser::{
     BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
-    FunctionDeclaration, ProgramNode, StatementNode, SwitchMapKey, UnaryOperatorNode,
-    VariableDeclaration,
+    FunctionDeclaration, InitialValue, ProgramNode, StatementNode, StorageInfo, SwitchMapKey,
+    UnaryOperatorNode, VariableDeclaration,
 };
 
 use super::{
-    BirdsBinaryOperatorNode, BirdsFunctionNode, BirdsInstructionNode, BirdsProgramNode,
+    BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsProgramNode, BirdsTopLevel,
     BirdsUnaryOperatorNode, BirdsValueNode, Convert, ConvertContext,
 };
 
@@ -17,38 +17,66 @@ impl Convert for ProgramNode {
     type Output = BirdsProgramNode;
 
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
-        Ok(BirdsProgramNode {
-            body: todo!(),
-            //process_results(
-            //     self.declarations.into_iter().map(|f| f.convert(context)),
-            //     |iter| iter.flatten().collect(),
-            // )?,
-        })
+        let mut body: Vec<BirdsTopLevel> = process_results(
+            self.declarations
+                .into_iter()
+                .filter_map(|declaration| match declaration {
+                    DeclarationNode::Variable(_) => None,
+                    DeclarationNode::Function(f) => Some(f.convert(context)),
+                }),
+            |iter| iter.flatten().collect(),
+        )?;
+        body.append(
+            &mut context
+                .symbols
+                .iter_mut()
+                .filter_map(|(name, info)| match &info.storage {
+                    StorageInfo::Static(init, global) => {
+                        let initial = match init {
+                            InitialValue::Tentative => 0_usize,
+                            InitialValue::Initial(i) => *i,
+                            InitialValue::None => return None,
+                        };
+                        Some(BirdsTopLevel::StaticVariable(
+                            name.clone(),
+                            initial,
+                            *global,
+                        ))
+                    }
+                    _ => None,
+                })
+                .collect(),
+        );
+        Ok(BirdsProgramNode { body })
     }
 }
 
 impl Convert for FunctionDeclaration {
-    type Output = Option<BirdsFunctionNode>;
+    type Output = Option<BirdsTopLevel>;
 
-    fn convert(
-        self,
-        context: &mut ConvertContext,
-    ) -> Result<Option<BirdsFunctionNode>, Box<dyn Error>> {
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         let name = self.name;
         let params = self.params.iter().map(|param| param.1.clone()).collect();
         if let Some(body) = self.body {
             let mut instructions = body.convert(context)?;
-            // add an extra "" at the end because the C standard dictates that if main() exits
+            // add an extra "return 0;" at the end because the C standard dictates that if main() exits
             // without a return statement, then it must actually return 0. If a return statement is
             // otherwise present, this instruction will never be run (dead code).
             instructions.push(BirdsInstructionNode::Return(
                 BirdsValueNode::IntegerConstant(0),
             ));
-            Ok(Some(BirdsFunctionNode {
-                name,
-                params,
-                instructions,
-            }))
+            if let StorageInfo::Function(_defined, global) =
+                context.symbols.get(&name).unwrap().storage
+            {
+                Ok(Some(BirdsTopLevel::Function(
+                    name,
+                    params,
+                    instructions,
+                    global,
+                )))
+            } else {
+                panic!("Symbol info missing from map for defined function")
+            }
         } else {
             Ok(None)
         }
@@ -326,6 +354,12 @@ impl Convert for VariableDeclaration {
     type Output = Vec<BirdsInstructionNode>;
 
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+        // do not emit any instructions for static and extern variable definitions. These are
+        // handled after the rest of the ProgramNode has been converted.
+        if self.storage_class.is_some() {
+            return Ok(Vec::new());
+        }
+
         match self.init {
             Some(e) => {
                 let assignment_expression = ExpressionNode::Assignment(

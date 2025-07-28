@@ -29,10 +29,26 @@ pub struct VariableDeclaration {
     pub storage_class: Option<StorageClass>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StorageClass {
     Static,
     Extern,
+}
+
+#[derive(Debug, Clone)]
+pub enum StorageInfo {
+    // is_defined and global (ie non-static)
+    Function(bool, bool),
+    // initializer and global
+    Static(InitialValue, bool),
+    Automatic,
+}
+
+#[derive(Debug, Clone)]
+pub enum InitialValue {
+    Tentative,
+    Initial(usize),
+    None,
 }
 
 pub type Block = Vec<BlockItemNode>;
@@ -180,6 +196,7 @@ struct ParseContext {
     do_not_validate: bool,
     // this prevent creating an extra new scope entering function bodies
     current_block_is_function_body: bool,
+    current_scope_is_file: bool,
 }
 
 pub fn parse(
@@ -194,6 +211,7 @@ pub fn parse(
             num_variables: 0,
             do_not_validate,
             current_block_is_function_body: false,
+            current_scope_is_file: true,
         },
     )
 }
@@ -232,18 +250,18 @@ struct ValidateContext {
     current_enclosing_loop_name_for_case: Option<String>,
     current_enclosing_loop_name_for_continue: Option<String>,
     current_switch_labels: Option<HashMap<SwitchMapKey, String>>,
-    types: HashMap<String, TypeInfo>,
+    symbols: HashMap<String, SymbolInfo>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct TypeInfo {
-    pub t: Type,
-    pub is_defined: bool,
+#[derive(Debug, Clone)]
+pub struct SymbolInfo {
+    pub symbol_type: Type,
+    pub storage: StorageInfo,
 }
 
 pub fn validate(
     mut parsed: ProgramNode,
-) -> Result<(ProgramNode, HashMap<String, TypeInfo>), Box<dyn Error>> {
+) -> Result<(ProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
     let passes: Vec<ValidationPass> = vec![
         ValidationPass::CheckLvalues,
         ValidationPass::ReadLabels,
@@ -264,14 +282,14 @@ pub fn validate(
         current_enclosing_loop_name_for_case: None,
         current_enclosing_loop_name_for_continue: None,
         current_switch_labels: None,
-        types: HashMap::new(),
+        symbols: HashMap::new(),
     };
     for pass in passes {
         validate_context.pass = pass;
         parsed = parsed.validate(&mut validate_context)?;
     }
 
-    Ok((parsed, validate_context.types))
+    Ok((parsed, validate_context.symbols))
 }
 
 trait CodeDisplay {

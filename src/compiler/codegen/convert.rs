@@ -1,18 +1,22 @@
-use crate::compiler::birds::{
-    BirdsBinaryOperatorNode, BirdsFunctionNode, BirdsInstructionNode, BirdsProgramNode,
-    BirdsUnaryOperatorNode, BirdsValueNode,
+use crate::compiler::{
+    birds::{
+        BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsProgramNode, BirdsTopLevel,
+        BirdsUnaryOperatorNode, BirdsValueNode,
+    },
+    parser::{StorageInfo, SymbolInfo},
 };
 use itertools::process_results;
 use std::{cmp::min, collections::HashMap, error::Error};
 
 use super::{
-    BinaryOperator, ConditionCode, Convert, ConvertContext, DisplayContext, Function, Instruction,
-    Operand, Program, Register, UnaryOperator, FUNCTION_PARAM_REGISTERS,
+    BinaryOperator, ConditionCode, Convert, ConvertContext, DisplayContext, Instruction, Operand,
+    Program, Register, TopLevel, UnaryOperator, FUNCTION_PARAM_REGISTERS,
 };
 
-struct StackContext {
+struct StackContext<'a> {
     current_min_pointer: i32,
     stack_locations: HashMap<String, i32>,
+    symbols: &'a mut HashMap<String, SymbolInfo>,
 }
 
 impl Convert for Program {
@@ -21,51 +25,70 @@ impl Convert for Program {
 
     fn convert(
         parsed: BirdsProgramNode,
-        config: &mut ConvertContext,
+        context: &mut ConvertContext,
     ) -> Result<Self, Box<dyn Error>> {
         Ok(Program {
-            body: Vec::<Function>::convert(parsed.body, config)?,
+            body: Vec::<TopLevel>::convert(parsed.body, context)?,
             displaying_context: DisplayContext {
-                comments: config.comments,
+                comments: context.comments,
                 indent: 0,
                 word_length_bytes: 4,
-                is_linux: config.is_linux,
-                is_mac: config.is_mac,
-                types: config.types.clone(),
+                is_linux: context.is_linux,
+                is_mac: context.is_mac,
+                symbols: context.symbols.clone(),
             },
         })
     }
 }
 
-impl Convert for Vec<Function> {
-    type Input = Vec<BirdsFunctionNode>;
+impl<U, V> Convert for Vec<U>
+where
+    U: Convert<Input = V, Output = U>,
+{
+    type Input = Vec<V>;
     type Output = Self;
 
     fn convert(
         parsed: Self::Input,
-        config: &mut ConvertContext,
+        context: &mut ConvertContext,
     ) -> Result<Self::Output, Box<dyn Error>> {
         process_results(
             parsed
                 .into_iter()
-                .map(|function| Function::convert(function, config)),
+                .map(|function| U::convert(function, context)),
             |iter| iter.collect(),
         )
     }
 }
 
-impl Convert for Function {
-    type Input = BirdsFunctionNode;
+impl Convert for TopLevel {
+    type Input = BirdsTopLevel;
     type Output = Self;
 
     fn convert(
         parsed: Self::Input,
-        config: &mut ConvertContext,
+        context: &mut ConvertContext,
     ) -> Result<Self::Output, Box<dyn Error>> {
+        match parsed {
+            BirdsTopLevel::Function(..) => Self::convert_function(parsed, context),
+            BirdsTopLevel::StaticVariable(name, init, global) => {
+                Ok(TopLevel::StaticVariable(name, init, global))
+            }
+        }
+    }
+}
+impl TopLevel {
+    fn convert_function(
+        parsed: BirdsTopLevel,
+        context: &mut ConvertContext,
+    ) -> Result<TopLevel, Box<dyn Error>> {
+        let (name, params, parsed_instructions, global) = match parsed {
+            BirdsTopLevel::Function(a, b, c, d) => (a, b, c, d),
+            _ => unreachable!(),
+        };
         let mut instructions: Vec<Instruction> = Vec::new();
 
         // ZEROTH PASS: Copy all the params out of registers onto the stack.
-        let params = parsed.params;
         for (i, param) in params.iter().enumerate() {
             if i < 6 {
                 instructions.push(Instruction::Mov(
@@ -83,10 +106,9 @@ impl Convert for Function {
 
         // FIRST PASS: create a bunch of mock registers to be replaced with stack entries later
         instructions.append(&mut process_results(
-            parsed
-                .instructions
+            parsed_instructions
                 .into_iter()
-                .map(|instruction| Instruction::convert(instruction, config)),
+                .map(|instruction| Instruction::convert(instruction, context)),
             |iter| iter.flatten().collect(),
         )?);
 
@@ -95,9 +117,10 @@ impl Convert for Function {
         let mut stack_context = StackContext {
             current_min_pointer: 0,
             stack_locations: HashMap::new(),
+            symbols: &mut context.symbols,
         };
 
-        let instructions = Function::update_instructions_with_context(
+        let instructions = TopLevel::update_instructions_with_context(
             instructions,
             Instruction::replace_mock_registers,
             &mut stack_context,
@@ -113,7 +136,7 @@ impl Convert for Function {
             // allocate space for local variables in the space before RSP in the stack.
             Instruction::AllocateStack(
                 (-stack_context.current_min_pointer)
-                    + ((16 + stack_context.current_min_pointer) % 16),
+                    + (stack_context.current_min_pointer).rem_euclid(16),
             ),
         ]
         .into_iter()
@@ -121,38 +144,26 @@ impl Convert for Function {
         .collect();
 
         let instructions =
-            Function::update_instructions(instructions, Instruction::fix_shift_operation_register);
-        let instructions = Function::update_instructions(
+            TopLevel::update_instructions(instructions, Instruction::fix_shift_operation_register);
+        let instructions = TopLevel::update_instructions(
             instructions,
             Instruction::fix_instructions_with_two_stack_entries,
         );
-        let instructions = Function::update_instructions(
+        let instructions = TopLevel::update_instructions(
             instructions,
             Instruction::fix_immediate_values_in_bad_places,
         );
         let instructions =
-            Function::update_instructions(instructions, Instruction::fix_memory_address_as_dst);
+            TopLevel::update_instructions(instructions, Instruction::fix_memory_address_as_dst);
 
         let instructions =
-            Function::update_instructions(instructions, Instruction::fix_constant_as_dst);
+            TopLevel::update_instructions(instructions, Instruction::fix_constant_as_dst);
 
-        Ok(Function {
-            header: if config.comments {
-                vec![
-                    "# make the function name accessible globally".to_string(),
-                    format!(".globl {}", parsed.name),
-                ]
-            } else {
-                vec![format!(".globl {}", parsed.name)]
-            },
-            name: parsed.name,
-            // stack_size: -stack_context.current_min_pointer,
-            instructions,
-        })
+        Ok(TopLevel::Function(name, instructions, global))
     }
 }
 
-impl Function {
+impl TopLevel {
     fn update_instructions(
         instructions: Vec<Instruction>,
         f: fn(Instruction) -> Vec<Instruction>,
@@ -178,88 +189,88 @@ impl Convert for Instruction {
 
     fn convert(
         input: BirdsInstructionNode,
-        config: &mut ConvertContext,
+        context: &mut ConvertContext,
     ) -> Result<Vec<Instruction>, Box<dyn Error>> {
         Ok(match input {
             BirdsInstructionNode::Return(src) => vec![
-                Instruction::Mov(Operand::convert(src, config)?, Operand::Reg(Register::AX)),
+                Instruction::Mov(Operand::convert(src, context)?, Operand::Reg(Register::AX)),
                 Instruction::Ret,
             ],
             BirdsInstructionNode::Unary(BirdsUnaryOperatorNode::Not, src, dst) => vec![
                 // Not returns 1 is src is zero, and 0 otherwise.
-                Instruction::Cmp(Operand::Imm(0), Operand::convert(src, config)?),
+                Instruction::Cmp(Operand::Imm(0), Operand::convert(src, context)?),
                 // zero out the destination (since SetCondition only affects the first byte).
-                Instruction::Mov(Operand::Imm(0), Operand::convert(dst.clone(), config)?),
-                Instruction::SetCondition(ConditionCode::E, Operand::convert(dst, config)?),
+                Instruction::Mov(Operand::Imm(0), Operand::convert(dst.clone(), context)?),
+                Instruction::SetCondition(ConditionCode::E, Operand::convert(dst, context)?),
             ],
             BirdsInstructionNode::Unary(op, src, dst) => vec![
                 Instruction::Mov(
-                    Operand::convert(src, config)?,
-                    Operand::convert(dst.clone(), config)?,
+                    Operand::convert(src, context)?,
+                    Operand::convert(dst.clone(), context)?,
                 ),
                 Instruction::Unary(
-                    UnaryOperator::convert(op, config)?,
-                    Operand::convert(dst, config)?,
+                    UnaryOperator::convert(op, context)?,
+                    Operand::convert(dst, context)?,
                 ),
             ],
             BirdsInstructionNode::Binary(BirdsBinaryOperatorNode::Divide, left, right, dst) => {
                 vec![
-                    Instruction::Mov(Operand::convert(left, config)?, Operand::Reg(Register::AX)),
+                    Instruction::Mov(Operand::convert(left, context)?, Operand::Reg(Register::AX)),
                     Instruction::Cdq,
-                    Instruction::Idiv(Operand::convert(right, config)?),
+                    Instruction::Idiv(Operand::convert(right, context)?),
                     Instruction::Mov(
                         Operand::Reg(Register::AX), // read quotient result from EAX
-                        Operand::convert(dst, config)?,
+                        Operand::convert(dst, context)?,
                     ),
                 ]
             }
             BirdsInstructionNode::Binary(BirdsBinaryOperatorNode::Mod, left, right, dst) => vec![
-                Instruction::Mov(Operand::convert(left, config)?, Operand::Reg(Register::AX)),
+                Instruction::Mov(Operand::convert(left, context)?, Operand::Reg(Register::AX)),
                 Instruction::Cdq,
                 // note: idiv can't operate on immediate values, so we need to stuff those into
                 // a register during a later pass.
-                Instruction::Idiv(Operand::convert(right, config)?),
+                Instruction::Idiv(Operand::convert(right, context)?),
                 Instruction::Mov(
                     Operand::Reg(Register::DX), // read remainder result from EDX
-                    Operand::convert(dst, config)?,
+                    Operand::convert(dst, context)?,
                 ),
             ],
             BirdsInstructionNode::Binary(op, left, right, dst) if op.is_relational() => vec![
                 Instruction::Cmp(
-                    Operand::convert(right, config)?,
-                    Operand::convert(left, config)?,
+                    Operand::convert(right, context)?,
+                    Operand::convert(left, context)?,
                 ),
                 // zero out the destination (since SetCondition only affects the first byte).
-                Instruction::Mov(Operand::Imm(0), Operand::convert(dst.clone(), config)?),
+                Instruction::Mov(Operand::Imm(0), Operand::convert(dst.clone(), context)?),
                 Instruction::SetCondition(
-                    ConditionCode::convert(op, config)?,
-                    Operand::convert(dst, config)?,
+                    ConditionCode::convert(op, context)?,
+                    Operand::convert(dst, context)?,
                 ),
             ],
             BirdsInstructionNode::Binary(op, left, right, dst) => vec![
                 Instruction::Mov(
-                    Operand::convert(left, config)?,
-                    Operand::convert(dst.clone(), config)?,
+                    Operand::convert(left, context)?,
+                    Operand::convert(dst.clone(), context)?,
                 ),
                 Instruction::Binary(
-                    BinaryOperator::convert(op, config)?,
-                    Operand::convert(right, config)?,
-                    Operand::convert(dst, config)?,
+                    BinaryOperator::convert(op, context)?,
+                    Operand::convert(right, context)?,
+                    Operand::convert(dst, context)?,
                 ),
             ],
             BirdsInstructionNode::Copy(src, dst) => {
                 vec![Instruction::Mov(
-                    Operand::convert(src, config)?,
-                    Operand::convert(dst, config)?,
+                    Operand::convert(src, context)?,
+                    Operand::convert(dst, context)?,
                 )]
             }
             BirdsInstructionNode::Jump(s) => vec![Instruction::Jmp(s)],
             BirdsInstructionNode::JumpZero(src, s) => vec![
-                Instruction::Cmp(Operand::Imm(0), Operand::convert(src, config)?),
+                Instruction::Cmp(Operand::Imm(0), Operand::convert(src, context)?),
                 Instruction::JmpCondition(ConditionCode::E, s),
             ],
             BirdsInstructionNode::JumpNotZero(src, s) => vec![
-                Instruction::Cmp(Operand::Imm(0), Operand::convert(src, config)?),
+                Instruction::Cmp(Operand::Imm(0), Operand::convert(src, context)?),
                 Instruction::JmpCondition(ConditionCode::Ne, s),
             ],
             BirdsInstructionNode::Label(s) => vec![Instruction::Label(s)],
@@ -276,13 +287,13 @@ impl Convert for Instruction {
 
                 for (i, arg) in register_args.iter().enumerate() {
                     instructions.push(Instruction::Mov(
-                        Operand::convert(arg.clone(), config)?,
+                        Operand::convert(arg.clone(), context)?,
                         Operand::Reg(FUNCTION_PARAM_REGISTERS[i].clone()),
                     ));
                 }
 
                 for arg in stack_args.iter().rev() {
-                    let converted_arg = Operand::convert(arg.clone(), config)?;
+                    let converted_arg = Operand::convert(arg.clone(), context)?;
                     if !matches!(converted_arg, Operand::Reg(_) | Operand::Imm(_)) {
                         instructions.push(Instruction::Mov(
                             converted_arg.clone(),
@@ -304,7 +315,7 @@ impl Convert for Instruction {
                 }
                 instructions.push(Instruction::Mov(
                     Operand::Reg(Register::AX),
-                    Operand::convert(dst.clone(), config)?,
+                    Operand::convert(dst.clone(), context)?,
                 ));
 
                 instructions
@@ -360,20 +371,34 @@ impl Instruction {
     }
 
     fn fix_instructions_with_two_stack_entries(self) -> Vec<Instruction> {
-        match self {
-            Instruction::Mov(Operand::Stack(src), Operand::Stack(dst)) => vec![
-                Instruction::Mov(Operand::Stack(src), Operand::Reg(Register::R10)),
-                Instruction::Mov(Operand::Reg(Register::R10), Operand::Stack(dst)),
-            ],
-            Instruction::Binary(op, Operand::Stack(src), Operand::Stack(dst)) => vec![
-                Instruction::Mov(Operand::Stack(src), Operand::Reg(Register::R10)),
-                Instruction::Binary(op, Operand::Reg(Register::R10), Operand::Stack(dst)),
-            ],
-            Instruction::Cmp(Operand::Stack(left), Operand::Stack(right)) => vec![
-                Instruction::Mov(Operand::Stack(left), Operand::Reg(Register::R10)),
-                Instruction::Cmp(Operand::Reg(Register::R10), Operand::Stack(right)),
-            ],
-            _ => vec![self],
+        let (src, dst) = match self {
+            Instruction::Mov(ref src, ref dst) => (src, dst),
+            Instruction::Binary(_, ref src, ref dst) => (src, dst),
+            // Instruction::Mov(Operand::Stack(src), Operand::Reg(Register::R10)),
+            // Instruction::Binary(op, Operand::Reg(Register::R10), Operand::Stack(dst)),
+            Instruction::Cmp(ref left, ref right) => (left, right),
+            _ => return vec![self],
+        };
+        if matches!(src, &Operand::Stack(_) | &Operand::Data(_))
+            && matches!(dst, &Operand::Stack(_) | &Operand::Data(_))
+        {
+            match self {
+                Instruction::Mov(src, dst) => vec![
+                    Instruction::Mov(src, Operand::Reg(Register::R10)),
+                    Instruction::Mov(Operand::Reg(Register::R10), dst),
+                ],
+                Instruction::Binary(op, src, dst) => vec![
+                    Instruction::Mov(src, Operand::Reg(Register::R10)),
+                    Instruction::Binary(op, Operand::Reg(Register::R10), dst),
+                ],
+                Instruction::Cmp(left, right) => vec![
+                    Instruction::Mov(left, Operand::Reg(Register::R10)),
+                    Instruction::Cmp(Operand::Reg(Register::R10), right),
+                ],
+                _ => unreachable!(),
+            }
+        } else {
+            vec![self]
         }
     }
 
@@ -449,7 +474,7 @@ impl Convert for Operand {
 
     fn convert(
         input: BirdsValueNode,
-        _config: &mut ConvertContext,
+        _context: &mut ConvertContext,
     ) -> Result<Operand, Box<dyn Error>> {
         match input {
             BirdsValueNode::IntegerConstant(c) => Ok(Operand::Imm(c)),
@@ -461,14 +486,22 @@ impl Convert for Operand {
 impl Operand {
     fn replace_mock_register(&mut self, context: &mut StackContext) {
         if let Operand::MockReg(name) = self {
-            let new_location = context
-                .stack_locations
-                .entry(name.to_string())
-                .or_insert_with(|| {
+            let existing_location = context.stack_locations.get(name);
+            if let Some(loc) = existing_location {
+                *self = Operand::Stack(*loc);
+                return;
+            }
+            match context.symbols.get(name).map(|res| &res.storage) {
+                Some(StorageInfo::Static(_init, _global)) => {
+                    *self = Operand::Data(name.clone());
+                }
+                None | Some(StorageInfo::Automatic) | Some(StorageInfo::Function(_, _)) => {
                     context.current_min_pointer -= 4;
-                    context.current_min_pointer
-                });
-            *self = Operand::Stack(*new_location);
+                    let new_location = context.current_min_pointer;
+                    context.stack_locations.insert(name.clone(), new_location);
+                    *self = Operand::Stack(new_location);
+                }
+            }
         }
     }
 }
@@ -479,7 +512,7 @@ impl Convert for UnaryOperator {
 
     fn convert(
         input: BirdsUnaryOperatorNode,
-        _config: &mut ConvertContext,
+        _context: &mut ConvertContext,
     ) -> Result<UnaryOperator, Box<dyn Error>> {
         match input {
             BirdsUnaryOperatorNode::Negate => Ok(UnaryOperator::Neg),
@@ -497,7 +530,7 @@ impl Convert for BinaryOperator {
 
     fn convert(
         input: BirdsBinaryOperatorNode,
-        _config: &mut ConvertContext,
+        _context: &mut ConvertContext,
     ) -> Result<BinaryOperator, Box<dyn Error>> {
         match input {
             BirdsBinaryOperatorNode::Add => Ok(BinaryOperator::Add),
@@ -529,7 +562,7 @@ impl Convert for ConditionCode {
 
     fn convert(
         input: BirdsBinaryOperatorNode,
-        _config: &mut ConvertContext,
+        _context: &mut ConvertContext,
     ) -> Result<ConditionCode, Box<dyn Error>> {
         match input {
             BirdsBinaryOperatorNode::Equal => Ok(ConditionCode::E),

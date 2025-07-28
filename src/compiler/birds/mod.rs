@@ -1,5 +1,5 @@
-use super::parser::ProgramNode;
-use std::error::Error;
+use super::parser::{ProgramNode, SymbolInfo};
+use std::{collections::HashMap, error::Error};
 
 mod convert;
 mod display;
@@ -7,13 +7,14 @@ mod display;
 // BIRDS: Bodacious Intermediate Representation Design Spec
 #[derive(Debug)]
 pub struct BirdsProgramNode {
-    pub body: Vec<BirdsFunctionNode>,
+    pub body: Vec<BirdsTopLevel>,
 }
 
-pub struct BirdsFunctionNode {
-    pub name: String,
-    pub params: Vec<String>,
-    pub instructions: Vec<BirdsInstructionNode>,
+pub enum BirdsTopLevel {
+    // name params instructions global
+    Function(String, Vec<String>, Vec<BirdsInstructionNode>, bool),
+    // name init global
+    StaticVariable(String, usize, bool),
 }
 
 #[derive(Debug)]
@@ -78,20 +79,26 @@ where
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>>;
 }
 
-pub struct ConvertContext {
+pub struct ConvertContext<'a> {
     last_end_label_number: i32,
     last_else_label_number: i32,
     last_false_label_number: i32,
     last_stack_number: i32,
     last_true_label_number: i32,
+    symbols: &'a mut HashMap<String, SymbolInfo>,
 }
 
-pub fn birds(parsed: ProgramNode) -> Result<BirdsProgramNode, Box<dyn Error>> {
-    parsed.convert(&mut ConvertContext {
+pub fn birds(
+    parsed: ProgramNode,
+    mut symbols: HashMap<String, SymbolInfo>,
+) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
+    let result = parsed.convert(&mut ConvertContext {
         last_end_label_number: 0,
         last_else_label_number: 0,
         last_false_label_number: 0,
         last_stack_number: 0,
         last_true_label_number: 0,
-    })
+        symbols: &mut symbols,
+    })?;
+    Ok((result, symbols))
 }

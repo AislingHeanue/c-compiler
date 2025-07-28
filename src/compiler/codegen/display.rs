@@ -1,8 +1,10 @@
 use itertools::Itertools;
 
+use crate::compiler::parser::StorageInfo;
+
 use super::{
-    BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, Function, Instruction, Operand,
-    Program, Register, UnaryOperator,
+    BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, Instruction, Operand, Program,
+    Register, TopLevel, UnaryOperator,
 };
 use std::fmt::Display;
 
@@ -18,7 +20,7 @@ where
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let context = &mut self.displaying_context.clone();
-        write!(f, "{}", self.body.show(context))?;
+        writeln!(f, "{}", self.body.show(context))?;
         context.indent();
         if context.is_linux {
             if context.comments {
@@ -42,34 +44,77 @@ impl Display for Program {
     }
 }
 
-impl CodeDisplay for Function {
+impl CodeDisplay for TopLevel {
     fn show(&self, context: &mut DisplayContext) -> String {
-        let function_name = if context.is_mac {
-            "_".to_string() + &self.name
-        } else {
-            self.name.clone()
-        };
+        match self {
+            TopLevel::Function(name, instructions, global) => {
+                let function_name = if context.is_mac {
+                    "_".to_string() + name
+                } else {
+                    name.clone()
+                };
 
-        context.indent();
-        let mut out = format!("{}\n", self.header.show(context));
-        context.unindent();
-        out += format!(
-            "{:indent$}{}:\n",
-            "",
-            function_name,
-            indent = context.indent
-        )
-        .as_str();
-        context.indent();
-        out += &self.instructions.show(context);
-        context.unindent();
-        out
+                context.indent();
+                let mut out = if *global {
+                    vec![format!(".globl {}", function_name), ".text".to_string()].show(context)
+                        + "\n"
+                } else {
+                    vec![".text".to_string()].show(context) + "\n"
+                };
+                context.unindent();
+                out += format!("{}:", function_name).show(context).as_str();
+                out += "\n";
+                context.indent();
+                out += &instructions.show(context);
+                out += "\n";
+                context.unindent();
+                out
+            }
+            TopLevel::StaticVariable(name, init, global) => {
+                let (address, align) = if context.is_mac {
+                    (format!("_{}", name), ".balign")
+                } else {
+                    (name.to_string(), ".align")
+                };
+
+                context.indent();
+                let mut out = "".to_string();
+                if *global {
+                    out += format!(".globl {}", address).show(context).as_str();
+                    out += "\n";
+                }
+
+                if *init != 0 {
+                    out += ".data".to_string().show(context).as_str();
+                } else {
+                    out += ".bss".to_string().show(context).as_str();
+                };
+                out += "\n";
+
+                out += format!("{} 4", align).show(context).as_str();
+                out += "\n";
+
+                context.unindent();
+                out += format!("{}:", address).show(context).as_str();
+                out += "\n";
+
+                context.indent();
+                if *init != 0 {
+                    out += format!(".long {}", init).show(context).as_str();
+                } else {
+                    out += ".zero 4".to_string().show(context).as_str();
+                };
+                out += "\n";
+                context.unindent();
+                out
+            }
+        }
     }
 }
 
 impl CodeDisplay for String {
     fn show(&self, context: &mut DisplayContext) -> String {
-        format!("\n{:indent$}{}", "", self, indent = context.indent)
+        format!("{:indent$}{}", "", self, indent = context.indent)
     }
 }
 
@@ -272,10 +317,16 @@ impl CodeDisplay for Instruction {
             Instruction::Call(s) => {
                 let function_name = if context.is_mac {
                     "_".to_string() + s
-                } else if context.is_linux && !context.types.get(s).unwrap().is_defined {
-                    // if a function isn't defined in this file, call it from another file (ie
-                    // externally link it)
-                    s.to_string() + "@PLT"
+                } else if context.is_linux {
+                    if let StorageInfo::Function(false, true) =
+                        context.symbols.get(s).unwrap().storage
+                    {
+                        // if a function isn't defined in this file, call it from another file (ie
+                        // externally link it)
+                        s.to_string() + "@PLT"
+                    } else {
+                        s.to_string()
+                    }
                 } else {
                     s.to_string()
                 };
@@ -338,6 +389,13 @@ impl CodeDisplay for Operand {
                 name
             ),
             Operand::Stack(num) => format!("{}(%rbp)", num),
+            Operand::Data(name) => {
+                if context.is_mac {
+                    format!("_{}(%rip)", name)
+                } else {
+                    format!("{}(%rip)", name)
+                }
+            }
         }
     }
 }

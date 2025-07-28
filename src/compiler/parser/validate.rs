@@ -3,8 +3,8 @@ use std::{collections::HashMap, error::Error};
 
 use super::{
     Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode, FunctionDeclaration,
-    ProgramNode, StatementNode, SwitchMapKey, Type, TypeInfo, UnaryOperatorNode, Validate,
-    ValidateContext, ValidationPass, VariableDeclaration,
+    InitialValue, ProgramNode, StatementNode, StorageClass, StorageInfo, SwitchMapKey, SymbolInfo,
+    Type, UnaryOperatorNode, Validate, ValidateContext, ValidationPass, VariableDeclaration,
 };
 
 impl<T> Validate for Option<T>
@@ -46,6 +46,7 @@ impl Validate for FunctionDeclaration {
         if matches!(context.pass, ValidationPass::ReadLabels) {
             context.labels.insert(self.name.clone(), HashMap::new());
         }
+        let previous_function_name = context.current_function_name.clone();
         context.current_function_name = Some(self.name.clone());
 
         if matches!(context.pass, ValidationPass::TypeChecking) {
@@ -54,27 +55,43 @@ impl Validate for FunctionDeclaration {
                 self.params.iter().map(|(t, _name)| t.clone()).collect(),
             );
 
-            let mut is_defined = false;
-            if let Some(old_type_info) = context.types.get(&self.name) {
-                if this_type != old_type_info.t {
+            let mut is_defined = self.body.is_some();
+            let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
+
+            if let Some(old_symbol_info) = context.symbols.get(&self.name) {
+                if this_type != old_symbol_info.symbol_type {
                     return Err(format!(
                         "Incompatible types for function declarations: {:?} and {:?}",
-                        old_type_info, this_type,
+                        old_symbol_info.symbol_type, this_type,
                     )
                     .into());
                 }
-                is_defined = old_type_info.is_defined;
-                if is_defined && self.body.is_some() {
-                    return Err("Function is defined multiple times".into());
+                if let StorageInfo::Function(was_defined, was_global) = old_symbol_info.storage {
+                    if was_defined && self.body.is_some() {
+                        return Err("Function is defined multiple times".into());
+                    }
+                    if was_global && !is_global {
+                        return Err(
+                            "Static function clashes with previously-declared non-static function"
+                                .into(),
+                        );
+                    }
+
+                    is_defined |= was_defined;
+                    is_global = was_global;
+                } else {
+                    panic!(
+                        "Incorrect storage type for function: {:?}",
+                        old_symbol_info.storage
+                    )
                 }
             }
-            is_defined |= self.body.is_some();
 
-            context.types.insert(
+            context.symbols.insert(
                 self.name.clone(),
-                TypeInfo {
-                    t: this_type,
-                    is_defined,
+                SymbolInfo {
+                    symbol_type: this_type,
+                    storage: StorageInfo::Function(is_defined, is_global),
                 },
             );
 
@@ -84,11 +101,11 @@ impl Validate for FunctionDeclaration {
             // out either way).
             if self.body.is_some() {
                 for param in &self.params {
-                    context.types.insert(
+                    context.symbols.insert(
                         param.1.clone(),
-                        TypeInfo {
-                            t: param.0.clone(),
-                            is_defined: false,
+                        SymbolInfo {
+                            symbol_type: param.0.clone(),
+                            storage: StorageInfo::Automatic,
                         },
                     );
                 }
@@ -96,23 +113,137 @@ impl Validate for FunctionDeclaration {
         }
 
         self.body = self.body.validate(context)?;
-        // don't need to reset current_function_name here because nested function bodies aren't
-        // allowed
+        // reset current_function_name because it's an easy way to check if we are currently in a
+        // block scope or file scope at the moment. May need to revisit this.
+        context.current_function_name = previous_function_name;
         Ok(self)
     }
 }
 impl Validate for VariableDeclaration {
     fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
         if matches!(context.pass, ValidationPass::TypeChecking) {
-            context.types.insert(
-                self.name.clone(),
-                TypeInfo {
-                    t: self.out_type.clone(),
-                    is_defined: false,
-                },
-            );
+            if context.current_function_name.is_none() {
+                self = self.validate_file_scope(context)?
+            } else {
+                self = self.validate_block_scope(context)?
+            }
         }
         self.init = self.init.validate(context)?;
+        Ok(self)
+    }
+}
+
+impl VariableDeclaration {
+    fn validate_file_scope(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+        // println!("{:?}", self);
+        let mut initial_value = if let Some(ExpressionNode::IntegerConstant(i)) = self.init {
+            InitialValue::Initial(i)
+        } else if self.init.is_none() {
+            if matches!(self.storage_class, Some(StorageClass::Extern)) {
+                InitialValue::None
+            } else {
+                InitialValue::Tentative
+            }
+        } else {
+            return Err("Initialiser for file-scope variable must be constant".into());
+        };
+
+        let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
+        if let Some(old_symbol_info) = context.symbols.get(&self.name) {
+            if Type::Integer != old_symbol_info.symbol_type {
+                return Err(format!(
+                    "Incompatible type for variable declarations: {:?}",
+                    old_symbol_info.symbol_type,
+                )
+                .into());
+            }
+            if let StorageInfo::Static(old_init, was_global) = &old_symbol_info.storage {
+                if matches!(self.storage_class, Some(StorageClass::Extern)) {
+                    is_global = *was_global;
+                } else if is_global != *was_global {
+                    return Err("Conflicting variable linkage".into());
+                }
+
+                match old_init {
+                    InitialValue::Initial(_) => {
+                        if matches!(initial_value, InitialValue::Initial(_)) {
+                            return Err("Conflicting file-scope variable definitions".into());
+                        } else {
+                            initial_value = old_init.clone();
+                        }
+                    }
+                    InitialValue::Tentative => {
+                        if !matches!(initial_value, InitialValue::Initial(_)) {
+                            initial_value = InitialValue::Tentative;
+                        }
+                    }
+                    _ => {}
+                }
+            } else {
+                panic!(
+                    "Incorrect storage type for variable: {:?}",
+                    old_symbol_info.storage
+                )
+            }
+        }
+        context.symbols.insert(
+            self.name.clone(),
+            SymbolInfo {
+                symbol_type: self.out_type.clone(),
+                storage: StorageInfo::Static(initial_value, is_global),
+            },
+        );
+        Ok(self)
+    }
+
+    fn validate_block_scope(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+        match self.storage_class {
+            Some(StorageClass::Extern) => {
+                if self.init.is_some() {
+                    return Err("Extern block-scope variable may not have an initialiser".into());
+                }
+                if let Some(old_symbol_info) = context.symbols.get(&self.name) {
+                    if old_symbol_info.symbol_type != self.out_type {
+                        return Err("Variable redeclared with Incompatible type".into());
+                    }
+                } else {
+                    context.symbols.insert(
+                        self.name.clone(),
+                        SymbolInfo {
+                            symbol_type: self.out_type.clone(),
+                            storage: StorageInfo::Static(InitialValue::None, true),
+                        },
+                    );
+                }
+            }
+            Some(StorageClass::Static) => {
+                let initial_value = match self.init {
+                    Some(ExpressionNode::IntegerConstant(i)) => InitialValue::Initial(i),
+                    None => InitialValue::Initial(0),
+                    _ => {
+                        return Err(
+                            "Non-constant initialiser on block-scope static variable".into()
+                        );
+                    }
+                };
+                context.symbols.insert(
+                    self.name.clone(),
+                    SymbolInfo {
+                        symbol_type: self.out_type.clone(),
+                        storage: StorageInfo::Static(initial_value, false),
+                    },
+                );
+            }
+            None => {
+                context.symbols.insert(
+                    self.name.clone(),
+                    SymbolInfo {
+                        symbol_type: self.out_type.clone(),
+                        storage: StorageInfo::Automatic,
+                    },
+                );
+            }
+        }
         Ok(self)
     }
 }
@@ -564,10 +695,10 @@ impl ExpressionNode {
         match self {
             ExpressionNode::FunctionCall(name, args) => {
                 let type_info = context
-                    .types
+                    .symbols
                     .get(&name)
                     .expect("Function should have been defined");
-                if let Type::Function(_out, params) = &type_info.t {
+                if let Type::Function(_out, params) = &type_info.symbol_type {
                     if params.len() != args.len() {
                         return Err("Function call has the wrong number of arguments".into());
                     }
@@ -578,11 +709,11 @@ impl ExpressionNode {
             }
             ExpressionNode::Var(name) => {
                 let type_info = context
-                    .types
+                    .symbols
                     .get(&name)
                     .expect("Var should have been defined");
 
-                if type_info.t != Type::Integer {
+                if type_info.symbol_type != Type::Integer {
                     return Err("Function has been defined as a variable".into());
                 }
 
