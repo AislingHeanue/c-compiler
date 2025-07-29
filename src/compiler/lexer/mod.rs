@@ -49,6 +49,7 @@ pub enum Token {
     Comma,
     Identifier(String),
     IntegerConstant(usize),
+    LongConstant(usize),
     KeywordInt,
     KeywordVoid,
     KeywordReturn,
@@ -65,6 +66,7 @@ pub enum Token {
     KeywordDefault,
     KeywordExtern,
     KeywordStatic,
+    KeywordLong,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -124,7 +126,8 @@ lazy_static! {
                 Token::Colon => r":",
                 Token::Comma => r",",
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
-                Token::IntegerConstant(_) =>r"[0-9]+\b",
+                Token::IntegerConstant(_) => r"[0-9]+\b",
+                Token::LongConstant(_) => r"[0-9]+[lL]\b",
                 // small hack to avoid having to use Option<> in this block, use
                 // an empty string and then filter those out below
                 Token::KeywordInt => "",
@@ -143,6 +146,7 @@ lazy_static! {
                 Token::KeywordDefault => "",
                 Token::KeywordExtern => "",
                 Token::KeywordStatic => "",
+                Token::KeywordLong => "",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -175,9 +179,13 @@ impl Token {
                 "default" => Token::KeywordDefault,
                 "extern" => Token::KeywordExtern,
                 "static" => Token::KeywordStatic,
+                "long" => Token::KeywordLong,
                 _ => Token::Identifier(text.to_string()),
             },
             Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<usize>().unwrap()),
+            Token::LongConstant(_) => {
+                Token::LongConstant(text.trim_end_matches(['l', 'L']).parse::<usize>().unwrap())
+            }
             _ => self.clone(),
         }
     }

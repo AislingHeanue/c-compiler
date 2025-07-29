@@ -14,16 +14,16 @@ pub struct ProgramNode {
 
 #[derive(Debug)]
 pub struct FunctionDeclaration {
-    pub out_type: Type,
+    pub function_type: Type,
     pub name: String,
-    pub params: Vec<(Type, String)>,
+    pub params: Vec<String>,
     pub body: Option<Block>,
     pub storage_class: Option<StorageClass>,
 }
 
 #[derive(Debug)]
 pub struct VariableDeclaration {
-    pub out_type: Type,
+    pub variable_type: Type,
     pub name: String,
     pub init: Option<ExpressionNode>,
     pub storage_class: Option<StorageClass>,
@@ -65,9 +65,11 @@ pub enum DeclarationNode {
     Function(FunctionDeclaration),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Integer,
+    Long,
+    // return type, param types
     Function(Box<Type>, Vec<Type>),
 }
 
@@ -130,7 +132,7 @@ pub enum ForInitialiserNode {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ExpressionNode {
-    IntegerConstant(usize),
+    Constant(Constant),
     Unary(UnaryOperatorNode, Box<ExpressionNode>),
     Binary(BinaryOperatorNode, Box<ExpressionNode>, Box<ExpressionNode>),
     Var(String),
@@ -143,6 +145,14 @@ pub enum ExpressionNode {
     ),
     // function name, args...
     FunctionCall(String, Vec<ExpressionNode>),
+    // target type to cast expression to
+    Cast(Type, Box<ExpressionNode>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Constant {
+    Integer(usize),
+    Long(usize),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

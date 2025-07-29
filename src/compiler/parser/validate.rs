@@ -2,9 +2,10 @@ use itertools::process_results;
 use std::{collections::HashMap, error::Error};
 
 use super::{
-    Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode, FunctionDeclaration,
-    InitialValue, ProgramNode, StatementNode, StorageClass, StorageInfo, SwitchMapKey, SymbolInfo,
-    Type, UnaryOperatorNode, Validate, ValidateContext, ValidationPass, VariableDeclaration,
+    Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode, ForInitialiserNode,
+    FunctionDeclaration, InitialValue, ProgramNode, StatementNode, StorageClass, StorageInfo,
+    SwitchMapKey, SymbolInfo, Type, UnaryOperatorNode, Validate, ValidateContext, ValidationPass,
+    VariableDeclaration,
 };
 
 impl<T> Validate for Option<T>
@@ -50,16 +51,13 @@ impl Validate for FunctionDeclaration {
         context.current_function_name = Some(self.name.clone());
 
         if matches!(context.pass, ValidationPass::TypeChecking) {
-            let this_type = Type::Function(
-                Box::new(self.out_type.clone()),
-                self.params.iter().map(|(t, _name)| t.clone()).collect(),
-            );
+            let this_type = &self.function_type;
 
             let mut is_defined = self.body.is_some();
             let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
 
             if let Some(old_symbol_info) = context.symbols.get(&self.name) {
-                if this_type != old_symbol_info.symbol_type {
+                if *this_type != old_symbol_info.symbol_type {
                     return Err(format!(
                         "Incompatible types for function declarations: {:?} and {:?}",
                         old_symbol_info.symbol_type, this_type,
@@ -90,21 +88,28 @@ impl Validate for FunctionDeclaration {
             context.symbols.insert(
                 self.name.clone(),
                 SymbolInfo {
-                    symbol_type: this_type,
+                    symbol_type: this_type.clone(),
                     storage: StorageInfo::Function(is_defined, is_global),
                 },
             );
+            let arg_types = match this_type {
+                Type::Function(_, v) => v,
+                _ => return Err("Incorrect Type for function".into()),
+            };
 
             // add the parameters to the types map if this function has a body. This is done
             // because it allows those parameters to be type checked in the scope that they are
             // actually used (ie, params names from declarations which don't have bodies are thrown
             // out either way).
             if self.body.is_some() {
-                for param in &self.params {
+                for (i, param) in self.params.iter().enumerate() {
                     context.symbols.insert(
-                        param.1.clone(),
+                        param.clone(),
                         SymbolInfo {
-                            symbol_type: param.0.clone(),
+                            symbol_type: arg_types
+                                .get(i)
+                                .expect("Function should have as many args as specified parameters")
+                                .clone(),
                             storage: StorageInfo::Automatic,
                         },
                     );
@@ -136,17 +141,18 @@ impl Validate for VariableDeclaration {
 impl VariableDeclaration {
     fn validate_file_scope(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
         // println!("{:?}", self);
-        let mut initial_value = if let Some(ExpressionNode::IntegerConstant(i)) = self.init {
-            InitialValue::Initial(i)
-        } else if self.init.is_none() {
-            if matches!(self.storage_class, Some(StorageClass::Extern)) {
-                InitialValue::None
+        let mut initial_value =
+            if let Some(ExpressionNode::Constant(Constant::Integer(i))) = self.init {
+                InitialValue::Initial(i)
+            } else if self.init.is_none() {
+                if matches!(self.storage_class, Some(StorageClass::Extern)) {
+                    InitialValue::None
+                } else {
+                    InitialValue::Tentative
+                }
             } else {
-                InitialValue::Tentative
-            }
-        } else {
-            return Err("Initialiser for file-scope variable must be constant".into());
-        };
+                return Err("Initialiser for file-scope variable must be constant".into());
+            };
 
         let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
         if let Some(old_symbol_info) = context.symbols.get(&self.name) {
@@ -189,7 +195,7 @@ impl VariableDeclaration {
         context.symbols.insert(
             self.name.clone(),
             SymbolInfo {
-                symbol_type: self.out_type.clone(),
+                symbol_type: self.variable_type.clone(),
                 storage: StorageInfo::Static(initial_value, is_global),
             },
         );
@@ -203,14 +209,14 @@ impl VariableDeclaration {
                     return Err("Extern block-scope variable may not have an initialiser".into());
                 }
                 if let Some(old_symbol_info) = context.symbols.get(&self.name) {
-                    if old_symbol_info.symbol_type != self.out_type {
+                    if old_symbol_info.symbol_type != self.variable_type {
                         return Err("Variable redeclared with Incompatible type".into());
                     }
                 } else {
                     context.symbols.insert(
                         self.name.clone(),
                         SymbolInfo {
-                            symbol_type: self.out_type.clone(),
+                            symbol_type: self.variable_type.clone(),
                             storage: StorageInfo::Static(InitialValue::None, true),
                         },
                     );
@@ -218,7 +224,9 @@ impl VariableDeclaration {
             }
             Some(StorageClass::Static) => {
                 let initial_value = match self.init {
-                    Some(ExpressionNode::IntegerConstant(i)) => InitialValue::Initial(i),
+                    Some(ExpressionNode::Constant(Constant::Integer(i))) => {
+                        InitialValue::Initial(i)
+                    }
                     None => InitialValue::Initial(0),
                     _ => {
                         return Err(
@@ -229,7 +237,7 @@ impl VariableDeclaration {
                 context.symbols.insert(
                     self.name.clone(),
                     SymbolInfo {
-                        symbol_type: self.out_type.clone(),
+                        symbol_type: self.variable_type.clone(),
                         storage: StorageInfo::Static(initial_value, false),
                     },
                 );
@@ -238,7 +246,7 @@ impl VariableDeclaration {
                 context.symbols.insert(
                     self.name.clone(),
                     SymbolInfo {
-                        symbol_type: self.out_type.clone(),
+                        symbol_type: self.variable_type.clone(),
                         storage: StorageInfo::Automatic,
                     },
                 );
@@ -531,8 +539,8 @@ impl StatementNode {
         _context: &mut ValidateContext,
     ) -> Result<Self, Box<dyn Error>> {
         if let StatementNode::Case(expression, body, label) = self {
-            if let ExpressionNode::IntegerConstant(i) = expression {
-                self = StatementNode::Case(ExpressionNode::IntegerConstant(i), body, label);
+            if let ExpressionNode::Constant(c) = expression {
+                self = StatementNode::Case(ExpressionNode::Constant(c), body, label);
                 Ok(self)
             } else {
                 Err(format!("Case expression must be constant, got {:?}", expression).into())
@@ -621,7 +629,7 @@ impl Validate for ExpressionNode {
         }
 
         match self {
-            ExpressionNode::IntegerConstant(_) => {}
+            ExpressionNode::Constant(_) => {}
             ExpressionNode::Unary(op, src) => {
                 self = ExpressionNode::Unary(op, Box::new(src.validate(context)?))
             }
@@ -649,6 +657,7 @@ impl Validate for ExpressionNode {
             ExpressionNode::FunctionCall(name, params) => {
                 self = ExpressionNode::FunctionCall(name, params.validate(context)?)
             }
+            ExpressionNode::Cast(_, _) => todo!(),
         }
         Ok(self)
     }

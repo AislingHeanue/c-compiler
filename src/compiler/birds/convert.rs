@@ -3,9 +3,9 @@ use std::error::Error;
 use itertools::process_results;
 
 use crate::compiler::parser::{
-    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
-    FunctionDeclaration, InitialValue, ProgramNode, StatementNode, StorageInfo, SwitchMapKey,
-    UnaryOperatorNode, VariableDeclaration,
+    BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
+    ForInitialiserNode, FunctionDeclaration, InitialValue, ProgramNode, StatementNode, StorageInfo,
+    SwitchMapKey, UnaryOperatorNode, VariableDeclaration,
 };
 
 use super::{
@@ -56,7 +56,7 @@ impl Convert for FunctionDeclaration {
 
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         let name = self.name;
-        let params = self.params.iter().map(|param| param.1.clone()).collect();
+        let params = self.params.to_vec();
         if let Some(body) = self.body {
             let mut instructions = body.convert(context)?;
             // add an extra "return 0;" at the end because the C standard dictates that if main() exits
@@ -415,8 +415,12 @@ impl Convert for ExpressionNode {
         context: &mut ConvertContext,
     ) -> Result<(Vec<BirdsInstructionNode>, BirdsValueNode), Box<dyn Error>> {
         match self {
-            ExpressionNode::IntegerConstant(c) => {
+            ExpressionNode::Constant(Constant::Integer(c)) => {
                 Ok((Vec::new(), BirdsValueNode::IntegerConstant(c)))
+            }
+            ExpressionNode::Constant(Constant::Long(_c)) => {
+                todo!()
+                // Ok((Vec::new(), BirdsValueNode::IntegerConstant(c)))
             }
             ExpressionNode::Var(name) => Ok((Vec::new(), BirdsValueNode::Var(name))),
             ExpressionNode::Assignment(left, right) => {
@@ -644,6 +648,7 @@ impl Convert for ExpressionNode {
 
                 Ok((instructions, new_dst))
             }
+            ExpressionNode::Cast(_, _) => todo!(),
         }
     }
 }

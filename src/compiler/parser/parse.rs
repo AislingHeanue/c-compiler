@@ -1,7 +1,7 @@
 use super::{
-    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode, ForInitialiserNode,
-    FunctionDeclaration, Parse, ProgramNode, StatementNode, StorageClass, Type, UnaryOperatorNode,
-    VariableDeclaration,
+    BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
+    ForInitialiserNode, FunctionDeclaration, Parse, ProgramNode, StatementNode, StorageClass, Type,
+    UnaryOperatorNode, VariableDeclaration,
 };
 use crate::compiler::{lexer::Token, parser::ParseContext};
 use std::{
@@ -9,6 +9,48 @@ use std::{
     error::Error,
     mem::discriminant,
 };
+
+fn match_specifier(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
+    Ok(match_type(tokens)? || matches!(peek(tokens)?, Token::KeywordStatic | Token::KeywordExtern))
+}
+
+fn match_type(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
+    Ok(matches!(
+        peek(tokens)?,
+        Token::KeywordLong | Token::KeywordInt
+    ))
+}
+
+fn match_unary_operator(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
+    Ok(matches!(
+        peek(tokens)?,
+        Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement
+    ))
+}
+
+fn match_constant(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
+    Ok(matches!(
+        peek(tokens)?,
+        Token::IntegerConstant(_) | Token::LongConstant(_)
+    ))
+}
+
+fn match_assignment(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
+    Ok(matches!(
+        peek(tokens)?,
+        Token::Assignment
+            | Token::AddAssign
+            | Token::SubtractAssign
+            | Token::MultiplyAssign
+            | Token::DivideAssign
+            | Token::ModAssign
+            | Token::AndAssign
+            | Token::XorAssign
+            | Token::OrAssign
+            | Token::ShiftLeftAssign
+            | Token::ShiftRightAssign
+    ))
+}
 
 fn expect(tokens: &mut VecDeque<Token>, expected: Token) -> Result<(), Box<dyn Error>> {
     // println!("{:?}", expected);
@@ -30,7 +72,7 @@ fn read(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
         .ok_or::<Box<dyn Error>>("Unexpected end of tokens".into())
 }
 
-fn peek(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
+fn peek(tokens: &VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
     // println!("peeking {:?}", tokens.front());
     Ok(tokens
         .front()
@@ -123,35 +165,59 @@ impl FunctionDeclaration {
     fn parse_params(
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
-    ) -> Result<Vec<(Type, String)>, Box<dyn Error>> {
+    ) -> Result<(Vec<Type>, Vec<String>), Box<dyn Error>> {
         if matches!(peek(tokens)?, Token::KeywordVoid) {
             expect(tokens, Token::KeywordVoid)?;
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
 
-        let mut params: Vec<(Type, String)> =
-            vec![FunctionDeclaration::parse_param(tokens, context)?];
+        let type_and_param = FunctionDeclaration::parse_param(tokens, context)?;
+        let (mut types, mut params) = (vec![type_and_param.0], vec![type_and_param.1]);
 
         while matches!(peek(tokens)?, Token::Comma) {
             expect(tokens, Token::Comma)?;
-            params.push(FunctionDeclaration::parse_param(tokens, context)?)
+            let type_and_param = FunctionDeclaration::parse_param(tokens, context)?;
+            types.push(type_and_param.0);
+            params.push(type_and_param.1);
         }
 
-        Ok(params)
+        Ok((types, params))
     }
 
     fn parse_param(
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<(Type, String), Box<dyn Error>> {
-        let out_type = match read(tokens)? {
-            Token::KeywordInt => Type::Integer,
-            t => return Err(format!("Invalid type in parameter: {:?}", t).into()),
-        };
-
+        let out_type = Type::parse(tokens, context)?;
         let name = new_identifier(read(tokens)?, false, context, None)?;
 
         Ok((out_type, name))
+    }
+}
+
+impl Parse for Type {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        _context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        let mut out = Vec::new();
+        while !tokens.is_empty() && match_type(tokens)? {
+            out.push(read(tokens)?)
+        }
+        Ok(match out.len() {
+            0 => return Err("No type identifier found".into()),
+            1 => match out[0] {
+                Token::KeywordInt => Type::Integer,
+                Token::KeywordLong => Type::Long,
+                _ => unreachable!(),
+            },
+            2 => match (&out[0], &out[1]) {
+                (Token::KeywordLong, Token::KeywordInt) => Type::Long,
+                (Token::KeywordInt, Token::KeywordLong) => Type::Long,
+                _ => return Err(format!("Invalid type: {:?}", out).into()),
+            },
+            _ => return Err(format!("Invalid type: {:?}", out).into()),
+        })
     }
 }
 
@@ -200,24 +266,23 @@ impl Parse for BlockItemNode {
         if tokens.is_empty() {
             return Err("Block item has no tokens".into());
         }
-        match peek(tokens)? {
-            Token::KeywordInt | Token::KeywordStatic | Token::KeywordExtern => {
-                let declaration = DeclarationNode::parse(tokens, context)?;
-                if let DeclarationNode::Function(ref f) = declaration {
-                    if f.body.is_some() && !context.do_not_validate {
-                        return Err("Block-scope function declaration may not have a body".into());
-                    }
-                    if matches!(f.storage_class, Some(StorageClass::Static))
-                        && !context.do_not_validate
-                    {
-                        return Err("Block-scope function declaration may not be static".into());
-                    }
+
+        if match_specifier(tokens)? {
+            let declaration = DeclarationNode::parse(tokens, context)?;
+            if let DeclarationNode::Function(ref f) = declaration {
+                if f.body.is_some() && !context.do_not_validate {
+                    return Err("Block-scope function declaration may not have a body".into());
                 }
-                Ok(BlockItemNode::Declaration(declaration))
+                if matches!(f.storage_class, Some(StorageClass::Static)) && !context.do_not_validate
+                {
+                    return Err("Block-scope function declaration may not be static".into());
+                }
             }
-            _ => Ok(BlockItemNode::Statement(StatementNode::parse(
+            Ok(BlockItemNode::Declaration(declaration))
+        } else {
+            Ok(BlockItemNode::Statement(StatementNode::parse(
                 tokens, context,
-            )?)),
+            )?))
         }
     }
 }
@@ -227,33 +292,27 @@ impl Parse for ForInitialiserNode {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        match peek(tokens)? {
-            Token::KeywordInt | Token::KeywordExtern | Token::KeywordStatic => {
-                let block_item = BlockItemNode::parse(tokens, context)?;
-                if let BlockItemNode::Declaration(DeclarationNode::Variable(v)) = block_item {
-                    if !context.do_not_validate && v.storage_class.is_some() {
-                        return Err(
-                            "For initialiser must not be declared as static or extern".into()
-                        );
-                    }
-                    Ok(ForInitialiserNode::Declaration(v))
-                } else if let BlockItemNode::Statement(StatementNode::Expression(expression)) =
-                    block_item
-                {
-                    Ok(ForInitialiserNode::Expression(Some(expression)))
-                } else {
-                    Err("Unexpected function declaration in the initialiser of a for loop".into())
+        if match_specifier(tokens)? {
+            let block_item = BlockItemNode::parse(tokens, context)?;
+            if let BlockItemNode::Declaration(DeclarationNode::Variable(v)) = block_item {
+                if !context.do_not_validate && v.storage_class.is_some() {
+                    return Err("For initialiser must not be declared as static or extern".into());
                 }
+                Ok(ForInitialiserNode::Declaration(v))
+            } else if let BlockItemNode::Statement(StatementNode::Expression(expression)) =
+                block_item
+            {
+                Ok(ForInitialiserNode::Expression(Some(expression)))
+            } else {
+                Err("Unexpected function declaration in the initialiser of a for loop".into())
             }
-            _ => {
-                let expression = ForInitialiserNode::Expression(Option::<ExpressionNode>::parse(
-                    tokens, context,
-                )?);
-                // pop the extra semi-colon off of tokens, since expressions themselves don't
-                // expect semi-colons
-                expect(tokens, Token::SemiColon)?;
-                Ok(expression)
-            }
+        } else {
+            let expression =
+                ForInitialiserNode::Expression(Option::<ExpressionNode>::parse(tokens, context)?);
+            // pop the extra semi-colon off of tokens, since expressions themselves don't
+            // expect semi-colons
+            expect(tokens, Token::SemiColon)?;
+            Ok(expression)
         }
     }
 }
@@ -289,14 +348,15 @@ impl Parse for DeclarationNode {
             Token::OpenParen => {
                 let name = new_identifier(name_token, true, context, storage_class.clone())?;
                 let original_outer_scope_variables = enter_scope(context);
-                let params = FunctionDeclaration::parse_params(tokens, context)?;
+                let (types, params) = FunctionDeclaration::parse_params(tokens, context)?;
                 expect(tokens, Token::CloseParen)?;
+                let function_type = Type::Function(Box::new(out_type), types);
 
                 let output_function = match peek(tokens)? {
                     Token::SemiColon => {
                         expect(tokens, Token::SemiColon)?;
                         FunctionDeclaration {
-                            out_type,
+                            function_type,
                             name,
                             params,
                             body: None,
@@ -309,7 +369,7 @@ impl Parse for DeclarationNode {
                         let body = Block::parse(tokens, context)?;
 
                         FunctionDeclaration {
-                            out_type,
+                            function_type,
                             name,
                             params,
                             body: Some(body),
@@ -334,7 +394,7 @@ impl Parse for DeclarationNode {
                     storage_class.clone(),
                 )?;
                 Ok(DeclarationNode::Variable(VariableDeclaration {
-                    out_type,
+                    variable_type: out_type,
                     name,
                     init: None,
                     storage_class,
@@ -351,7 +411,7 @@ impl Parse for DeclarationNode {
                 let expression = ExpressionNode::parse(tokens, context)?;
                 expect(tokens, Token::SemiColon)?;
                 Ok(DeclarationNode::Variable(VariableDeclaration {
-                    out_type,
+                    variable_type: out_type,
                     name,
                     init: Some(expression),
                     storage_class,
@@ -548,82 +608,72 @@ impl ExpressionNode {
             if precedence < level {
                 break;
             }
-            match peek(tokens)? {
-                Token::Assignment
-                | Token::AddAssign
-                | Token::SubtractAssign
-                | Token::MultiplyAssign
-                | Token::DivideAssign
-                | Token::ModAssign
-                | Token::AndAssign
-                | Token::XorAssign
-                | Token::OrAssign
-                | Token::ShiftLeftAssign
-                | Token::ShiftRightAssign => {
-                    let operator_token = read(tokens)?;
-                    let right =
-                        ExpressionNode::parse_with_level(tokens, context, precedence, false)?;
-                    left = if let Token::Assignment = operator_token {
-                        ExpressionNode::Assignment(Box::new(left), Box::new(right.unwrap()))
-                    } else {
-                        let operator = match operator_token {
-                            Token::AddAssign => BinaryOperatorNode::Add,
-                            Token::SubtractAssign => BinaryOperatorNode::Subtract,
-                            Token::MultiplyAssign => BinaryOperatorNode::Multiply,
-                            Token::DivideAssign => BinaryOperatorNode::Divide,
-                            Token::ModAssign => BinaryOperatorNode::Mod,
-                            Token::AndAssign => BinaryOperatorNode::BitwiseAnd,
-                            Token::XorAssign => BinaryOperatorNode::BitwiseXor,
-                            Token::OrAssign => BinaryOperatorNode::BitwiseOr,
-                            Token::ShiftLeftAssign => BinaryOperatorNode::ShiftLeft,
-                            Token::ShiftRightAssign => BinaryOperatorNode::ShiftRight,
-                            _ => unreachable!(
-                                "Can't use {:?} as an assignment operator",
-                                operator_token
-                            ),
-                        };
-                        ExpressionNode::Assignment(
-                            Box::new(left.clone()),
-                            Box::new(ExpressionNode::Binary(
-                                operator,
-                                Box::new(left),
-                                Box::new(right.unwrap()),
-                            )),
-                        )
+            if match_assignment(tokens)? {
+                let operator_token = read(tokens)?;
+                let right = ExpressionNode::parse_with_level(tokens, context, precedence, false)?;
+                left = if let Token::Assignment = operator_token {
+                    ExpressionNode::Assignment(Box::new(left), Box::new(right.unwrap()))
+                } else {
+                    let operator = match operator_token {
+                        Token::AddAssign => BinaryOperatorNode::Add,
+                        Token::SubtractAssign => BinaryOperatorNode::Subtract,
+                        Token::MultiplyAssign => BinaryOperatorNode::Multiply,
+                        Token::DivideAssign => BinaryOperatorNode::Divide,
+                        Token::ModAssign => BinaryOperatorNode::Mod,
+                        Token::AndAssign => BinaryOperatorNode::BitwiseAnd,
+                        Token::XorAssign => BinaryOperatorNode::BitwiseXor,
+                        Token::OrAssign => BinaryOperatorNode::BitwiseOr,
+                        Token::ShiftLeftAssign => BinaryOperatorNode::ShiftLeft,
+                        Token::ShiftRightAssign => BinaryOperatorNode::ShiftRight,
+                        _ => {
+                            unreachable!("Can't use {:?} as an assignment operator", operator_token)
+                        }
                     };
-                }
-                Token::Increment | Token::Decrement => {
-                    left = ExpressionNode::Unary(
-                        UnaryOperatorNode::parse_as_suffix(tokens, context)?,
-                        Box::new(left),
-                    );
-                }
-                Token::Question => {
-                    expect(tokens, Token::Question)?;
-                    // parse this expression with precedence level reset
-                    let middle = ExpressionNode::parse(tokens, context)?;
-                    expect(tokens, Token::Colon)?;
-                    let end = ExpressionNode::parse_with_level(tokens, context, precedence, false)?;
-                    left = ExpressionNode::Ternary(
-                        Box::new(left),
-                        Box::new(middle),
-                        Box::new(end.unwrap()),
+                    ExpressionNode::Assignment(
+                        Box::new(left.clone()),
+                        Box::new(ExpressionNode::Binary(
+                            operator,
+                            Box::new(left),
+                            Box::new(right.unwrap()),
+                        )),
                     )
-                }
-                _ => {
-                    left = ExpressionNode::Binary(
-                        BinaryOperatorNode::parse(tokens, context)?,
-                        Box::new(left),
-                        Box::new(
-                            ExpressionNode::parse_with_level(
-                                tokens,
-                                context,
-                                precedence + 1,
-                                false,
-                            )?
-                            .unwrap(),
-                        ),
-                    );
+                };
+            } else {
+                match peek(tokens)? {
+                    Token::Increment | Token::Decrement => {
+                        left = ExpressionNode::Unary(
+                            UnaryOperatorNode::parse_as_suffix(tokens, context)?,
+                            Box::new(left),
+                        );
+                    }
+                    Token::Question => {
+                        expect(tokens, Token::Question)?;
+                        // parse this expression with precedence level reset
+                        let middle = ExpressionNode::parse(tokens, context)?;
+                        expect(tokens, Token::Colon)?;
+                        let end =
+                            ExpressionNode::parse_with_level(tokens, context, precedence, false)?;
+                        left = ExpressionNode::Ternary(
+                            Box::new(left),
+                            Box::new(middle),
+                            Box::new(end.unwrap()),
+                        )
+                    }
+                    _ => {
+                        left = ExpressionNode::Binary(
+                            BinaryOperatorNode::parse(tokens, context)?,
+                            Box::new(left),
+                            Box::new(
+                                ExpressionNode::parse_with_level(
+                                    tokens,
+                                    context,
+                                    precedence + 1,
+                                    false,
+                                )?
+                                .unwrap(),
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -636,63 +686,68 @@ impl ExpressionNode {
         context: &mut ParseContext,
         allow_empty: bool,
     ) -> Result<Option<Self>, Box<dyn Error>> {
-        let expression = match peek(tokens)? {
-            Token::IntegerConstant(value) => {
-                expect(tokens, Token::IntegerConstant(0))?;
-                Some(ExpressionNode::IntegerConstant(value))
-            }
-            Token::OpenParen => {
-                expect(tokens, Token::OpenParen)?;
-                let expression = ExpressionNode::parse(tokens, context)?;
-                expect(tokens, Token::CloseParen)?;
-                Some(expression)
-            }
-            Token::Identifier(name) => {
-                expect(tokens, Token::Identifier("".to_string()))?;
-                match peek(tokens)? {
-                    // this is a function call !!
-                    Token::OpenParen => {
-                        let (new_name, _external_link) =
-                            ExpressionNode::resolve_identifier(&name, context)?;
-
-                        expect(tokens, Token::OpenParen)?;
-                        let mut arguments: Vec<ExpressionNode> = Vec::new();
-                        if !matches!(peek(tokens)?, Token::CloseParen) {
-                            arguments.push(ExpressionNode::parse(tokens, context)?);
-                        }
-                        while matches!(peek(tokens)?, Token::Comma) {
-                            expect(tokens, Token::Comma)?;
-                            arguments.push(ExpressionNode::parse(tokens, context)?);
-                        }
+        let expression = if match_unary_operator(tokens)? {
+            let operator = UnaryOperatorNode::parse(tokens, context)?;
+            let precedence = UnaryOperatorNode::precedence(); // all unary operators have the
+                                                              // same precedence
+            let expression = ExpressionNode::parse_with_level(tokens, context, precedence, false)?;
+            Some(ExpressionNode::Unary(
+                operator,
+                Box::new(expression.unwrap()),
+            ))
+        } else if match_constant(tokens)? {
+            Some(ExpressionNode::Constant(Constant::parse(tokens, context)?))
+        } else {
+            match peek(tokens)? {
+                Token::OpenParen => {
+                    expect(tokens, Token::OpenParen)?;
+                    if match_type(tokens)? {
+                        let cast_type = Type::parse(tokens, context)?;
                         expect(tokens, Token::CloseParen)?;
-
-                        Some(ExpressionNode::FunctionCall(new_name, arguments))
-                    }
-                    _ => {
-                        // VALIDATION STEP: Check the variable has been declared
-                        let (new_name, _external_link) =
-                            ExpressionNode::resolve_identifier(&name, context)?;
-
-                        Some(ExpressionNode::Var(new_name))
+                        let factor = ExpressionNode::parse_factor(tokens, context, false)?.unwrap();
+                        Some(ExpressionNode::Cast(cast_type, Box::new(factor)))
+                    } else {
+                        let expression = ExpressionNode::parse(tokens, context)?;
+                        expect(tokens, Token::CloseParen)?;
+                        Some(expression)
                     }
                 }
-            }
-            Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement => {
-                let operator = UnaryOperatorNode::parse(tokens, context)?;
-                let precedence = UnaryOperatorNode::precedence(); // all unary operators have the
-                                                                  // same precedence
-                let expression =
-                    ExpressionNode::parse_with_level(tokens, context, precedence, false)?;
-                Some(ExpressionNode::Unary(
-                    operator,
-                    Box::new(expression.unwrap()),
-                ))
-            }
-            t => {
-                if allow_empty {
-                    None
-                } else {
-                    return Err(format!("Invalid token at start of expression: {:?}", t).into());
+                Token::Identifier(name) => {
+                    expect(tokens, Token::Identifier("".to_string()))?;
+                    match peek(tokens)? {
+                        // this is a function call !!
+                        Token::OpenParen => {
+                            let (new_name, _external_link) =
+                                ExpressionNode::resolve_identifier(&name, context)?;
+
+                            expect(tokens, Token::OpenParen)?;
+                            let mut arguments: Vec<ExpressionNode> = Vec::new();
+                            if !matches!(peek(tokens)?, Token::CloseParen) {
+                                arguments.push(ExpressionNode::parse(tokens, context)?);
+                            }
+                            while matches!(peek(tokens)?, Token::Comma) {
+                                expect(tokens, Token::Comma)?;
+                                arguments.push(ExpressionNode::parse(tokens, context)?);
+                            }
+                            expect(tokens, Token::CloseParen)?;
+
+                            Some(ExpressionNode::FunctionCall(new_name, arguments))
+                        }
+                        _ => {
+                            // VALIDATION STEP: Check the variable has been declared
+                            let (new_name, _external_link) =
+                                ExpressionNode::resolve_identifier(&name, context)?;
+
+                            Some(ExpressionNode::Var(new_name))
+                        }
+                    }
+                }
+                t => {
+                    if allow_empty {
+                        None
+                    } else {
+                        return Err(format!("Invalid token at start of expression: {:?}", t).into());
+                    }
                 }
             }
         };
@@ -721,6 +776,33 @@ impl ExpressionNode {
         } else {
             Err(format!("Identifier used before declaration: {}", name).into())
         }
+    }
+}
+
+impl Parse for Constant {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        _context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        let (is_int, numeric_value) = match read(tokens)? {
+            Token::IntegerConstant(v) => (true, v),
+            Token::LongConstant(v) => (false, v),
+            _ => unreachable!(),
+        };
+
+        if numeric_value >= 2_usize.pow(63) {
+            return Err(format!(
+                "value will not fit in either a long or an int: {}",
+                numeric_value
+            )
+            .into());
+        }
+
+        Ok(if is_int && numeric_value < 2_usize.pow(31) {
+            Constant::Integer(numeric_value)
+        } else {
+            Constant::Long(numeric_value)
+        })
     }
 }
 
@@ -855,17 +937,14 @@ impl BinaryOperatorNode {
 impl Parse for (Type, Option<StorageClass>) {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        _context: &mut ParseContext,
+        context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         // Specifiers may be one of "static", "int" or "extern"
         // ... and there may be any non-zero amount of them
         let mut storage_classes = Vec::new();
         let mut types = Vec::new();
-        while matches!(
-            peek(tokens)?,
-            Token::KeywordInt | Token::KeywordStatic | Token::KeywordExtern
-        ) {
-            if matches!(peek(tokens)?, Token::KeywordInt) {
+        while match_specifier(tokens)? {
+            if match_type(tokens)? {
                 types.push(read(tokens)?);
             } else {
                 storage_classes.push(read(tokens)?);
@@ -880,8 +959,8 @@ impl Parse for (Type, Option<StorageClass>) {
             .into());
         }
 
-        if types.len() != 1 {
-            return Err(format!("Incorrect number of types in declaration: {:?}", types).into());
+        if types.is_empty() {
+            return Err("Missing types in declaration".into());
         }
 
         let storage = storage_classes.first().map(|t| match t {
@@ -890,11 +969,7 @@ impl Parse for (Type, Option<StorageClass>) {
             _ => unreachable!(),
         });
 
-        let this_type = match types.first().unwrap() {
-            Token::KeywordInt => Type::Integer,
-            _ => unreachable!(),
-        };
-
+        let this_type = Type::parse(&mut types.into(), context)?;
         Ok((this_type, storage))
     }
 }

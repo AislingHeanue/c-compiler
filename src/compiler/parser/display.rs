@@ -1,14 +1,16 @@
 use itertools::Itertools;
 
 use super::{
-    BinaryOperatorNode, Block, BlockItemNode, CodeDisplay, DeclarationNode, DisplayContext,
-    ExpressionNode, ForInitialiserNode, FunctionDeclaration, ProgramNode, StatementNode, Type,
-    UnaryOperatorNode, VariableDeclaration,
+    BinaryOperatorNode, Block, BlockItemNode, CodeDisplay, Constant, DeclarationNode,
+    DisplayContext, ExpressionNode, ForInitialiserNode, FunctionDeclaration, ProgramNode,
+    StatementNode, Type, UnaryOperatorNode, VariableDeclaration,
 };
 use std::{borrow::Borrow, fmt::Display};
 
 impl Display for ProgramNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // silly inclusion to make the output code more like Go.
+        // writeln!(f, "package main")?;
         write!(
             f,
             "{}",
@@ -58,7 +60,7 @@ impl CodeDisplay for StatementNode {
             StatementNode::If(condition, then, otherwise) => {
                 if let Some(other) = otherwise.borrow() {
                     format!(
-                        "{}if ({}) {} else {}",
+                        "{}if {} {} else {}",
                         context.new_line_start(),
                         condition.show(&mut context.indent()),
                         then.show(context),
@@ -66,7 +68,7 @@ impl CodeDisplay for StatementNode {
                     )
                 } else {
                     format!(
-                        "{}if ({}) {}",
+                        "{}if {} {}",
                         context.new_line_start(),
                         condition.show(&mut context.indent()),
                         then.show(context),
@@ -168,45 +170,54 @@ impl CodeDisplay for VariableDeclaration {
     fn show(&self, context: &mut DisplayContext) -> String {
         if let Some(init) = &self.init {
             format!(
-                "{} {} = {}",
-                self.out_type.show(context),
+                "var {} {} = {}",
                 self.name,
+                self.variable_type.show(context),
                 init.show(&mut context.indent()),
             )
         } else {
-            format!("{} {}", self.out_type.show(context), self.name,)
+            format!("{} {}", self.variable_type.show(context), self.name,)
         }
     }
 }
 
 impl CodeDisplay for FunctionDeclaration {
     fn show(&self, context: &mut DisplayContext) -> String {
+        let (out_type, param_types) = match &self.function_type {
+            Type::Function(out, params) => (out, params),
+            _ => unreachable!(),
+        };
+        let show_params = param_types
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("{} {}", self.params[i], p.show(context)))
+            .join(", ");
+
         if let Some(body) = &self.body {
             format!(
-                "{} {}({}) {{{}\n{:indent$}}}",
-                self.out_type.show(context),
+                "func {}({}) {} {{{}\n{:indent$}}}",
+                // self.function_type.show(context),
                 self.name,
-                self.params.show(&mut context.indent()),
+                show_params,
+                out_type.show(context),
                 body.show(&mut context.indent()),
                 "",
                 indent = context.indent
             )
         } else {
             format!(
-                "{} {}({});",
-                self.out_type.show(context),
+                "var {} func({}) {};",
                 self.name,
-                self.params.show(&mut context.indent()),
+                show_params,
+                out_type.show(context),
             )
         }
     }
 }
 
-impl CodeDisplay for Vec<(Type, String)> {
-    fn show(&self, context: &mut DisplayContext) -> String {
-        self.iter()
-            .map(|(t, s)| format!("{} {}", t.show(context), s))
-            .join(", ")
+impl CodeDisplay for Vec<String> {
+    fn show(&self, _context: &mut DisplayContext) -> String {
+        self.iter().join(", ")
     }
 }
 
@@ -226,6 +237,7 @@ impl CodeDisplay for Type {
             Type::Function(output, inputs) => {
                 format!("func ({}) {}", inputs.show(context), output.show(context))
             }
+            Type::Long => "int64".to_string(),
         }
     }
 }
@@ -257,10 +269,10 @@ impl CodeDisplay for Option<ExpressionNode> {
 impl CodeDisplay for ExpressionNode {
     fn show(&self, context: &mut DisplayContext) -> String {
         match self {
-            ExpressionNode::IntegerConstant(value) => value.to_string(),
+            ExpressionNode::Constant(c) => c.show(context),
             ExpressionNode::Unary(operator, exp) => {
                 format!(
-                    "({}{})",
+                    "{}{}",
                     operator.show(&mut context.indent()),
                     exp.show(&mut context.indent()),
                 )
@@ -288,6 +300,18 @@ impl CodeDisplay for ExpressionNode {
             ExpressionNode::FunctionCall(name, args) => {
                 format!("{}({})", name, args.show(&mut context.indent()))
             }
+            ExpressionNode::Cast(target_type, e) => {
+                format!("{}({})", target_type.show(context), e.show(context))
+            }
+        }
+    }
+}
+
+impl CodeDisplay for Constant {
+    fn show(&self, _context: &mut DisplayContext) -> String {
+        match self {
+            Constant::Integer(c) => c.to_string(),
+            Constant::Long(c) => format!("uint64({})", c),
         }
     }
 }
