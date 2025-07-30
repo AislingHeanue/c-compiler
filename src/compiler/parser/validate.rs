@@ -1,22 +1,21 @@
-use itertools::process_results;
 use std::{collections::HashMap, error::Error};
 
 use super::{
-    Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode, ForInitialiserNode,
-    FunctionDeclaration, InitialValue, ProgramNode, StatementNode, StorageClass, StorageInfo,
-    SwitchMapKey, SymbolInfo, Type, UnaryOperatorNode, Validate, ValidateContext, ValidationPass,
-    VariableDeclaration,
+    BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
+    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialValue, ProgramNode,
+    StatementNode, StaticInitial, StorageClass, StorageInfo, SwitchMapKey, SymbolInfo, Type,
+    UnaryOperatorNode, Validate, ValidateContext, ValidationPass, VariableDeclaration,
 };
 
 impl<T> Validate for Option<T>
 where
     T: Validate,
 {
-    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         if let Some(e) = self {
-            self = Some(e.validate(context)?)
+            e.validate(context)?;
         }
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -24,126 +23,131 @@ impl<T> Validate for Vec<T>
 where
     T: Validate,
 {
-    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        self = process_results(self.into_iter().map(|e| e.validate(context)), |iter| {
-            iter.collect()
-        })?;
-        Ok(self)
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        for i in self {
+            i.validate(context)?;
+        }
+        Ok(())
     }
 }
 
 impl Validate for ProgramNode {
-    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        self.declarations = process_results(
-            self.declarations.into_iter().map(|f| f.validate(context)),
-            |iter| iter.collect(),
-        )?;
-        Ok(self)
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        for d in self.declarations.iter_mut() {
+            d.validate(context)?;
+        }
+        Ok(())
     }
 }
 
 impl Validate for FunctionDeclaration {
-    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         if matches!(context.pass, ValidationPass::ReadLabels) {
             context.labels.insert(self.name.clone(), HashMap::new());
         }
+
         let previous_function_name = context.current_function_name.clone();
         context.current_function_name = Some(self.name.clone());
 
         if matches!(context.pass, ValidationPass::TypeChecking) {
-            let this_type = &self.function_type;
-
-            let mut is_defined = self.body.is_some();
-            let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
-
-            if let Some(old_symbol_info) = context.symbols.get(&self.name) {
-                if *this_type != old_symbol_info.symbol_type {
-                    return Err(format!(
-                        "Incompatible types for function declarations: {:?} and {:?}",
-                        old_symbol_info.symbol_type, this_type,
-                    )
-                    .into());
-                }
-                if let StorageInfo::Function(was_defined, was_global) = old_symbol_info.storage {
-                    if was_defined && self.body.is_some() {
-                        return Err("Function is defined multiple times".into());
-                    }
-                    if was_global && !is_global {
-                        return Err(
-                            "Static function clashes with previously-declared non-static function"
-                                .into(),
-                        );
-                    }
-
-                    is_defined |= was_defined;
-                    is_global = was_global;
-                } else {
-                    panic!(
-                        "Incorrect storage type for function: {:?}",
-                        old_symbol_info.storage
-                    )
-                }
-            }
-
-            context.symbols.insert(
-                self.name.clone(),
-                SymbolInfo {
-                    symbol_type: this_type.clone(),
-                    storage: StorageInfo::Function(is_defined, is_global),
-                },
-            );
-            let arg_types = match this_type {
-                Type::Function(_, v) => v,
-                _ => return Err("Incorrect Type for function".into()),
-            };
-
-            // add the parameters to the types map if this function has a body. This is done
-            // because it allows those parameters to be type checked in the scope that they are
-            // actually used (ie, params names from declarations which don't have bodies are thrown
-            // out either way).
-            if self.body.is_some() {
-                for (i, param) in self.params.iter().enumerate() {
-                    context.symbols.insert(
-                        param.clone(),
-                        SymbolInfo {
-                            symbol_type: arg_types
-                                .get(i)
-                                .expect("Function should have as many args as specified parameters")
-                                .clone(),
-                            storage: StorageInfo::Automatic,
-                        },
-                    );
-                }
-            }
+            self.check_types(context)?;
         }
 
-        self.body = self.body.validate(context)?;
+        self.body.validate(context)?;
         // reset current_function_name because it's an easy way to check if we are currently in a
         // block scope or file scope at the moment. May need to revisit this.
         context.current_function_name = previous_function_name;
-        Ok(self)
+        Ok(())
     }
 }
-impl Validate for VariableDeclaration {
-    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        if matches!(context.pass, ValidationPass::TypeChecking) {
-            if context.current_function_name.is_none() {
-                self = self.validate_file_scope(context)?
+
+impl FunctionDeclaration {
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        let this_type = &self.function_type;
+
+        let mut is_defined = self.body.is_some();
+        let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
+
+        if let Some(old_symbol_info) = context.symbols.get(&self.name) {
+            if *this_type != old_symbol_info.symbol_type {
+                return Err(format!(
+                    "Incompatible types for function declarations: {:?} and {:?}",
+                    old_symbol_info.symbol_type, this_type,
+                )
+                .into());
+            }
+            if let StorageInfo::Function(was_defined, was_global) = old_symbol_info.storage {
+                if was_defined && self.body.is_some() {
+                    return Err("Function is defined multiple times".into());
+                }
+                if was_global && !is_global {
+                    return Err(
+                        "Static function clashes with previously-declared non-static function"
+                            .into(),
+                    );
+                }
+
+                is_defined |= was_defined;
+                is_global = was_global;
             } else {
-                self = self.validate_block_scope(context)?
+                panic!(
+                    "Incorrect storage type for function: {:?}",
+                    old_symbol_info.storage
+                )
             }
         }
-        self.init = self.init.validate(context)?;
-        Ok(self)
+
+        context.symbols.insert(
+            self.name.clone(),
+            SymbolInfo {
+                symbol_type: this_type.clone(),
+                storage: StorageInfo::Function(is_defined, is_global),
+            },
+        );
+        let arg_types = match this_type {
+            Type::Function(_, v) => v,
+            _ => return Err("Incorrect Type for function".into()),
+        };
+
+        // add the parameters to the types map if this function has a body. This is done
+        // because it allows those parameters to be type checked in the scope that they are
+        // actually used (ie, params names from declarations which don't have bodies are thrown
+        // out either way).
+        if self.body.is_some() {
+            for (param, arg) in self.params.iter().zip(arg_types.iter()) {
+                context.symbols.insert(
+                    param.clone(),
+                    SymbolInfo {
+                        symbol_type: arg.clone(),
+                        storage: StorageInfo::Automatic,
+                    },
+                );
+            }
+        };
+        Ok(())
+    }
+}
+
+impl Validate for VariableDeclaration {
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        if matches!(context.pass, ValidationPass::TypeChecking) {
+            if context.current_function_name.is_none() {
+                self.validate_file_scope(context)?;
+            } else {
+                self.validate_block_scope(context)?;
+            }
+        }
+        self.init.validate(context)?;
+        Ok(())
     }
 }
 
 impl VariableDeclaration {
-    fn validate_file_scope(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+    fn validate_file_scope(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         // println!("{:?}", self);
         let mut initial_value =
-            if let Some(ExpressionNode::Constant(Constant::Integer(i))) = self.init {
-                InitialValue::Initial(i)
+            if let Some(ExpressionWithoutType::Constant(c)) = self.init.as_ref().map(|i| &i.0) {
+                InitialValue::Initial(c.convert_to(&self.variable_type))
             } else if self.init.is_none() {
                 if matches!(self.storage_class, Some(StorageClass::Extern)) {
                     InitialValue::None
@@ -156,7 +160,7 @@ impl VariableDeclaration {
 
         let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
         if let Some(old_symbol_info) = context.symbols.get(&self.name) {
-            if Type::Integer != old_symbol_info.symbol_type {
+            if self.variable_type != old_symbol_info.symbol_type {
                 return Err(format!(
                     "Incompatible type for variable declarations: {:?}",
                     old_symbol_info.symbol_type,
@@ -199,10 +203,13 @@ impl VariableDeclaration {
                 storage: StorageInfo::Static(initial_value, is_global),
             },
         );
-        Ok(self)
+        Ok(())
     }
 
-    fn validate_block_scope(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+    fn validate_block_scope(
+        &mut self,
+        context: &mut ValidateContext,
+    ) -> Result<(), Box<dyn Error>> {
         match self.storage_class {
             Some(StorageClass::Extern) => {
                 if self.init.is_some() {
@@ -223,11 +230,17 @@ impl VariableDeclaration {
                 }
             }
             Some(StorageClass::Static) => {
-                let initial_value = match self.init {
-                    Some(ExpressionNode::Constant(Constant::Integer(i))) => {
-                        InitialValue::Initial(i)
+                // don't call check_types here, since we don't want to pollute constant expressions
+                // with more complex expressions, which we may end up doing with other expressions
+                let initial_value = match self.init.as_ref().map(|i| &i.0) {
+                    Some(ExpressionWithoutType::Constant(ref c)) => {
+                        InitialValue::Initial(c.convert_to(&self.variable_type))
                     }
-                    None => InitialValue::Initial(0),
+                    None => match self.variable_type {
+                        Type::Integer => InitialValue::Initial(StaticInitial::Integer(0)),
+                        Type::Long => InitialValue::Initial(StaticInitial::Long(0)),
+                        Type::Function(_, _) => unreachable!(),
+                    },
                     _ => {
                         return Err(
                             "Non-constant initialiser on block-scope static variable".into()
@@ -250,312 +263,320 @@ impl VariableDeclaration {
                         storage: StorageInfo::Automatic,
                     },
                 );
+
+                // cast the expression to the appropriate type at runtime
+                // ensure that this section runs after the variable exists in the symbol table, so
+                // that the definition is allowed to refer to its own value
+                if let Some(ref mut init) = self.init {
+                    init.check_types(context)?;
+                    ExpressionNode::convert_type(init, &self.variable_type);
+                }
             }
         }
-        Ok(self)
+        Ok(())
+    }
+}
+
+// this block will likely move to a type-conversion module of some kind in part 3 for compile-time
+// constant-folding
+impl Constant {
+    pub fn convert_to(&self, target: &Type) -> StaticInitial {
+        match (&self, target) {
+            (Constant::Long(l), Type::Integer) => StaticInitial::Integer(*l as i32),
+            (Constant::Integer(i), Type::Integer) => StaticInitial::Integer(*i),
+            (Constant::Integer(i), Type::Long) => StaticInitial::Long((*i).into()),
+            (Constant::Long(l), Type::Long) => StaticInitial::Long(*l),
+            (_, Type::Function(_, _)) => unreachable!(),
+        }
     }
 }
 
 impl Validate for Block {
-    fn validate(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        process_results(
-            self.into_iter().map(|i| match i {
-                BlockItemNode::Declaration(d) => {
-                    Ok(BlockItemNode::Declaration(d.validate(context)?))
-                }
-                BlockItemNode::Statement(s) => Ok(BlockItemNode::Statement(s.validate(context)?)),
-            }),
-            |iter| iter.collect(),
-        )
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        for i in self {
+            match i {
+                BlockItemNode::Statement(s) => s.validate(context)?,
+                BlockItemNode::Declaration(d) => d.validate(context)?,
+            }
+        }
+        Ok(())
     }
 }
 
 impl Validate for DeclarationNode {
-    fn validate(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         match self {
-            DeclarationNode::Variable(v) => Ok(DeclarationNode::Variable(v.validate(context)?)),
-            DeclarationNode::Function(f) => Ok(DeclarationNode::Function(f.validate(context)?)),
-        }
+            DeclarationNode::Variable(v) => v.validate(context)?,
+            DeclarationNode::Function(f) => f.validate(context)?,
+        };
+        Ok(())
     }
 }
 
 impl Validate for StatementNode {
-    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        if matches!(context.pass, ValidationPass::TypeChecking) {
+            self.check_types(context)?;
+        }
         match context.pass {
             ValidationPass::ReadLabels => {
-                self = Self::read_labels(self, context)?;
+                self.read_labels(context)?;
             }
             ValidationPass::ValidateLabels => {
-                self = Self::validate_labels(self, context)?;
+                self.validate_labels(context)?;
             }
             // LabelLoops covers the context required by
             // all loops, switch, break, continue, case, default
             ValidationPass::LabelLoops => {
-                self = Self::label_loops(self, context)?;
-            }
-            ValidationPass::ConstantCases => {
-                self = Self::validate_constant_cases(self, context)?;
+                self.label_loops(context)?;
             }
             ValidationPass::CheckLvalues => {}
             ValidationPass::TypeChecking => {}
         }
         match self {
-            StatementNode::Expression(e) => self = StatementNode::Expression(e.validate(context)?),
+            StatementNode::Expression(ref mut e) => e.validate(context)?,
             StatementNode::Pass => {}
-            StatementNode::Return(e) => self = StatementNode::Return(e.validate(context)?),
-            StatementNode::If(condition, then, otherwise) => {
-                let new_other = match *otherwise {
-                    Some(other) => Some(other.validate(context)?),
-                    None => None,
-                };
-                self = StatementNode::If(
-                    condition.validate(context)?,
-                    Box::new(then.validate(context)?),
-                    Box::new(new_other),
-                )
+            StatementNode::Return(ref mut e) => e.validate(context)?,
+            StatementNode::If(ref mut condition, ref mut then, ref mut otherwise) => {
+                condition.validate(context)?;
+                then.validate(context)?;
+                otherwise.validate(context)?;
             }
-            StatementNode::Label(s, statement) => {
-                self = StatementNode::Label(s, Box::new(statement.validate(context)?))
+            StatementNode::Label(_, ref mut statement) => {
+                statement.validate(context)?;
             }
             StatementNode::Goto(_) => {}
-            StatementNode::Compound(block) => {
-                self = StatementNode::Compound(block.validate(context)?)
+            StatementNode::Compound(ref mut block) => {
+                block.validate(context)?;
             }
             StatementNode::Break(_) => {}
             StatementNode::Continue(_) => {}
-            StatementNode::While(expression, body, label) => {
-                let previous_loop_names = if matches!(context.pass, ValidationPass::LabelLoops) {
-                    StatementNode::enter_loop(context)
-                } else {
-                    (None, None)
-                };
-
-                self = StatementNode::While(
-                    expression.validate(context)?,
-                    Box::new(body.validate(context)?),
-                    label.or(context.current_enclosing_loop_name_for_break.clone()),
-                );
-
+            StatementNode::While(ref mut expression, ref mut body, ref mut label) => {
                 if matches!(context.pass, ValidationPass::LabelLoops) {
-                    StatementNode::leave_loop(previous_loop_names, context)
+                    let previous = StatementNode::enter_loop(context);
+                    *label = context.current_enclosing_loop_name_for_break.clone();
+
+                    expression.validate(context)?;
+                    body.validate(context)?;
+
+                    StatementNode::leave_loop(previous, context)
+                } else {
+                    expression.validate(context)?;
+                    body.validate(context)?;
+                };
+            }
+            StatementNode::DoWhile(ref mut body, ref mut expression, ref mut label) => {
+                if matches!(context.pass, ValidationPass::LabelLoops) {
+                    let previous = StatementNode::enter_loop(context);
+                    *label = context.current_enclosing_loop_name_for_break.clone();
+
+                    body.validate(context)?;
+                    expression.validate(context)?;
+
+                    StatementNode::leave_loop(previous, context)
+                } else {
+                    body.validate(context)?;
+                    expression.validate(context)?;
+                };
+            }
+            StatementNode::For(
+                ref mut init,
+                ref mut cond,
+                ref mut post,
+                ref mut body,
+                ref mut label,
+            ) => {
+                if matches!(context.pass, ValidationPass::LabelLoops) {
+                    let previous = StatementNode::enter_loop(context);
+                    *label = context.current_enclosing_loop_name_for_break.clone();
+
+                    init.validate(context)?;
+                    cond.validate(context)?;
+                    post.validate(context)?;
+                    body.validate(context)?;
+
+                    StatementNode::leave_loop(previous, context)
+                } else {
+                    init.validate(context)?;
+                    cond.validate(context)?;
+                    post.validate(context)?;
+                    body.validate(context)?;
+                };
+            }
+            StatementNode::Switch(ref mut expression, ref mut body, ref mut label, ref mut map) => {
+                match context.pass {
+                    ValidationPass::LabelLoops => {
+                        let previous = StatementNode::enter_switch(context);
+                        *label = context.current_enclosing_loop_name_for_break.clone();
+
+                        expression.validate(context)?;
+                        body.validate(context)?;
+
+                        StatementNode::leave_switch(previous, context)
+                    }
+                    ValidationPass::TypeChecking => {
+                        expression.check_types(context)?;
+                        let previous =
+                            StatementNode::enter_switch_type_checking(expression, context);
+
+                        expression.validate(context)?;
+                        body.validate(context)?;
+                        // only steal the map from the context after the switch body has been type
+                        // checked
+                        *map = context.current_switch_labels.take();
+                        StatementNode::leave_switch_type_checking(previous, context);
+                    }
+                    _ => {
+                        expression.validate(context)?;
+                        body.validate(context)?;
+                    }
                 }
             }
-            StatementNode::DoWhile(body, expression, label) => {
-                let previous_loop_name = if matches!(context.pass, ValidationPass::LabelLoops) {
-                    StatementNode::enter_loop(context)
-                } else {
-                    (None, None)
-                };
-
-                self = StatementNode::DoWhile(
-                    Box::new(body.validate(context)?),
-                    expression.validate(context)?,
-                    label.or(context.current_enclosing_loop_name_for_break.clone()),
-                );
-
-                if matches!(context.pass, ValidationPass::LabelLoops) {
-                    StatementNode::leave_loop(previous_loop_name, context)
-                }
+            StatementNode::Case(expression, body, _) => {
+                expression.validate(context)?;
+                body.validate(context)?;
             }
-            StatementNode::For(init, cond, post, body, label) => {
-                let previous_loop_name = if matches!(context.pass, ValidationPass::LabelLoops) {
-                    StatementNode::enter_loop(context)
-                } else {
-                    (None, None)
-                };
-
-                self = StatementNode::For(
-                    init.validate(context)?,
-                    process_results(cond.map(|cond| cond.validate(context)), |mut iter| {
-                        iter.next()
-                    })?,
-                    process_results(post.map(|post| post.validate(context)), |mut iter| {
-                        iter.next()
-                    })?,
-                    Box::new(body.validate(context)?),
-                    label.or(context.current_enclosing_loop_name_for_break.clone()),
-                );
-
-                if matches!(context.pass, ValidationPass::LabelLoops) {
-                    StatementNode::leave_loop(previous_loop_name, context)
-                }
-            }
-            StatementNode::Switch(expression, body, label, map) => {
-                let previous_loop_names = if matches!(context.pass, ValidationPass::LabelLoops) {
-                    StatementNode::enter_switch(context)
-                } else {
-                    (None, None, None)
-                };
-
-                if matches!(context.pass, ValidationPass::LabelLoops) {
-                    let body_inner = body.validate(context)?;
-                    self = StatementNode::Switch(
-                        expression.validate(context)?,
-                        Box::new(body_inner),
-                        label.or(context.current_enclosing_loop_name_for_break.clone()),
-                        context.current_switch_labels.take(),
-                    );
-                    StatementNode::leave_switch(previous_loop_names, context)
-                } else {
-                    self = StatementNode::Switch(
-                        expression.validate(context)?,
-                        Box::new(body.validate(context)?),
-                        label.or(context.current_enclosing_loop_name_for_break.clone()),
-                        map,
-                    );
-                }
-            }
-            StatementNode::Case(expression, body, label) => {
-                self = StatementNode::Case(
-                    expression.validate(context)?,
-                    Box::new(body.validate(context)?),
-                    label,
-                )
-            }
-            StatementNode::Default(body, label) => {
-                self = StatementNode::Default(Box::new(body.validate(context)?), label)
-            }
-        }
-        Ok(self)
-    }
-}
-
-impl Validate for ForInitialiserNode {
-    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        match self {
-            ForInitialiserNode::Declaration(v) => {
-                self = ForInitialiserNode::Declaration(v.validate(context)?)
-            }
-            ForInitialiserNode::Expression(e) => {
-                self = ForInitialiserNode::Expression(e.validate(context)?)
-            }
-        }
-        Ok(self)
+            StatementNode::Default(body, _) => body.validate(context)?,
+        };
+        Ok(())
     }
 }
 
 impl StatementNode {
-    fn read_labels(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        if let StatementNode::Label(s, statement) = self {
+    fn read_labels(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        if let StatementNode::Label(ref mut s, _) = self {
             let labels_defined = context
                 .labels
                 .get_mut(&context.current_function_name.clone().unwrap())
                 .unwrap();
 
-            if labels_defined.contains_key(&s) {
+            if labels_defined.contains_key(s) {
                 return Err(format!("Duplicate label name definition: {}", s).into());
             }
             context.num_labels += 1;
             let new_name = format!("{}_user_{}", s, context.num_labels);
             labels_defined.insert(s.clone(), new_name.clone());
-
-            self = StatementNode::Label(new_name, statement)
+            *s = new_name;
         }
-        Ok(self)
+        Ok(())
     }
 
-    fn validate_labels(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        if let StatementNode::Goto(s) = self {
+    fn validate_labels(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        if let StatementNode::Goto(ref mut name) = self {
             let labels_defined = context
                 .labels
                 .get_mut(&context.current_function_name.clone().unwrap())
                 .unwrap();
-            let new_name = labels_defined
-                .get(&s)
-                .ok_or(format!("Label not found: {}", s))?;
-            self = StatementNode::Goto(new_name.to_string());
+            *name = labels_defined
+                .get(name)
+                .ok_or(format!("Label not found: {}", name))?
+                .to_string();
         }
 
-        Ok(self)
+        Ok(())
     }
 
-    fn label_loops(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+    fn label_loops(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         match self {
-            StatementNode::Break(label) => {
-                self = StatementNode::Break(Some(
-                    label
-                        .or(context.current_enclosing_loop_name_for_break.clone())
+            StatementNode::Break(ref mut label) => {
+                *label = Some(
+                    context
+                        .current_enclosing_loop_name_for_break
+                        .clone()
                         .ok_or::<Box<dyn Error>>("Break is not inside a loop or switch".into())?,
-                ))
+                );
             }
-            StatementNode::Continue(label) => {
-                self = StatementNode::Continue(Some(
-                    label
-                        .or(context.current_enclosing_loop_name_for_continue.clone())
+            StatementNode::Continue(ref mut label) => {
+                *label = Some(
+                    context
+                        .current_enclosing_loop_name_for_continue
+                        .clone()
                         .ok_or::<Box<dyn Error>>("Continue is not inside a loop".into())?,
-                ))
+                );
             }
-            StatementNode::Case(expression, body, label) => {
-                let switch_label = label
-                    .or(context.current_enclosing_loop_name_for_case.clone())
+            StatementNode::Case(_, _, ref mut label) => {
+                let switch_label = context
+                    .current_enclosing_loop_name_for_case
+                    .clone()
                     .ok_or::<Box<dyn Error>>("Case is not inside a switch".into())?;
 
                 context.num_switch_labels += 1;
-                let new_case_name = format!("{}_case_{}", switch_label, context.num_switch_labels);
+                *label = format!("{}_case_{}", switch_label, context.num_switch_labels).into();
+            }
+            StatementNode::Default(_, ref mut label) => {
+                let switch_label = context
+                    .current_enclosing_loop_name_for_case
+                    .clone()
+                    .ok_or::<Box<dyn Error>>("Default is not inside a switch".into())?;
+
+                *label = format!("{}_default", switch_label).into();
+            }
+            _ => {}
+        };
+        Ok(())
+    }
+
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        match self {
+            StatementNode::Return(e) => {
+                e.check_types(context)?;
+                if let Type::Function(out, _) = &context
+                    .symbols
+                    .get(context.current_function_name.as_ref().unwrap())
+                    .unwrap()
+                    .symbol_type
+                {
+                    ExpressionNode::convert_type(e, out);
+                } else {
+                    unreachable!();
+                };
+            }
+            StatementNode::Case(ref mut e, _, ref label) => {
+                e.check_types(context)?;
+
+                let target_type = context
+                    .current_switch_type
+                    .clone()
+                    .ok_or::<Box<dyn Error>>("Case is not in a switch statement".into())?;
+
+                let constant_value = if let ExpressionWithoutType::Constant(ref mut c) = e.0 {
+                    c.convert_to(&target_type)
+                } else {
+                    return Err("None constant expression found in case statement".into());
+                };
 
                 let already_present = context
                     .current_switch_labels
                     .as_mut()
                     .ok_or("Switch label map not found")?
                     .insert(
-                        SwitchMapKey::Expression(expression.clone()),
-                        new_case_name.clone(),
+                        SwitchMapKey::Constant(constant_value.clone()),
+                        label.as_ref().unwrap().clone(),
                     );
 
                 if already_present.is_some() {
-                    return Err(
-                        format!("Duplicate case expression in switch: {:?}", expression).into(),
-                    );
+                    return Err(format!(
+                        "Duplicate case expression in switch: {:?}",
+                        constant_value
+                    )
+                    .into());
                 }
-
-                self = StatementNode::Case(expression, body, Some(new_case_name))
             }
-            StatementNode::Default(body, label) => {
-                let switch_label = label
-                    .or(context.current_enclosing_loop_name_for_case.clone())
-                    .ok_or::<Box<dyn Error>>("Default is not inside a switch".into())?;
-
-                let new_name = format!("{}_default", switch_label);
-
+            StatementNode::Default(_, label) => {
                 let already_present = context
                     .current_switch_labels
                     .as_mut()
                     .ok_or("Switch label map not found")?
-                    .insert(SwitchMapKey::Default, new_name.clone());
+                    .insert(SwitchMapKey::Default, label.clone().unwrap());
 
                 if already_present.is_some() {
                     return Err("Duplicate default in switch".into());
                 }
-
-                self = StatementNode::Default(body, Some(new_name))
             }
-            _ => {}
+            _ => (),
         };
-        Ok(self)
+        Ok(())
     }
-
-    fn validate_constant_cases(
-        mut self,
-        _context: &mut ValidateContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        if let StatementNode::Case(expression, body, label) = self {
-            if let ExpressionNode::Constant(c) = expression {
-                self = StatementNode::Case(ExpressionNode::Constant(c), body, label);
-                Ok(self)
-            } else {
-                Err(format!("Case expression must be constant, got {:?}", expression).into())
-            }
-        } else {
-            Ok(self)
-        }
-    }
-
-    // fn check_types(mut self, _context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-    //     match self {
-    //         StatementNode::Expression(_) => todo!(),
-    //         StatementNode::Return(_) => todo!(),
-    //     }
-    // }
 
     fn enter_loop(context: &mut ValidateContext) -> (Option<String>, Option<String>) {
         context.num_loops += 1;
@@ -574,13 +595,7 @@ impl StatementNode {
         )
     }
 
-    fn enter_switch(
-        context: &mut ValidateContext,
-    ) -> (
-        Option<String>,
-        Option<String>,
-        Option<HashMap<SwitchMapKey, String>>,
-    ) {
+    fn enter_switch(context: &mut ValidateContext) -> (Option<String>, Option<String>) {
         context.num_switches += 1;
         let new_switch_name = format!("switch_{}", context.num_switches);
 
@@ -590,14 +605,20 @@ impl StatementNode {
         let previous_loop_name_for_case = context.current_enclosing_loop_name_for_case.clone();
         context.current_enclosing_loop_name_for_case = Some(new_switch_name);
 
-        let previous_switch_labels = context.current_switch_labels.clone();
+        (previous_loop_name_for_break, previous_loop_name_for_case)
+    }
+
+    fn enter_switch_type_checking(
+        e: &ExpressionNode,
+        context: &mut ValidateContext,
+    ) -> (Option<Type>, Option<HashMap<SwitchMapKey, String>>) {
+        let previous_switch_labels = context.current_switch_labels.take();
         context.current_switch_labels = Some(HashMap::new());
 
-        (
-            previous_loop_name_for_break,
-            previous_loop_name_for_case,
-            previous_switch_labels,
-        )
+        let previous_switch_type = context.current_switch_type.take();
+        context.current_switch_type = e.1.clone();
+
+        (previous_switch_type, previous_switch_labels)
     }
 
     fn leave_loop(previous_names: (Option<String>, Option<String>), context: &mut ValidateContext) {
@@ -606,130 +627,239 @@ impl StatementNode {
     }
 
     fn leave_switch(
-        previous_names: (
-            Option<String>,
-            Option<String>,
-            Option<HashMap<SwitchMapKey, String>>,
-        ),
+        previous_names: (Option<String>, Option<String>),
         context: &mut ValidateContext,
     ) {
         context.current_enclosing_loop_name_for_break = previous_names.0;
         context.current_enclosing_loop_name_for_case = previous_names.1;
-        context.current_switch_labels = previous_names.2;
+    }
+
+    fn leave_switch_type_checking(
+        previous: (Option<Type>, Option<HashMap<SwitchMapKey, String>>),
+        context: &mut ValidateContext,
+    ) {
+        context.current_switch_type = previous.0;
+        context.current_switch_labels = previous.1;
+    }
+}
+
+impl Validate for ForInitialiserNode {
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        match self {
+            ForInitialiserNode::Declaration(v) => v.validate(context)?,
+            ForInitialiserNode::Expression(e) => e.validate(context)?,
+        }
+        Ok(())
     }
 }
 
 impl Validate for ExpressionNode {
-    fn validate(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         if matches!(context.pass, ValidationPass::CheckLvalues) {
-            self = ExpressionNode::validate_lvalues_are_variables(self, context)?;
+            self.validate_lvalues_are_variables(context)?;
         }
         if matches!(context.pass, ValidationPass::TypeChecking) {
-            self = ExpressionNode::check_types(self, context)?;
+            self.check_types(context)?;
         }
 
-        match self {
-            ExpressionNode::Constant(_) => {}
-            ExpressionNode::Unary(op, src) => {
-                self = ExpressionNode::Unary(op, Box::new(src.validate(context)?))
+        match self.0 {
+            ExpressionWithoutType::Constant(_) => {}
+            ExpressionWithoutType::Unary(_, ref mut src) => {
+                src.validate(context)?;
             }
-            ExpressionNode::Binary(op, left, right) => {
-                self = ExpressionNode::Binary(
-                    op,
-                    Box::new(left.validate(context)?),
-                    Box::new(right.validate(context)?),
-                )
+            ExpressionWithoutType::Binary(_, ref mut left, ref mut right) => {
+                left.validate(context)?;
+                right.validate(context)?;
             }
-            ExpressionNode::Var(_) => {}
-            ExpressionNode::Assignment(dst, src) => {
-                self = ExpressionNode::Assignment(
-                    Box::new(dst.validate(context)?),
-                    Box::new(src.validate(context)?),
-                )
+            ExpressionWithoutType::Var(_) => {}
+            ExpressionWithoutType::Assignment(ref mut dst, ref mut src) => {
+                dst.validate(context)?;
+                src.validate(context)?;
             }
-            ExpressionNode::Ternary(condition, then, otherwise) => {
-                self = ExpressionNode::Ternary(
-                    Box::new(condition.validate(context)?),
-                    Box::new(then.validate(context)?),
-                    Box::new(otherwise.validate(context)?),
-                )
+            ExpressionWithoutType::Ternary(ref mut condition, ref mut then, ref mut otherwise) => {
+                condition.validate(context)?;
+                then.validate(context)?;
+                otherwise.validate(context)?;
             }
-            ExpressionNode::FunctionCall(name, params) => {
-                self = ExpressionNode::FunctionCall(name, params.validate(context)?)
+            ExpressionWithoutType::FunctionCall(_, ref mut params) => {
+                params.validate(context)?;
             }
-            ExpressionNode::Cast(_, _) => todo!(),
-        }
-        Ok(self)
+            ExpressionWithoutType::Cast(_, ref mut expression) => {
+                expression.validate(context)?;
+            }
+        };
+        Ok(())
     }
 }
 
 impl ExpressionNode {
     fn validate_lvalues_are_variables(
-        mut self,
+        &mut self,
         _context: &mut ValidateContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        match self {
-            ExpressionNode::Unary(op, src) => {
+    ) -> Result<(), Box<dyn Error>> {
+        match &self.0 {
+            ExpressionWithoutType::Unary(
+                UnaryOperatorNode::PrefixIncrement
+                | UnaryOperatorNode::PrefixDecrement
+                | UnaryOperatorNode::SuffixIncrement
+                | UnaryOperatorNode::SuffixDecrement,
+                src,
+            ) => {
                 // VALIDATION: Make sure ++ and -- only operate on variables, not constants or
                 // other expressions
-                match op {
-                    UnaryOperatorNode::PrefixIncrement
-                    | UnaryOperatorNode::PrefixDecrement
-                    | UnaryOperatorNode::SuffixIncrement
-                    | UnaryOperatorNode::SuffixDecrement => {
-                        if !src.is_lvalue() {
-                            return Err(format!(
-                                "Can't perform increment/decrement operation on non-variable: {:?}",
-                                src,
-                            )
-                            .into());
-                        }
-                    }
-                    _ => {}
+                if !src.0.is_lvalue() {
+                    return Err(format!(
+                        "Can't perform increment/decrement operation on non-variable: {:?}",
+                        src,
+                    )
+                    .into());
                 }
-                self = ExpressionNode::Unary(op, src)
             }
-            ExpressionNode::Assignment(dst, src) => {
-                if !dst.is_lvalue() {
-                    return Err(format!("Can't assign to non-variable: {:?}", src,).into());
+            ExpressionWithoutType::Assignment(ref dst, _) => {
+                if !dst.0.is_lvalue() {
+                    return Err(format!("Can't assign to non-variable: {:?}", dst).into());
                 }
-                self = ExpressionNode::Assignment(dst, src)
             }
             _ => {}
         }
-        Ok(self)
+        Ok(())
     }
 
-    fn check_types(mut self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>> {
-        match self {
-            ExpressionNode::FunctionCall(name, args) => {
+    fn get_common_type(t1: &Type, t2: &Type) -> Type {
+        if t1 == t2 {
+            t1.clone()
+        } else {
+            Type::Long // the common type if long and int mismatch is long. This will get more
+                       // complex later
+        }
+    }
+
+    fn convert_type(src: &mut ExpressionNode, target: &Type) {
+        if src.1.clone().unwrap() != *target {
+            *src = ExpressionNode(
+                ExpressionWithoutType::Cast(target.clone(), Box::new(src.clone())),
+                Some(target.clone()),
+            )
+        }
+    }
+
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        if self.1.is_some() {
+            // no need to type check this expression a second time
+            return Ok(());
+        }
+        self.1 = Some(match self.0 {
+            ExpressionWithoutType::FunctionCall(ref name, ref mut args) => {
                 let type_info = context
                     .symbols
-                    .get(&name)
-                    .expect("Function should have been defined");
-                if let Type::Function(_out, params) = &type_info.symbol_type {
+                    .get(name)
+                    .expect("Function should have been defined")
+                    .clone();
+                if let Type::Function(out, params) = &type_info.symbol_type {
                     if params.len() != args.len() {
                         return Err("Function call has the wrong number of arguments".into());
                     }
-                    self = ExpressionNode::FunctionCall(name, args.validate(context)?)
+                    for (arg, param) in args.iter_mut().zip(params.iter()) {
+                        arg.check_types(context)?;
+                        ExpressionNode::convert_type(arg, param)
+                    }
+
+                    *out.clone()
                 } else {
                     return Err("Variable has been called as a function".into());
                 }
             }
-            ExpressionNode::Var(name) => {
+            ExpressionWithoutType::Var(ref name) => {
                 let type_info = context
                     .symbols
-                    .get(&name)
+                    .get(name)
                     .expect("Var should have been defined");
 
-                if type_info.symbol_type != Type::Integer {
-                    return Err("Function has been defined as a variable".into());
+                match &type_info.symbol_type {
+                    Type::Function(_, _) => {
+                        return Err("Function has been defined as a variable".into())
+                    }
+                    t => t.clone(),
                 }
-
-                self = ExpressionNode::Var(name)
             }
-            _ => {}
-        }
-        Ok(self)
+            ExpressionWithoutType::Constant(ref c) => match c {
+                Constant::Integer(_) => Type::Integer,
+                Constant::Long(_) => Type::Long,
+            },
+            ExpressionWithoutType::Unary(ref op, ref mut src) => {
+                // replace src in-place in the expression (oh wait i can probably do this
+                // everywhere) (yeah)
+                src.check_types(context)?;
+                match op {
+                    UnaryOperatorNode::Not => Type::Integer, // returns 0 or 1 (eg boolean-like)
+                    _ => src.1.clone().unwrap(),
+                }
+            }
+            ExpressionWithoutType::Binary(ref op, ref mut left, ref mut right) => {
+                left.check_types(context)?;
+                right.check_types(context)?;
+                if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) {
+                    Type::Integer // returns 0 or 1 (eg boolean-like)
+                } else {
+                    let common_type = ExpressionNode::get_common_type(
+                        left.1.as_ref().unwrap(),
+                        right.1.as_ref().unwrap(),
+                    );
+                    if !matches!(
+                        op,
+                        BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight
+                    ) {
+                        ExpressionNode::convert_type(left, &common_type);
+                        ExpressionNode::convert_type(right, &common_type);
+                    }
+
+                    match op {
+                        BinaryOperatorNode::Add
+                        | BinaryOperatorNode::Subtract
+                        | BinaryOperatorNode::Multiply
+                        | BinaryOperatorNode::Divide
+                        | BinaryOperatorNode::Mod
+                        | BinaryOperatorNode::BitwiseOr
+                        | BinaryOperatorNode::BitwiseAnd
+                        | BinaryOperatorNode::BitwiseXor => common_type,
+                        BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight => {
+                            left.1.clone().unwrap()
+                        }
+                        BinaryOperatorNode::And
+                        | BinaryOperatorNode::Or
+                        | BinaryOperatorNode::Equal
+                        | BinaryOperatorNode::NotEqual
+                        | BinaryOperatorNode::Less
+                        | BinaryOperatorNode::Greater
+                        | BinaryOperatorNode::LessEqual
+                        | BinaryOperatorNode::GreaterEqual => Type::Integer,
+                    }
+                }
+            }
+            ExpressionWithoutType::Assignment(ref mut dst, ref mut src) => {
+                dst.check_types(context)?;
+                src.check_types(context)?;
+                ExpressionNode::convert_type(src, dst.1.as_ref().unwrap());
+                dst.1.clone().unwrap()
+            }
+            ExpressionWithoutType::Ternary(ref mut cond, ref mut then, ref mut other) => {
+                cond.check_types(context)?;
+                then.check_types(context)?;
+                other.check_types(context)?;
+                let common_type = ExpressionNode::get_common_type(
+                    then.1.as_ref().unwrap(),
+                    other.1.as_ref().unwrap(),
+                );
+                ExpressionNode::convert_type(then, &common_type);
+                ExpressionNode::convert_type(other, &common_type);
+
+                common_type
+            }
+            ExpressionWithoutType::Cast(ref target, ref mut e) => {
+                e.check_types(context)?;
+                target.clone()
+            }
+        });
+        Ok(())
     }
 }

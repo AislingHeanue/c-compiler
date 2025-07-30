@@ -48,8 +48,8 @@ pub enum Token {
     Colon,
     Comma,
     Identifier(String),
-    IntegerConstant(usize),
-    LongConstant(usize),
+    IntegerConstant(i64),
+    LongConstant(i64),
     KeywordInt,
     KeywordVoid,
     KeywordReturn,
@@ -80,7 +80,7 @@ pub enum Keyword {
 lazy_static! {
     // format is (Token, Regex, Precedence). Higher precedence regexes are taken over lower ones.
     // Needed for keywords vs identifiers.
-    static ref ALL_TOKENS: Vec<(Token, Regex, usize)> = {
+    static ref ALL_TOKENS: Vec<(Token, Regex)> = {
         let mut v = Vec::new();
         for token in Token::iter() {
             let entry = match token {
@@ -150,7 +150,7 @@ lazy_static! {
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
-                v.push((token, Regex::new(&entry).unwrap(), 0))
+                v.push((token, Regex::new(&entry).unwrap()))
             }
         }
         v
@@ -182,9 +182,9 @@ impl Token {
                 "long" => Token::KeywordLong,
                 _ => Token::Identifier(text.to_string()),
             },
-            Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<usize>().unwrap()),
+            Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<i64>().unwrap()),
             Token::LongConstant(_) => {
-                Token::LongConstant(text.trim_end_matches(['l', 'L']).parse::<usize>().unwrap())
+                Token::LongConstant(text.trim_end_matches(['l', 'L']).parse::<i64>().unwrap())
             }
             _ => self.clone(),
         }
@@ -193,25 +193,17 @@ impl Token {
     fn find_next(text: &str) -> Result<(Token, Match), Box<dyn Error>> {
         ALL_TOKENS
             .iter()
-            .map(|(possible_token, regex, precedence)| {
-                (possible_token, regex.find(text), precedence)
-            })
+            .map(|(possible_token, regex)| (possible_token, regex.find(text)))
             // filter out non-matching patterns
-            .filter_map(|(possible_token, maybe_matched, precedence)| {
-                maybe_matched.map(|matched| (possible_token.clone(), matched, precedence))
+            .filter_map(|(possible_token, maybe_matched)| {
+                maybe_matched.map(|matched| (possible_token.clone(), matched))
             })
-            .max_by(
-                |(_, matched_a, precedence_a), (_, matched_b, precedence_b)| {
-                    matched_a
-                        .end()
-                        .cmp(&matched_b.end())
-                        // need to order by precedence because keywords and identifiers may match
-                        // results with the same length, and in this case the keyword is always
-                        // preferred.
-                        .then(precedence_a.cmp(precedence_b))
-                },
-            )
-            .map(|(possible_token, matched, _)| (possible_token, matched))
+            .max_by(|(_, matched_a), (_, matched_b)| {
+                matched_a.end().cmp(&matched_b.end())
+                // need to order by precedence because keywords and identifiers may match
+                // results with the same length, and in this case the keyword is always
+                // preferred.
+            })
             .ok_or::<Box<dyn Error>>("Invalid token detected".into())
     }
 }

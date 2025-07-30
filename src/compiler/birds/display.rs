@@ -31,8 +31,9 @@ impl Debug for BirdsTopLevel {
                 .field("instructions", &List(instructions))
                 .field("global", global)
                 .finish(),
-            BirdsTopLevel::StaticVariable(name, init, global) => f
+            BirdsTopLevel::StaticVariable(t, name, init, global) => f
                 .debug_struct("BirdTopLevel::StaticVariable")
+                .field("type", t)
                 .field("name", name)
                 .field("init", init)
                 .field("global", global)

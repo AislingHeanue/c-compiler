@@ -1,10 +1,10 @@
 use itertools::Itertools;
 
-use crate::compiler::parser::StorageInfo;
+use crate::compiler::parser::{StaticInitial, StorageInfo};
 
 use super::{
-    BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, Instruction, Operand, Program,
-    Register, TopLevel, UnaryOperator,
+    AssemblyType, BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, Instruction, Operand,
+    Program, Register, TopLevel, UnaryOperator,
 };
 use std::fmt::Display;
 
@@ -70,12 +70,14 @@ impl CodeDisplay for TopLevel {
                 context.unindent();
                 out
             }
-            TopLevel::StaticVariable(name, init, global) => {
+            TopLevel::StaticVariable(name, global, alignment, init) => {
                 let (address, align) = if context.is_mac {
                     (format!("_{}", name), ".balign")
                 } else {
                     (name.to_string(), ".align")
                 };
+                let init_is_zero =
+                    matches!(init, StaticInitial::Integer(0) | StaticInitial::Long(0));
 
                 context.indent();
                 let mut out = "".to_string();
@@ -84,14 +86,14 @@ impl CodeDisplay for TopLevel {
                     out += "\n";
                 }
 
-                if *init != 0 {
-                    out += ".data".to_string().show(context).as_str();
-                } else {
+                if init_is_zero {
                     out += ".bss".to_string().show(context).as_str();
+                } else {
+                    out += ".data".to_string().show(context).as_str();
                 };
                 out += "\n";
 
-                out += format!("{} 4", align).show(context).as_str();
+                out += format!("{} {}", align, alignment).show(context).as_str();
                 out += "\n";
 
                 context.unindent();
@@ -99,16 +101,25 @@ impl CodeDisplay for TopLevel {
                 out += "\n";
 
                 context.indent();
-                if *init != 0 {
-                    out += format!(".long {}", init).show(context).as_str();
-                } else {
-                    out += ".zero 4".to_string().show(context).as_str();
-                };
+                out += init.show(context).as_str();
                 out += "\n";
                 context.unindent();
                 out
             }
         }
+    }
+}
+
+impl CodeDisplay for StaticInitial {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        let s = match self {
+            StaticInitial::Integer(0) => ".zero 4".to_string(),
+            StaticInitial::Integer(i) => format!(".long {}", i),
+            StaticInitial::Long(0) => ".zero 8".to_string(),
+            StaticInitial::Long(l) => format!(".quad {}", l),
+        };
+
+        format!("{:indent$}{}", "", s, indent = context.indent)
     }
 }
 
@@ -154,83 +165,83 @@ impl CodeDisplay for Instruction {
                     )
                 }
             }
-            Instruction::Mov(src, dst) => {
+            Instruction::Mov(t, src, dst) => {
                 if context.comments {
                     format!(
                         "{:indent$}# movl means move a 32 bit word (left) to a register (right)\n\
-                            {:indent$}movl {}, {}",
+                            {:indent$}mov{} {}, {}",
                         "",
                         "",
+                        context.suffix_for_type(t),
                         src.show(context),
                         dst.show(context),
                         indent = context.indent
                     )
                 } else {
                     format!(
-                        "{:indent$}movl {}, {}",
+                        "{:indent$}mov{} {}, {}",
                         "",
+                        context.suffix_for_type(t),
                         src.show(context),
                         dst.show(context),
                         indent = context.indent
                     )
                 }
             }
-            Instruction::Custom(s) => format!("{:indent$}{}", "", s, indent = context.indent),
-            Instruction::Unary(op, src) => format!("{} {}", op.show(context), src.show(context)),
-            Instruction::Binary(op, src, dst) => format!(
-                "{:indent$}{} {}, {}",
+            Instruction::Movsx(src, dst) => {
+                format!(
+                    "{:indent$}movslq {}, {}",
+                    "",
+                    src.show(context.regular()),
+                    dst.show(context.long()),
+                    indent = context.indent
+                )
+            }
+            Instruction::Unary(op, t, src) => {
+                format!(
+                    "{:indent$}{}{} {}",
+                    "",
+                    op.show(context),
+                    context.suffix_for_type(t),
+                    src.show(context),
+                    indent = context.indent
+                )
+            }
+            Instruction::Binary(op, t, src, dst) => format!(
+                "{:indent$}{}{} {}, {}",
                 "",
                 op.show(context),
+                context.suffix_for_type(t),
                 src.show(context),
                 dst.show(context),
                 indent = context.indent
             ),
-            Instruction::AllocateStack(num) => {
-                if context.comments {
-                    format!(
-                        "{:indent$}# Move the stack pointer by n bytes to the left.\n\
-                            {:indent$}# This has the effect of allocating n bytes for\n\
-                            {:indent$}# use in this function.\n\
-                            {:indent$}# Variables are allocated relative to RBP, which is\n\
-                            {:indent$}# where RSP was also located before this operation\n\
-                            {:indent$}subq ${}, %rsp",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        num,
-                        indent = context.indent
-                    )
-                } else {
-                    format!("{:indent$}subq ${}, %rsp", "", num, indent = context.indent)
-                }
-            }
-            Instruction::Idiv(src) => {
+            Instruction::Idiv(t, src) => {
                 if context.comments {
                     format!(
                         "{:indent$}# Read the dividend from EDX and EAX,\n\
                             {:indent$}# and then store the quotient in EDX and\n\
                             {:indent$}# the remainder in EAX\n\
-                            {:indent$}idivl {}",
+                            {:indent$}idiv{} {}",
                         "",
                         "",
                         "",
                         "",
+                        context.suffix_for_type(t),
                         src.show(context),
                         indent = context.indent
                     )
                 } else {
                     format!(
-                        "{:indent$}idivl {}",
+                        "{:indent$}idiv{} {}",
                         "",
+                        context.suffix_for_type(t),
                         src.show(context),
                         indent = context.indent
                     )
                 }
             }
-            Instruction::Cdq => {
+            Instruction::Cdq(AssemblyType::Longword) => {
                 if context.comments {
                     format!(
                         "{:indent$}# Extend the 32-bit value in EAX to a 64-bit\n\
@@ -245,10 +256,14 @@ impl CodeDisplay for Instruction {
                     format!("{:indent$}cdq", "", indent = context.indent)
                 }
             }
-            Instruction::Cmp(left, right) => {
+            Instruction::Cdq(AssemblyType::Quadword) => {
+                format!("{:indent$}cqo", "", indent = context.indent)
+            }
+            Instruction::Cmp(t, left, right) => {
                 format!(
-                    "{:indent$}cmpl {}, {}",
+                    "{:indent$}cmp{} {}, {}",
                     "",
+                    context.suffix_for_type(t),
                     left.show(context),
                     right.show(context),
                     indent = context.indent
@@ -299,9 +314,6 @@ impl CodeDisplay for Instruction {
                 );
                 context.indent();
                 out
-            }
-            Instruction::FreeStack(num) => {
-                format!("{:indent$}addq ${}, %rsp", "", num, indent = context.indent)
             }
             Instruction::Push(o) => {
                 context.long();
@@ -358,6 +370,8 @@ impl CodeDisplay for Operand {
                     Register::R9 => "%r9b",
                     Register::R10 => "%r10b",
                     Register::R11 => "%r11b",
+                    Register::SP => "%rsp",
+                    Register::BP => "%rbp",
                 },
                 4 => match reg {
                     Register::AX => "%eax",
@@ -369,6 +383,8 @@ impl CodeDisplay for Operand {
                     Register::R9 => "%r9d",
                     Register::R10 => "%r10d",
                     Register::R11 => "%r11d",
+                    Register::SP => "%rsp",
+                    Register::BP => "%rbp",
                 },
                 8 => match reg {
                     Register::AX => "%rax",
@@ -380,6 +396,8 @@ impl CodeDisplay for Operand {
                     Register::R9 => "%r9",
                     Register::R10 => "%r10",
                     Register::R11 => "%r11",
+                    Register::SP => "%rsp",
+                    Register::BP => "%rbp",
                 },
                 _ => panic!("Invalid word length: {}", context.word_length_bytes),
             }
@@ -403,8 +421,8 @@ impl CodeDisplay for Operand {
 impl CodeDisplay for UnaryOperator {
     fn show(&self, _context: &mut DisplayContext) -> String {
         match self {
-            UnaryOperator::Neg => "negl",
-            UnaryOperator::Not => "notl",
+            UnaryOperator::Neg => "neg",
+            UnaryOperator::Not => "not",
         }
         .to_string()
     }
@@ -413,11 +431,11 @@ impl CodeDisplay for UnaryOperator {
 impl CodeDisplay for BinaryOperator {
     fn show(&self, _context: &mut DisplayContext) -> String {
         match self {
-            BinaryOperator::Add => "addl",
-            BinaryOperator::Sub => "subl",
-            BinaryOperator::Mult => "imull",
-            BinaryOperator::ShiftLeft => "sall",
-            BinaryOperator::ShiftRight => "sarl",
+            BinaryOperator::Add => "add",
+            BinaryOperator::Sub => "sub",
+            BinaryOperator::Mult => "imul",
+            BinaryOperator::ShiftLeft => "sal",
+            BinaryOperator::ShiftRight => "sar",
             BinaryOperator::BitwiseAnd => "and",
             BinaryOperator::BitwiseXor => "xor",
             BinaryOperator::BitwiseOr => "or",

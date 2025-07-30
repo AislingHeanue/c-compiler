@@ -27,13 +27,13 @@ pub fn compile(
         return Ok(());
     }
 
-    let parsed = parse(lexed, config.only_parse)?;
+    let mut parsed = parse(lexed, config.only_parse)?;
     if config.only_parse {
         println!("{}", parsed);
         return Ok(());
     }
 
-    let (parsed, symbols) = validate(parsed)?;
+    let symbols = validate(&mut parsed)?;
     if config.only_validate {
         println!("{}", parsed);
         return Ok(());

@@ -2,8 +2,8 @@ use itertools::Itertools;
 
 use super::{
     BinaryOperatorNode, Block, BlockItemNode, CodeDisplay, Constant, DeclarationNode,
-    DisplayContext, ExpressionNode, ForInitialiserNode, FunctionDeclaration, ProgramNode,
-    StatementNode, Type, UnaryOperatorNode, VariableDeclaration,
+    DisplayContext, ExpressionNode, ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration,
+    ProgramNode, StatementNode, Type, UnaryOperatorNode, VariableDeclaration,
 };
 use std::{borrow::Borrow, fmt::Display};
 
@@ -189,8 +189,8 @@ impl CodeDisplay for FunctionDeclaration {
         };
         let show_params = param_types
             .iter()
-            .enumerate()
-            .map(|(i, p)| format!("{} {}", self.params[i], p.show(context)))
+            .zip(self.params.iter())
+            .map(|(t, p)| format!("{} {}", p, t.show(context)))
             .join(", ");
 
         if let Some(body) = &self.body {
@@ -268,16 +268,26 @@ impl CodeDisplay for Option<ExpressionNode> {
 
 impl CodeDisplay for ExpressionNode {
     fn show(&self, context: &mut DisplayContext) -> String {
+        if let Some(t) = &self.1 {
+            format!("{} /* {} */", self.0.show(context), t.show(context))
+        } else {
+            self.0.show(context)
+        }
+    }
+}
+
+impl CodeDisplay for ExpressionWithoutType {
+    fn show(&self, context: &mut DisplayContext) -> String {
         match self {
-            ExpressionNode::Constant(c) => c.show(context),
-            ExpressionNode::Unary(operator, exp) => {
+            ExpressionWithoutType::Constant(c) => c.show(context),
+            ExpressionWithoutType::Unary(operator, exp) => {
                 format!(
                     "{}{}",
                     operator.show(&mut context.indent()),
                     exp.show(&mut context.indent()),
                 )
             }
-            ExpressionNode::Binary(operator, left, right) => {
+            ExpressionWithoutType::Binary(operator, left, right) => {
                 format!(
                     "({} {} {})",
                     left.show(&mut context.indent()),
@@ -285,11 +295,11 @@ impl CodeDisplay for ExpressionNode {
                     right.show(&mut context.indent())
                 )
             }
-            ExpressionNode::Var(s) => s.to_string(),
-            ExpressionNode::Assignment(l, r) => {
+            ExpressionWithoutType::Var(s) => s.to_string(),
+            ExpressionWithoutType::Assignment(l, r) => {
                 format!("{} = {}", l.show(context), r.show(context))
             }
-            ExpressionNode::Ternary(condition, then, otherwise) => {
+            ExpressionWithoutType::Ternary(condition, then, otherwise) => {
                 format!(
                     "{} ? {} : {}",
                     condition.show(&mut context.indent()),
@@ -297,10 +307,10 @@ impl CodeDisplay for ExpressionNode {
                     otherwise.show(context),
                 )
             }
-            ExpressionNode::FunctionCall(name, args) => {
+            ExpressionWithoutType::FunctionCall(name, args) => {
                 format!("{}({})", name, args.show(&mut context.indent()))
             }
-            ExpressionNode::Cast(target_type, e) => {
+            ExpressionWithoutType::Cast(target_type, e) => {
                 format!("{}({})", target_type.show(context), e.show(context))
             }
         }

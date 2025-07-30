@@ -1,7 +1,7 @@
 use super::{
     BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
-    ForInitialiserNode, FunctionDeclaration, Parse, ProgramNode, StatementNode, StorageClass, Type,
-    UnaryOperatorNode, VariableDeclaration,
+    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, Parse, ProgramNode,
+    StatementNode, StorageClass, Type, UnaryOperatorNode, VariableDeclaration,
 };
 use crate::compiler::{lexer::Token, parser::ParseContext};
 use std::{
@@ -496,18 +496,26 @@ impl Parse for StatementNode {
                 let body = StatementNode::parse(tokens, context)?;
                 expect(tokens, Token::KeywordWhile)?;
                 expect(tokens, Token::OpenParen)?;
-                let expression = ExpressionNode::parse(tokens, context)?;
+                let expression = ExpressionWithoutType::parse(tokens, context)?;
                 expect(tokens, Token::CloseParen)?;
                 expect(tokens, Token::SemiColon)?;
-                Ok(StatementNode::DoWhile(Box::new(body), expression, None))
+                Ok(StatementNode::DoWhile(
+                    Box::new(body),
+                    expression.into(),
+                    None,
+                ))
             }
             Token::KeywordWhile => {
                 expect(tokens, Token::KeywordWhile)?;
                 expect(tokens, Token::OpenParen)?;
-                let expression = ExpressionNode::parse(tokens, context)?;
+                let expression = ExpressionWithoutType::parse(tokens, context)?;
                 expect(tokens, Token::CloseParen)?;
                 let body = StatementNode::parse(tokens, context)?;
-                Ok(StatementNode::While(expression, Box::new(body), None))
+                Ok(StatementNode::While(
+                    expression.into(),
+                    Box::new(body),
+                    None,
+                ))
             }
             Token::KeywordBreak => {
                 expect(tokens, Token::KeywordBreak)?;
@@ -522,10 +530,10 @@ impl Parse for StatementNode {
             Token::KeywordSwitch => {
                 expect(tokens, Token::KeywordSwitch)?;
                 expect(tokens, Token::OpenParen)?;
-                let expression = ExpressionNode::parse(tokens, context)?;
+                let expression = ExpressionWithoutType::parse(tokens, context)?;
                 expect(tokens, Token::CloseParen)?;
                 Ok(StatementNode::Switch(
-                    expression,
+                    expression.into(),
                     Box::new(StatementNode::parse(tokens, context)?),
                     None,
                     None,
@@ -533,10 +541,10 @@ impl Parse for StatementNode {
             }
             Token::KeywordCase => {
                 expect(tokens, Token::KeywordCase)?;
-                let expression = ExpressionNode::parse(tokens, context)?;
+                let expression = ExpressionWithoutType::parse(tokens, context)?;
                 expect(tokens, Token::Colon)?;
                 Ok(StatementNode::Case(
-                    expression,
+                    expression.into(),
                     Box::new(StatementNode::parse(tokens, context)?),
                     None,
                 ))
@@ -578,7 +586,10 @@ impl Parse for Option<ExpressionNode> {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        ExpressionNode::parse_with_level(tokens, context, 0, true)
+        Ok(
+            ExpressionWithoutType::parse_with_level(tokens, context, 0, true)?
+                .map(|res| res.into()),
+        )
     }
 }
 
@@ -587,18 +598,33 @@ impl Parse for ExpressionNode {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        Ok(ExpressionNode::parse_with_level(tokens, context, 0, false)?.unwrap())
+        Ok(ExpressionWithoutType::parse(tokens, context)?.into())
     }
 }
 
-impl ExpressionNode {
+impl Parse for ExpressionWithoutType {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        Ok(ExpressionWithoutType::parse_with_level(tokens, context, 0, false)?.unwrap())
+    }
+}
+
+impl From<ExpressionWithoutType> for ExpressionNode {
+    fn from(val: ExpressionWithoutType) -> Self {
+        ExpressionNode(val, None)
+    }
+}
+
+impl ExpressionWithoutType {
     fn parse_with_level(
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
         level: usize,
         allow_empty: bool,
     ) -> Result<Option<Self>, Box<dyn Error>> {
-        let maybe_left = ExpressionNode::parse_factor(tokens, context, allow_empty)?;
+        let maybe_left = ExpressionWithoutType::parse_factor(tokens, context, allow_empty)?;
         if maybe_left.is_none() {
             // if allow_empty is false, parse_factor will throw the relevant error for here
             return Ok(None);
@@ -610,9 +636,13 @@ impl ExpressionNode {
             }
             if match_assignment(tokens)? {
                 let operator_token = read(tokens)?;
-                let right = ExpressionNode::parse_with_level(tokens, context, precedence, false)?;
+                let right =
+                    ExpressionWithoutType::parse_with_level(tokens, context, precedence, false)?;
                 left = if let Token::Assignment = operator_token {
-                    ExpressionNode::Assignment(Box::new(left), Box::new(right.unwrap()))
+                    ExpressionWithoutType::Assignment(
+                        Box::new(left.into()),
+                        Box::new(right.unwrap().into()),
+                    )
                 } else {
                     let operator = match operator_token {
                         Token::AddAssign => BinaryOperatorNode::Add,
@@ -629,48 +659,53 @@ impl ExpressionNode {
                             unreachable!("Can't use {:?} as an assignment operator", operator_token)
                         }
                     };
-                    ExpressionNode::Assignment(
-                        Box::new(left.clone()),
-                        Box::new(ExpressionNode::Binary(
-                            operator,
-                            Box::new(left),
-                            Box::new(right.unwrap()),
-                        )),
+                    ExpressionWithoutType::Assignment(
+                        Box::new(left.clone().into()),
+                        Box::new(
+                            ExpressionWithoutType::Binary(
+                                operator,
+                                Box::new(left.into()),
+                                Box::new(right.unwrap().into()),
+                            )
+                            .into(),
+                        ),
                     )
                 };
             } else {
                 match peek(tokens)? {
                     Token::Increment | Token::Decrement => {
-                        left = ExpressionNode::Unary(
+                        left = ExpressionWithoutType::Unary(
                             UnaryOperatorNode::parse_as_suffix(tokens, context)?,
-                            Box::new(left),
+                            Box::new(left.into()),
                         );
                     }
                     Token::Question => {
                         expect(tokens, Token::Question)?;
                         // parse this expression with precedence level reset
-                        let middle = ExpressionNode::parse(tokens, context)?;
+                        let middle = ExpressionWithoutType::parse(tokens, context)?;
                         expect(tokens, Token::Colon)?;
-                        let end =
-                            ExpressionNode::parse_with_level(tokens, context, precedence, false)?;
-                        left = ExpressionNode::Ternary(
-                            Box::new(left),
-                            Box::new(middle),
-                            Box::new(end.unwrap()),
+                        let end = ExpressionWithoutType::parse_with_level(
+                            tokens, context, precedence, false,
+                        )?;
+                        left = ExpressionWithoutType::Ternary(
+                            Box::new(left.into()),
+                            Box::new(middle.into()),
+                            Box::new(end.unwrap().into()),
                         )
                     }
                     _ => {
-                        left = ExpressionNode::Binary(
+                        left = ExpressionWithoutType::Binary(
                             BinaryOperatorNode::parse(tokens, context)?,
-                            Box::new(left),
+                            Box::new(left.into()),
                             Box::new(
-                                ExpressionNode::parse_with_level(
+                                ExpressionWithoutType::parse_with_level(
                                     tokens,
                                     context,
                                     precedence + 1,
                                     false,
                                 )?
-                                .unwrap(),
+                                .unwrap()
+                                .into(),
                             ),
                         );
                     }
@@ -690,13 +725,16 @@ impl ExpressionNode {
             let operator = UnaryOperatorNode::parse(tokens, context)?;
             let precedence = UnaryOperatorNode::precedence(); // all unary operators have the
                                                               // same precedence
-            let expression = ExpressionNode::parse_with_level(tokens, context, precedence, false)?;
-            Some(ExpressionNode::Unary(
+            let expression =
+                ExpressionWithoutType::parse_with_level(tokens, context, precedence, false)?;
+            Some(ExpressionWithoutType::Unary(
                 operator,
-                Box::new(expression.unwrap()),
+                Box::new(expression.unwrap().into()),
             ))
         } else if match_constant(tokens)? {
-            Some(ExpressionNode::Constant(Constant::parse(tokens, context)?))
+            Some(ExpressionWithoutType::Constant(Constant::parse(
+                tokens, context,
+            )?))
         } else {
             match peek(tokens)? {
                 Token::OpenParen => {
@@ -704,10 +742,14 @@ impl ExpressionNode {
                     if match_type(tokens)? {
                         let cast_type = Type::parse(tokens, context)?;
                         expect(tokens, Token::CloseParen)?;
-                        let factor = ExpressionNode::parse_factor(tokens, context, false)?.unwrap();
-                        Some(ExpressionNode::Cast(cast_type, Box::new(factor)))
+                        let factor =
+                            ExpressionWithoutType::parse_factor(tokens, context, false)?.unwrap();
+                        Some(ExpressionWithoutType::Cast(
+                            cast_type,
+                            Box::new(factor.into()),
+                        ))
                     } else {
-                        let expression = ExpressionNode::parse(tokens, context)?;
+                        let expression = ExpressionWithoutType::parse(tokens, context)?;
                         expect(tokens, Token::CloseParen)?;
                         Some(expression)
                     }
@@ -718,27 +760,30 @@ impl ExpressionNode {
                         // this is a function call !!
                         Token::OpenParen => {
                             let (new_name, _external_link) =
-                                ExpressionNode::resolve_identifier(&name, context)?;
+                                ExpressionWithoutType::resolve_identifier(&name, context)?;
 
                             expect(tokens, Token::OpenParen)?;
-                            let mut arguments: Vec<ExpressionNode> = Vec::new();
+                            let mut arguments: Vec<ExpressionWithoutType> = Vec::new();
                             if !matches!(peek(tokens)?, Token::CloseParen) {
-                                arguments.push(ExpressionNode::parse(tokens, context)?);
+                                arguments.push(ExpressionWithoutType::parse(tokens, context)?);
                             }
                             while matches!(peek(tokens)?, Token::Comma) {
                                 expect(tokens, Token::Comma)?;
-                                arguments.push(ExpressionNode::parse(tokens, context)?);
+                                arguments.push(ExpressionWithoutType::parse(tokens, context)?);
                             }
                             expect(tokens, Token::CloseParen)?;
 
-                            Some(ExpressionNode::FunctionCall(new_name, arguments))
+                            Some(ExpressionWithoutType::FunctionCall(
+                                new_name,
+                                arguments.into_iter().map(|a| a.into()).collect(),
+                            ))
                         }
                         _ => {
                             // VALIDATION STEP: Check the variable has been declared
                             let (new_name, _external_link) =
-                                ExpressionNode::resolve_identifier(&name, context)?;
+                                ExpressionWithoutType::resolve_identifier(&name, context)?;
 
-                            Some(ExpressionNode::Var(new_name))
+                            Some(ExpressionWithoutType::Var(new_name))
                         }
                     }
                 }
@@ -756,7 +801,7 @@ impl ExpressionNode {
     }
 
     pub fn is_lvalue(&self) -> bool {
-        matches!(self, ExpressionNode::Var(_))
+        matches!(self, ExpressionWithoutType::Var(_))
     }
 
     fn resolve_identifier(
@@ -790,16 +835,16 @@ impl Parse for Constant {
             _ => unreachable!(),
         };
 
-        if numeric_value >= 2_usize.pow(63) {
-            return Err(format!(
-                "value will not fit in either a long or an int: {}",
-                numeric_value
-            )
-            .into());
-        }
+        // if numeric_value >= i64::MAX {
+        //     return Err(format!(
+        //         "value will not fit in either a long or an int: {}",
+        //         numeric_value
+        //     )
+        //     .into());
+        // }
 
-        Ok(if is_int && numeric_value < 2_usize.pow(31) {
-            Constant::Integer(numeric_value)
+        Ok(if is_int && numeric_value <= i32::MAX.into() {
+            Constant::Integer(numeric_value.try_into().unwrap())
         } else {
             Constant::Long(numeric_value)
         })

@@ -1,4 +1,4 @@
-use super::parser::{ProgramNode, SymbolInfo};
+use super::parser::{Constant, ProgramNode, StaticInitial, SymbolInfo, Type};
 use std::{collections::HashMap, error::Error};
 
 mod convert;
@@ -14,7 +14,7 @@ pub enum BirdsTopLevel {
     // name params instructions global
     Function(String, Vec<String>, Vec<BirdsInstructionNode>, bool),
     // name init global
-    StaticVariable(String, usize, bool),
+    StaticVariable(Type, String, StaticInitial, bool),
 }
 
 #[derive(Debug)]
@@ -36,11 +36,15 @@ pub enum BirdsInstructionNode {
     Label(String),
     // name, args, dst
     FunctionCall(String, Vec<BirdsValueNode>, BirdsValueNode),
+    // src (32 bits) to dst (64 bits)
+    SignedExtend(BirdsValueNode, BirdsValueNode),
+    // src (64 bits) to dst (32 bits)
+    Truncate(BirdsValueNode, BirdsValueNode),
 }
 
 #[derive(Clone, Debug)]
 pub enum BirdsValueNode {
-    IntegerConstant(usize),
+    Constant(Constant),
     Var(String),
 }
 
@@ -79,26 +83,28 @@ where
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>>;
 }
 
-pub struct ConvertContext<'a> {
+pub struct ConvertContext {
     last_end_label_number: i32,
     last_else_label_number: i32,
     last_false_label_number: i32,
     last_stack_number: i32,
     last_true_label_number: i32,
-    symbols: &'a mut HashMap<String, SymbolInfo>,
+    symbols: HashMap<String, SymbolInfo>,
 }
 
 pub fn birds(
     parsed: ProgramNode,
-    mut symbols: HashMap<String, SymbolInfo>,
+    symbols: HashMap<String, SymbolInfo>,
 ) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
-    let result = parsed.convert(&mut ConvertContext {
+    let mut context = ConvertContext {
         last_end_label_number: 0,
         last_else_label_number: 0,
         last_false_label_number: 0,
         last_stack_number: 0,
         last_true_label_number: 0,
-        symbols: &mut symbols,
-    })?;
-    Ok((result, symbols))
+        symbols,
+    };
+
+    let result = parsed.convert(&mut context)?;
+    Ok((result, context.symbols))
 }

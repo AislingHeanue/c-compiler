@@ -21,6 +21,9 @@ pub struct FunctionDeclaration {
     pub storage_class: Option<StorageClass>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExpressionNode(pub ExpressionWithoutType, pub Option<Type>);
+
 #[derive(Debug)]
 pub struct VariableDeclaration {
     pub variable_type: Type,
@@ -47,8 +50,14 @@ pub enum StorageInfo {
 #[derive(Debug, Clone)]
 pub enum InitialValue {
     Tentative,
-    Initial(usize),
+    Initial(StaticInitial),
     None,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum StaticInitial {
+    Integer(i32),
+    Long(i64),
 }
 
 pub type Block = Vec<BlockItemNode>;
@@ -121,7 +130,7 @@ pub enum StatementNode {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SwitchMapKey {
     Default,
-    Expression(ExpressionNode),
+    Constant(StaticInitial),
 }
 
 #[derive(Debug)]
@@ -131,7 +140,7 @@ pub enum ForInitialiserNode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ExpressionNode {
+pub enum ExpressionWithoutType {
     Constant(Constant),
     Unary(UnaryOperatorNode, Box<ExpressionNode>),
     Binary(BinaryOperatorNode, Box<ExpressionNode>, Box<ExpressionNode>),
@@ -151,8 +160,8 @@ pub enum ExpressionNode {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Constant {
-    Integer(usize),
-    Long(usize),
+    Integer(i32),
+    Long(i64),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -230,7 +239,7 @@ trait Validate
 where
     Self: Sized,
 {
-    fn validate(self, context: &mut ValidateContext) -> Result<Self, Box<dyn Error>>;
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
 }
 
 #[derive(Clone, Debug)]
@@ -240,7 +249,6 @@ enum ValidationPass {
     ReadLabels,
     ValidateLabels,
     LabelLoops,
-    ConstantCases,
     TypeChecking,
 }
 
@@ -260,6 +268,7 @@ struct ValidateContext {
     current_enclosing_loop_name_for_case: Option<String>,
     current_enclosing_loop_name_for_continue: Option<String>,
     current_switch_labels: Option<HashMap<SwitchMapKey, String>>,
+    current_switch_type: Option<Type>,
     symbols: HashMap<String, SymbolInfo>,
 }
 
@@ -269,15 +278,12 @@ pub struct SymbolInfo {
     pub storage: StorageInfo,
 }
 
-pub fn validate(
-    mut parsed: ProgramNode,
-) -> Result<(ProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
+pub fn validate(parsed: &mut ProgramNode) -> Result<HashMap<String, SymbolInfo>, Box<dyn Error>> {
     let passes: Vec<ValidationPass> = vec![
         ValidationPass::CheckLvalues,
         ValidationPass::ReadLabels,
         ValidationPass::ValidateLabels,
         ValidationPass::LabelLoops,
-        ValidationPass::ConstantCases,
         ValidationPass::TypeChecking,
     ];
     let mut validate_context = ValidateContext {
@@ -292,14 +298,15 @@ pub fn validate(
         current_enclosing_loop_name_for_case: None,
         current_enclosing_loop_name_for_continue: None,
         current_switch_labels: None,
+        current_switch_type: None,
         symbols: HashMap::new(),
     };
     for pass in passes {
         validate_context.pass = pass;
-        parsed = parsed.validate(&mut validate_context)?;
+        parsed.validate(&mut validate_context)?;
     }
 
-    Ok((parsed, validate_context.symbols))
+    Ok(validate_context.symbols)
 }
 
 trait CodeDisplay {
