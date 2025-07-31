@@ -28,10 +28,12 @@ fn new_temp_variable(type_to_store: Type, context: &mut ConvertContext) -> Birds
     BirdsValueNode::Var(new_name)
 }
 
-fn get_typed_constant(value: i32, target: &ExpressionNode) -> BirdsValueNode {
+fn get_typed_constant(value: u32, target: &ExpressionNode) -> BirdsValueNode {
     match target.1.as_ref().unwrap() {
-        Type::Integer => BirdsValueNode::Constant(Constant::Integer(value)),
+        Type::Integer => BirdsValueNode::Constant(Constant::Integer(value.try_into().unwrap())),
         Type::Long => BirdsValueNode::Constant(Constant::Long(value.into())),
+        Type::UnsignedInteger => BirdsValueNode::Constant(Constant::UnsignedInteger(value)),
+        Type::UnsignedLong => BirdsValueNode::Constant(Constant::UnsignedLong(value.into())),
         Type::Function(_, _) => unreachable!(),
     }
 }
@@ -367,8 +369,14 @@ impl Convert for StaticInitial {
 
     fn convert(self, _context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         match self {
-            StaticInitial::Long(l) => Ok(BirdsValueNode::Constant(Constant::Long(l))),
             StaticInitial::Integer(i) => Ok(BirdsValueNode::Constant(Constant::Integer(i))),
+            StaticInitial::Long(l) => Ok(BirdsValueNode::Constant(Constant::Long(l))),
+            StaticInitial::UnsignedInteger(i) => {
+                Ok(BirdsValueNode::Constant(Constant::UnsignedInteger(i)))
+            }
+            StaticInitial::UnsignedLong(l) => {
+                Ok(BirdsValueNode::Constant(Constant::UnsignedLong(l)))
+            }
         }
     }
 }
@@ -722,6 +730,18 @@ impl Convert for ExpressionNode {
                             .push(BirdsInstructionNode::SignedExtend(new_src, new_dst.clone()));
                         Ok((instructions, new_dst))
                     }
+                    (Type::Integer, Type::UnsignedInteger) => todo!(),
+                    (Type::Integer, Type::UnsignedLong) => todo!(),
+                    (Type::Long, Type::UnsignedInteger) => todo!(),
+                    (Type::Long, Type::UnsignedLong) => todo!(),
+                    (Type::UnsignedInteger, Type::Integer) => todo!(),
+                    (Type::UnsignedInteger, Type::Long) => todo!(),
+                    (Type::UnsignedInteger, Type::UnsignedInteger) => todo!(),
+                    (Type::UnsignedInteger, Type::UnsignedLong) => todo!(),
+                    (Type::UnsignedLong, Type::Integer) => todo!(),
+                    (Type::UnsignedLong, Type::Long) => todo!(),
+                    (Type::UnsignedLong, Type::UnsignedInteger) => todo!(),
+                    (Type::UnsignedLong, Type::UnsignedLong) => todo!(),
                     (_, Type::Function(_, _)) => unreachable!(),
                     (Type::Function(_, _), _) => unreachable!(),
                     (Type::Integer, Type::Integer) => unreachable!(),

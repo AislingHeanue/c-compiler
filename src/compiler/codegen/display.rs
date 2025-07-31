@@ -122,6 +122,10 @@ impl CodeDisplay for StaticInitial {
             StaticInitial::Integer(i) => format!(".long {}", i),
             StaticInitial::Long(0) => ".zero 8".to_string(),
             StaticInitial::Long(l) => format!(".quad {}", l),
+            StaticInitial::UnsignedInteger(0) => todo!(),
+            StaticInitial::UnsignedInteger(_i) => todo!(),
+            StaticInitial::UnsignedLong(0) => todo!(),
+            StaticInitial::UnsignedLong(_i) => todo!(),
         };
 
         format!("{:indent$}{}", "", s, indent = context.indent)

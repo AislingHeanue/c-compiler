@@ -239,6 +239,8 @@ impl VariableDeclaration {
                     None => match self.variable_type {
                         Type::Integer => InitialValue::Initial(StaticInitial::Integer(0)),
                         Type::Long => InitialValue::Initial(StaticInitial::Long(0)),
+                        Type::UnsignedInteger => todo!(),
+                        Type::UnsignedLong => todo!(),
                         Type::Function(_, _) => unreachable!(),
                     },
                     _ => {
@@ -282,10 +284,35 @@ impl VariableDeclaration {
 impl Constant {
     pub fn convert_to(&self, target: &Type) -> StaticInitial {
         match (&self, target) {
-            (Constant::Long(l), Type::Integer) => StaticInitial::Integer(*l as i32),
+            // this would be a good time for a macro huh
             (Constant::Integer(i), Type::Integer) => StaticInitial::Integer(*i),
-            (Constant::Integer(i), Type::Long) => StaticInitial::Long((*i).into()),
+            (Constant::Long(l), Type::Integer) => StaticInitial::Integer(*l as i32),
+            (Constant::UnsignedInteger(i), Type::Integer) => StaticInitial::Integer(*i as i32),
+            (Constant::UnsignedLong(l), Type::Integer) => StaticInitial::Integer(*l as i32),
+
+            (Constant::Integer(i), Type::Long) => StaticInitial::Long(*i as i64),
             (Constant::Long(l), Type::Long) => StaticInitial::Long(*l),
+            (Constant::UnsignedInteger(i), Type::Long) => StaticInitial::Long(*i as i64),
+            (Constant::UnsignedLong(l), Type::Long) => StaticInitial::Long(*l as i64),
+
+            (Constant::Integer(i), Type::UnsignedInteger) => {
+                StaticInitial::UnsignedInteger(*i as u32)
+            }
+            (Constant::Long(l), Type::UnsignedInteger) => StaticInitial::UnsignedInteger(*l as u32),
+            (Constant::UnsignedInteger(i), Type::UnsignedInteger) => {
+                StaticInitial::UnsignedInteger(*i)
+            }
+            (Constant::UnsignedLong(l), Type::UnsignedInteger) => {
+                StaticInitial::UnsignedInteger(*l as u32)
+            }
+
+            (Constant::Integer(i), Type::UnsignedLong) => StaticInitial::UnsignedLong(*i as u64),
+            (Constant::Long(l), Type::UnsignedLong) => StaticInitial::UnsignedLong(*l as u64),
+            (Constant::UnsignedInteger(i), Type::UnsignedLong) => {
+                StaticInitial::UnsignedLong(*i as u64)
+            }
+            (Constant::UnsignedLong(l), Type::UnsignedLong) => StaticInitial::UnsignedLong(*l),
+
             (_, Type::Function(_, _)) => unreachable!(),
         }
     }
@@ -725,12 +752,21 @@ impl ExpressionNode {
         Ok(())
     }
 
+    // See System V ABI list of rules for how to reconcile types of various sizes
+    // C Spec 6.3.1.8, Paragraph 1
     fn get_common_type(t1: &Type, t2: &Type) -> Type {
         if t1 == t2 {
             t1.clone()
+        } else if t1.get_size() == t2.get_size() {
+            if t1.is_signed() {
+                t2.clone()
+            } else {
+                t1.clone()
+            }
+        } else if t1.get_size() > t2.get_size() {
+            t1.clone()
         } else {
-            Type::Long // the common type if long and int mismatch is long. This will get more
-                       // complex later
+            t2.clone()
         }
     }
 
@@ -785,6 +821,8 @@ impl ExpressionNode {
             ExpressionWithoutType::Constant(ref c) => match c {
                 Constant::Integer(_) => Type::Integer,
                 Constant::Long(_) => Type::Long,
+                Constant::UnsignedInteger(_) => Type::UnsignedInteger,
+                Constant::UnsignedLong(_) => Type::UnsignedLong,
             },
             ExpressionWithoutType::Unary(ref op, ref mut src) => {
                 // replace src in-place in the expression (oh wait i can probably do this

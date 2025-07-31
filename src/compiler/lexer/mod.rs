@@ -4,7 +4,7 @@ use std::{collections::VecDeque, error::Error};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, Hash)]
 pub enum Token {
     OpenParen,
     CloseParen,
@@ -50,6 +50,8 @@ pub enum Token {
     Identifier(String),
     IntegerConstant(i64),
     LongConstant(i64),
+    UnsignedIntegerConstant(u64),
+    UnsignedLongConstant(u64),
     KeywordInt,
     KeywordVoid,
     KeywordReturn,
@@ -67,6 +69,8 @@ pub enum Token {
     KeywordExtern,
     KeywordStatic,
     KeywordLong,
+    KeywordSigned,
+    KeywordUnsigned,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -128,6 +132,8 @@ lazy_static! {
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
                 Token::IntegerConstant(_) => r"[0-9]+\b",
                 Token::LongConstant(_) => r"[0-9]+[lL]\b",
+                Token::UnsignedIntegerConstant(_) => r"[0-9]+[uU]\b",
+                Token::UnsignedLongConstant(_) => r"[0-9]+([lL][uU]|[uU][lL])\b",
                 // small hack to avoid having to use Option<> in this block, use
                 // an empty string and then filter those out below
                 Token::KeywordInt => "",
@@ -147,6 +153,8 @@ lazy_static! {
                 Token::KeywordExtern => "",
                 Token::KeywordStatic => "",
                 Token::KeywordLong => "",
+                Token::KeywordSigned => "",
+                Token::KeywordUnsigned => "",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -180,12 +188,22 @@ impl Token {
                 "extern" => Token::KeywordExtern,
                 "static" => Token::KeywordStatic,
                 "long" => Token::KeywordLong,
+                "signed" => Token::KeywordSigned,
+                "unsigned" => Token::KeywordUnsigned,
                 _ => Token::Identifier(text.to_string()),
             },
             Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<i64>().unwrap()),
             Token::LongConstant(_) => {
                 Token::LongConstant(text.trim_end_matches(['l', 'L']).parse::<i64>().unwrap())
             }
+            Token::UnsignedIntegerConstant(_) => Token::UnsignedIntegerConstant(
+                text.trim_end_matches(['u', 'U']).parse::<u64>().unwrap(),
+            ),
+            Token::UnsignedLongConstant(_) => Token::UnsignedLongConstant(
+                text.trim_end_matches(['l', 'L', 'u', 'U'])
+                    .parse::<u64>()
+                    .unwrap(),
+            ),
             _ => self.clone(),
         }
     }
@@ -196,7 +214,10 @@ impl Token {
             .map(|(possible_token, regex)| (possible_token, regex.find(text)))
             // filter out non-matching patterns
             .filter_map(|(possible_token, maybe_matched)| {
-                maybe_matched.map(|matched| (possible_token.clone(), matched))
+                maybe_matched.map(|matched| {
+                    // println!("{:?}", matched);
+                    (possible_token.clone(), matched)
+                })
             })
             .max_by(|(_, matched_a), (_, matched_b)| {
                 matched_a.end().cmp(&matched_b.end())

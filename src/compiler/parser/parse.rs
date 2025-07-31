@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 use super::{
     BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
     ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, Parse, ProgramNode,
@@ -17,7 +19,7 @@ fn match_specifier(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
 fn match_type(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
     Ok(matches!(
         peek(tokens)?,
-        Token::KeywordLong | Token::KeywordInt
+        Token::KeywordLong | Token::KeywordInt | Token::KeywordUnsigned | Token::KeywordSigned
     ))
 }
 
@@ -28,10 +30,17 @@ fn match_unary_operator(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>
     ))
 }
 
+fn match_suffix_operator(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
+    Ok(matches!(peek(tokens)?, Token::Increment | Token::Decrement))
+}
+
 fn match_constant(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
     Ok(matches!(
         peek(tokens)?,
-        Token::IntegerConstant(_) | Token::LongConstant(_)
+        Token::IntegerConstant(_)
+            | Token::LongConstant(_)
+            | Token::UnsignedIntegerConstant(_)
+            | Token::UnsignedLongConstant(_)
     ))
 }
 
@@ -204,20 +213,25 @@ impl Parse for Type {
         while !tokens.is_empty() && match_type(tokens)? {
             out.push(read(tokens)?)
         }
-        Ok(match out.len() {
-            0 => return Err("No type identifier found".into()),
-            1 => match out[0] {
-                Token::KeywordInt => Type::Integer,
-                Token::KeywordLong => Type::Long,
-                _ => unreachable!(),
-            },
-            2 => match (&out[0], &out[1]) {
-                (Token::KeywordLong, Token::KeywordInt) => Type::Long,
-                (Token::KeywordInt, Token::KeywordLong) => Type::Long,
-                _ => return Err(format!("Invalid type: {:?}", out).into()),
-            },
-            _ => return Err(format!("Invalid type: {:?}", out).into()),
-        })
+        if out.is_empty() {
+            return Err("No type tokens found".into());
+        }
+        if out.len() != out.iter().unique().collect_vec().len() {
+            return Err("Repeated token in type definition".into());
+        }
+        if out.contains(&Token::KeywordSigned) && out.contains(&Token::KeywordUnsigned) {
+            return Err("Type specified as both signed and unsigned".into());
+        }
+        if out.contains(&Token::KeywordUnsigned) && out.contains(&Token::KeywordLong) {
+            return Ok(Type::UnsignedLong);
+        }
+        if out.contains(&Token::KeywordUnsigned) {
+            return Ok(Type::UnsignedInteger);
+        }
+        if out.contains(&Token::KeywordLong) {
+            return Ok(Type::Long);
+        }
+        Ok(Type::Integer)
     }
 }
 
@@ -673,12 +687,6 @@ impl ExpressionWithoutType {
                 };
             } else {
                 match peek(tokens)? {
-                    Token::Increment | Token::Decrement => {
-                        left = ExpressionWithoutType::Unary(
-                            UnaryOperatorNode::parse_as_suffix(tokens, context)?,
-                            Box::new(left.into()),
-                        );
-                    }
                     Token::Question => {
                         expect(tokens, Token::Question)?;
                         // parse this expression with precedence level reset
@@ -721,7 +729,7 @@ impl ExpressionWithoutType {
         context: &mut ParseContext,
         allow_empty: bool,
     ) -> Result<Option<Self>, Box<dyn Error>> {
-        let expression = if match_unary_operator(tokens)? {
+        let mut expression = if match_unary_operator(tokens)? {
             let operator = UnaryOperatorNode::parse(tokens, context)?;
             let precedence = UnaryOperatorNode::precedence(); // all unary operators have the
                                                               // same precedence
@@ -737,6 +745,7 @@ impl ExpressionWithoutType {
             )?))
         } else {
             match peek(tokens)? {
+                // casting
                 Token::OpenParen => {
                     expect(tokens, Token::OpenParen)?;
                     if match_type(tokens)? {
@@ -796,6 +805,12 @@ impl ExpressionWithoutType {
                 }
             }
         };
+        while match_suffix_operator(tokens)? {
+            expression = Some(ExpressionWithoutType::Unary(
+                UnaryOperatorNode::parse_as_suffix(tokens, context)?,
+                Box::new(expression.unwrap().into()),
+            ));
+        }
 
         Ok(expression)
     }
@@ -829,25 +844,21 @@ impl Parse for Constant {
         tokens: &mut VecDeque<Token>,
         _context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        let (is_int, numeric_value) = match read(tokens)? {
-            Token::IntegerConstant(v) => (true, v),
-            Token::LongConstant(v) => (false, v),
+        match read(tokens)? {
+            Token::IntegerConstant(v) => Ok(if v <= i32::MAX.into() {
+                Constant::Integer(v.try_into().unwrap())
+            } else {
+                Constant::Long(v)
+            }),
+            Token::UnsignedIntegerConstant(v) => Ok(if v <= u32::MAX.into() {
+                Constant::UnsignedInteger(v.try_into().unwrap())
+            } else {
+                Constant::UnsignedLong(v)
+            }),
+            Token::LongConstant(v) => Ok(Constant::Long(v)),
+            Token::UnsignedLongConstant(v) => Ok(Constant::UnsignedLong(v)),
             _ => unreachable!(),
-        };
-
-        // if numeric_value >= i64::MAX {
-        //     return Err(format!(
-        //         "value will not fit in either a long or an int: {}",
-        //         numeric_value
-        //     )
-        //     .into());
-        // }
-
-        Ok(if is_int && numeric_value <= i32::MAX.into() {
-            Constant::Integer(numeric_value.try_into().unwrap())
-        } else {
-            Constant::Long(numeric_value)
-        })
+        }
     }
 }
 
@@ -1002,10 +1013,6 @@ impl Parse for (Type, Option<StorageClass>) {
                 storage_classes
             )
             .into());
-        }
-
-        if types.is_empty() {
-            return Err("Missing types in declaration".into());
         }
 
         let storage = storage_classes.first().map(|t| match t {

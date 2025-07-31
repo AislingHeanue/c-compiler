@@ -233,11 +233,13 @@ impl CodeDisplay for DeclarationNode {
 impl CodeDisplay for Type {
     fn show(&self, context: &mut DisplayContext) -> String {
         match self {
-            Type::Integer => "int".to_string(),
+            Type::Integer => "int32".to_string(),
+            Type::Long => "int64".to_string(),
+            Type::UnsignedInteger => "uint32".to_string(),
+            Type::UnsignedLong => "uint64".to_string(),
             Type::Function(output, inputs) => {
                 format!("func ({}) {}", inputs.show(context), output.show(context))
             }
-            Type::Long => "int64".to_string(),
         }
     }
 }
@@ -321,7 +323,9 @@ impl CodeDisplay for Constant {
     fn show(&self, _context: &mut DisplayContext) -> String {
         match self {
             Constant::Integer(c) => c.to_string(),
-            Constant::Long(c) => format!("uint64({})", c),
+            Constant::Long(c) => format!("int64({})", c),
+            Constant::UnsignedInteger(c) => format!("uint32({})", c),
+            Constant::UnsignedLong(c) => format!("uint64({})", c),
         }
     }
 }

@@ -36,6 +36,8 @@ impl Convert for AssemblyType {
         match parsed {
             Type::Integer => Ok(AssemblyType::Longword),
             Type::Long => Ok(AssemblyType::Quadword),
+            Type::UnsignedInteger => Ok(AssemblyType::Longword),
+            Type::UnsignedLong => Ok(AssemblyType::Quadword),
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
         }
     }
@@ -47,8 +49,10 @@ impl AssemblyType {
         context: &mut ConvertContext,
     ) -> Result<AssemblyType, Box<dyn Error>> {
         Ok(match src {
-            BirdsValueNode::Constant(Constant::Long(_)) => AssemblyType::Quadword,
             BirdsValueNode::Constant(Constant::Integer(_)) => AssemblyType::Longword,
+            BirdsValueNode::Constant(Constant::Long(_)) => AssemblyType::Quadword,
+            BirdsValueNode::Constant(Constant::UnsignedInteger(_)) => AssemblyType::Longword,
+            BirdsValueNode::Constant(Constant::UnsignedLong(_)) => AssemblyType::Quadword,
             BirdsValueNode::Var(name) => {
                 let var_type = context.symbols.get(name).unwrap().symbol_type.clone();
                 AssemblyType::convert(var_type, context)?
@@ -408,6 +412,8 @@ impl Convert for Operand {
         match input {
             BirdsValueNode::Constant(Constant::Integer(c)) => Ok(Operand::Imm(c.into())),
             BirdsValueNode::Constant(Constant::Long(c)) => Ok(Operand::Imm(c)),
+            BirdsValueNode::Constant(Constant::UnsignedInteger(_c)) => todo!(),
+            BirdsValueNode::Constant(Constant::UnsignedLong(_c)) => todo!(),
             BirdsValueNode::Var(s) => Ok(Operand::MockReg(s)),
         }
     }

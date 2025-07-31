@@ -32,34 +32,6 @@ pub struct VariableDeclaration {
     pub storage_class: Option<StorageClass>,
 }
 
-#[derive(Debug, Clone)]
-pub enum StorageClass {
-    Static,
-    Extern,
-}
-
-#[derive(Debug, Clone)]
-pub enum StorageInfo {
-    // is_defined and global (ie non-static)
-    Function(bool, bool),
-    // initializer and global
-    Static(InitialValue, bool),
-    Automatic,
-}
-
-#[derive(Debug, Clone)]
-pub enum InitialValue {
-    Tentative,
-    Initial(StaticInitial),
-    None,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum StaticInitial {
-    Integer(i32),
-    Long(i64),
-}
-
 pub type Block = Vec<BlockItemNode>;
 
 #[derive(Debug)]
@@ -78,8 +50,70 @@ pub enum DeclarationNode {
 pub enum Type {
     Integer,
     Long,
+    UnsignedInteger,
+    UnsignedLong,
     // return type, param types
     Function(Box<Type>, Vec<Type>),
+}
+
+impl Type {
+    fn get_size(&self) -> i32 {
+        match self {
+            Type::Integer => 32,
+            Type::Long => 64,
+            Type::UnsignedInteger => 32,
+            Type::UnsignedLong => 64,
+            Type::Function(_, _) => unreachable!(),
+        }
+    }
+
+    fn is_signed(&self) -> bool {
+        match self {
+            Type::Integer => true,
+            Type::Long => true,
+            Type::UnsignedInteger => false,
+            Type::UnsignedLong => false,
+            Type::Function(_, _) => unreachable!(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Constant {
+    Integer(i32),
+    Long(i64),
+    UnsignedInteger(u32),
+    UnsignedLong(u64),
+}
+
+#[derive(Debug, Clone)]
+pub enum InitialValue {
+    Tentative,
+    Initial(StaticInitial),
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum StaticInitial {
+    Integer(i32),
+    Long(i64),
+    UnsignedInteger(u32),
+    UnsignedLong(u64),
+}
+
+#[derive(Debug, Clone)]
+pub enum StorageClass {
+    Static,
+    Extern,
+}
+
+#[derive(Debug, Clone)]
+pub enum StorageInfo {
+    // is_defined and global (ie non-static)
+    Function(bool, bool),
+    // initializer and global
+    Static(InitialValue, bool),
+    Automatic,
 }
 
 #[derive(Debug)]
@@ -156,12 +190,6 @@ pub enum ExpressionWithoutType {
     FunctionCall(String, Vec<ExpressionNode>),
     // target type to cast expression to
     Cast(Type, Box<ExpressionNode>),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Constant {
-    Integer(i32),
-    Long(i64),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
