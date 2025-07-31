@@ -9,8 +9,8 @@ use itertools::{izip, process_results};
 use std::{cmp::min, error::Error};
 
 use super::{
-    AssemblyType, BinaryOperator, ConditionCode, Convert, ConvertContext, DisplayContext,
-    Instruction, Operand, Program, Register, TopLevel, UnaryOperator, FUNCTION_PARAM_REGISTERS,
+    AssemblyType, BinaryOperator, ConditionCode, Convert, ConvertContext, Instruction, Operand,
+    Program, Register, TopLevel, UnaryOperator, FUNCTION_PARAM_REGISTERS,
 };
 
 impl Convert for Program {
@@ -23,15 +23,7 @@ impl Convert for Program {
     ) -> Result<Self, Box<dyn Error>> {
         Ok(Program {
             body: Vec::<TopLevel>::convert(parsed.body, context)?,
-            displaying_context: DisplayContext {
-                comments: context.comments,
-                indent: 0,
-                word_length_bytes: 4,
-                instruction_suffix: "l".to_string(),
-                is_linux: context.is_linux,
-                is_mac: context.is_mac,
-                symbols: context.symbols.clone(),
-            },
+            displaying_context: None,
         })
     }
 }
@@ -271,6 +263,10 @@ impl Convert for Instruction {
             }
             BirdsInstructionNode::Binary(op, left, right, dst) => {
                 let left_type = AssemblyType::infer(&left, context)?;
+                // NOTE: right and left operands implicitly swap places here.
+                // This is 100% expected because the 'left' operand in a binary
+                // gets put into dst. Eg 1 - 2 turns into Sub(2, 1) and the result is
+                // read from where 1 is.
                 vec![
                     Instruction::Mov(
                         left_type,

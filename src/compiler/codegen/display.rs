@@ -1,6 +1,6 @@
 use itertools::Itertools;
 
-use crate::compiler::parser::{StaticInitial, StorageInfo};
+use crate::compiler::{codegen::AssemblySymbolInfo, parser::StaticInitial};
 
 use super::{
     AssemblyType, BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, Instruction, Operand,
@@ -19,7 +19,12 @@ where
 
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let context = &mut self.displaying_context.clone();
+        // do some rust borrow checker wizardry to access the Program's
+        // DisplayContext mutably.
+        let context_ref = self.displaying_context.as_ref().unwrap();
+        let mut context_object = context_ref.borrow_mut();
+        let context = &mut *context_object;
+
         writeln!(f, "{}", self.body.show(context))?;
         context.indent();
         if context.is_linux {
@@ -207,15 +212,36 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
-            Instruction::Binary(op, t, src, dst) => format!(
-                "{:indent$}{}{} {}, {}",
-                "",
-                op.show(context),
-                context.suffix_for_type(t),
-                src.show(context),
-                dst.show(context),
-                indent = context.indent
-            ),
+            Instruction::Binary(op, t, src, dst)
+                if matches!(op, BinaryOperator::ShiftLeft | BinaryOperator::ShiftRight) =>
+            {
+                // bit-shift operations (as of today) require that the first argument, ie the
+                // number to shift by, is 1 byte long. This is sensible since we don't represent
+                // any numbers higher than 2^256 anyway. I'm just not sure why this seems to have
+                // come up as a regression in my code today, maybe a sneaky GCC change...?
+                context.short();
+                let shift_by = src.show(context);
+                format!(
+                    "{:indent$}{}{} {}, {}",
+                    "",
+                    op.show(context),
+                    context.suffix_for_type(t),
+                    shift_by,
+                    dst.show(context),
+                    indent = context.indent
+                )
+            }
+            Instruction::Binary(op, t, src, dst) => {
+                format!(
+                    "{:indent$}{}{} {}, {}",
+                    "",
+                    op.show(context),
+                    context.suffix_for_type(t),
+                    src.show(context),
+                    dst.show(context),
+                    indent = context.indent
+                )
+            }
             Instruction::Idiv(t, src) => {
                 if context.comments {
                     format!(
@@ -330,9 +356,7 @@ impl CodeDisplay for Instruction {
                 let function_name = if context.is_mac {
                     "_".to_string() + s
                 } else if context.is_linux {
-                    if let StorageInfo::Function(false, true) =
-                        context.symbols.get(s).unwrap().storage
-                    {
+                    if let AssemblySymbolInfo::Function(false) = context.symbols.get(s).unwrap() {
                         // if a function isn't defined in this file, call it from another file (ie
                         // externally link it)
                         s.to_string() + "@PLT"

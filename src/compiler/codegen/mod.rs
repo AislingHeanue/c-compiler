@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error};
+use std::{cell::RefCell, collections::HashMap, error::Error, mem::swap};
 
 use super::{
     birds::BirdsProgramNode,
@@ -11,7 +11,7 @@ mod validate;
 
 pub struct Program {
     body: Vec<TopLevel>,
-    displaying_context: DisplayContext,
+    displaying_context: Option<RefCell<DisplayContext>>,
 }
 
 enum TopLevel {
@@ -147,7 +147,6 @@ trait CodeDisplay {
     fn show(&self, context: &mut DisplayContext) -> String;
 }
 
-#[derive(Clone)]
 pub struct DisplayContext {
     comments: bool,
     indent: usize,
@@ -155,7 +154,7 @@ pub struct DisplayContext {
     is_mac: bool,
     word_length_bytes: i32,
     instruction_suffix: String,
-    symbols: HashMap<String, SymbolInfo>,
+    symbols: HashMap<String, AssemblySymbolInfo>,
 }
 
 impl DisplayContext {
@@ -212,9 +211,11 @@ pub fn codegen(
     let mut converted = Program::convert(parsed, &mut context)?;
 
     let mut assembly_map: HashMap<String, AssemblySymbolInfo> = HashMap::new();
-    // clone the symbols table so we can iterate over it and still use it for conversion (not ideal
-    // but not the end of the world).
-    for (k, v) in context.symbols.clone() {
+
+    // swap the symbols map out of the ConvertContext so we can iterate over it and build a new map
+    let mut stolen_map = HashMap::new();
+    swap(&mut stolen_map, &mut context.symbols);
+    for (k, v) in stolen_map {
         if let Type::Function(_, _) = v.symbol_type {
             if let StorageInfo::Function(defined, _) = v.storage {
                 assembly_map.insert(k.clone(), AssemblySymbolInfo::Function(defined));
@@ -257,6 +258,18 @@ pub fn codegen(
         validate_context.pass = Some(pass);
         converted.validate(&mut validate_context)?;
     }
+
+    // store the DisplayContext in a RefCell so that the Display trait can pick out
+    // the value and modify it while it is rendering the actual Assembly code.
+    converted.displaying_context = Some(RefCell::new(DisplayContext {
+        comments: context.comments,
+        indent: 0,
+        word_length_bytes: 4,
+        instruction_suffix: "l".to_string(),
+        is_linux: context.is_linux,
+        is_mac: context.is_mac,
+        symbols: validate_context.symbols,
+    }));
 
     Ok(converted)
 }
