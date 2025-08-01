@@ -15,6 +15,7 @@ struct CompileConfig {
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut filenames = Vec::new();
+    let mut linker_args = Vec::new();
     let mut only_lex = false;
     let mut only_parse = false;
     let mut only_validate = false;
@@ -33,6 +34,7 @@ fn main() {
             "-S" => assembly_out = true,
             "--comments" => add_comments = true,
             "-c" => to_object_file = true,
+            t if t.len() > 1 && t[..2] == *"-l" => linker_args.push(arg.clone()),
             _ => filenames.push(arg.clone()),
         }
     }
@@ -89,10 +91,12 @@ fn main() {
         .args(if to_object_file {
             let mut args = vec!["-c", "-o", &object_filename];
             args.append(&mut asm_filenames.iter().map(|s| s.as_str()).collect());
+            args.append(&mut linker_args.iter().map(|s| s.as_str()).collect());
             args
         } else {
             let mut args = vec!["-o", &stripped_filename];
             args.append(&mut asm_filenames.iter().map(|s| s.as_str()).collect());
+            args.append(&mut linker_args.iter().map(|s| s.as_str()).collect());
             args
         })
         .output()

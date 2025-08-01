@@ -1,10 +1,10 @@
 use lazy_static::lazy_static;
-use regex::{Match, Regex};
+use regex::Regex;
 use std::{collections::VecDeque, error::Error};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, Hash)]
+#[derive(Clone, Debug, PartialEq, EnumIter)]
 pub enum Token {
     OpenParen,
     CloseParen,
@@ -50,6 +50,7 @@ pub enum Token {
     Identifier(String),
     IntegerConstant(i64),
     LongConstant(i64),
+    DoubleConstant(f64),
     UnsignedIntegerConstant(u64),
     UnsignedLongConstant(u64),
     KeywordInt,
@@ -71,6 +72,7 @@ pub enum Token {
     KeywordLong,
     KeywordSigned,
     KeywordUnsigned,
+    KeywordDouble,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -130,31 +132,38 @@ lazy_static! {
                 Token::Colon => r":",
                 Token::Comma => r",",
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
-                Token::IntegerConstant(_) => r"[0-9]+\b",
-                Token::LongConstant(_) => r"[0-9]+[lL]\b",
-                Token::UnsignedIntegerConstant(_) => r"[0-9]+[uU]\b",
-                Token::UnsignedLongConstant(_) => r"[0-9]+([lL][uU]|[uU][lL])\b",
+                Token::IntegerConstant(_) => r"([0-9]+)[^\w.]",
+                Token::LongConstant(_) => r"([0-9]+[lL])[^\w.]",
+                Token::UnsignedIntegerConstant(_) => r"([0-9]+[uU])[^\w.]",
+                Token::UnsignedLongConstant(_) => r"([0-9]+([lL][uU]|[uU][lL]))[^\w.]",
+                Token::DoubleConstant(_) => r"((?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]",
+                // Token::IntegerConstant(_) => r"([0-9]+)\b",
+                // Token::LongConstant(_) => r"([0-9]+[lL])\b",
+                // Token::UnsignedIntegerConstant(_) => r"([0-9]+[uU])\b",
+                // Token::UnsignedLongConstant(_) => r"([0-9]+([lL][uU]|[uU][lL]))\b",
+                // Token::DoubleConstant(_) => r"(([0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)\b",
                 // small hack to avoid having to use Option<> in this block, use
                 // an empty string and then filter those out below
-                Token::KeywordInt => "",
-                Token::KeywordVoid => "",
-                Token::KeywordReturn => "",
-                Token::KeywordIf => "",
-                Token::KeywordElse => "",
-                Token::KeywordGoto => "",
-                Token::KeywordDo => "",
-                Token::KeywordWhile => "",
-                Token::KeywordFor => "",
-                Token::KeywordBreak => "",
-                Token::KeywordContinue => "",
-                Token::KeywordSwitch => "",
-                Token::KeywordCase => "",
-                Token::KeywordDefault => "",
-                Token::KeywordExtern => "",
-                Token::KeywordStatic => "",
-                Token::KeywordLong => "",
-                Token::KeywordSigned => "",
-                Token::KeywordUnsigned => "",
+                Token::KeywordInt => r"int\b",
+                Token::KeywordVoid =>r"void\b",
+                Token::KeywordReturn =>r"return\b",
+                Token::KeywordIf =>r"if\b",
+                Token::KeywordElse =>r"else\b",
+                Token::KeywordGoto =>r"goto\b",
+                Token::KeywordDo =>r"do\b",
+                Token::KeywordWhile =>r"while\b",
+                Token::KeywordFor =>r"for\b",
+                Token::KeywordBreak =>r"break\b",
+                Token::KeywordContinue =>r"continue\b",
+                Token::KeywordSwitch => r"switch\b",
+                Token::KeywordCase =>r"case\b",
+                Token::KeywordDefault =>r"default\b",
+                Token::KeywordExtern =>r"extern\b",
+                Token::KeywordStatic =>r"static\b",
+                Token::KeywordLong =>r"long\b",
+                Token::KeywordSigned =>r"signed\b",
+                Token::KeywordUnsigned =>r"unsigned\b",
+                Token::KeywordDouble =>r"double\b",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -170,28 +179,7 @@ impl Token {
         // fill in values for identifiers and integer constants, since they need to read the actual
         // contents of the matching field
         match self {
-            Token::Identifier(_) => match text {
-                "int" => Token::KeywordInt,
-                "return" => Token::KeywordReturn,
-                "void" => Token::KeywordVoid,
-                "if" => Token::KeywordIf,
-                "else" => Token::KeywordElse,
-                "goto" => Token::KeywordGoto,
-                "do" => Token::KeywordDo,
-                "while" => Token::KeywordWhile,
-                "for" => Token::KeywordFor,
-                "break" => Token::KeywordBreak,
-                "continue" => Token::KeywordContinue,
-                "switch" => Token::KeywordSwitch,
-                "case" => Token::KeywordCase,
-                "default" => Token::KeywordDefault,
-                "extern" => Token::KeywordExtern,
-                "static" => Token::KeywordStatic,
-                "long" => Token::KeywordLong,
-                "signed" => Token::KeywordSigned,
-                "unsigned" => Token::KeywordUnsigned,
-                _ => Token::Identifier(text.to_string()),
-            },
+            Token::Identifier(_) => Token::Identifier(text.to_string()),
             Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<i64>().unwrap()),
             Token::LongConstant(_) => {
                 Token::LongConstant(text.trim_end_matches(['l', 'L']).parse::<i64>().unwrap())
@@ -204,26 +192,32 @@ impl Token {
                     .parse::<u64>()
                     .unwrap(),
             ),
+            Token::DoubleConstant(_) => Token::DoubleConstant(text.parse::<f64>().unwrap()),
             _ => self.clone(),
         }
     }
 
-    fn find_next(text: &str) -> Result<(Token, Match), Box<dyn Error>> {
+    fn find_next(text: &str) -> Result<(Token, usize), Box<dyn Error>> {
         ALL_TOKENS
             .iter()
-            .map(|(possible_token, regex)| (possible_token, regex.find(text)))
+            .map(|(possible_token, regex)| (possible_token, regex.captures(text)))
             // filter out non-matching patterns
-            .filter_map(|(possible_token, maybe_matched)| {
-                maybe_matched.map(|matched| {
-                    // println!("{:?}", matched);
-                    (possible_token.clone(), matched)
+            .filter_map(|(possible_token, maybe_captures)| {
+                maybe_captures.map(|captures| {
+                    (
+                        possible_token.clone(),
+                        captures.get(captures.len() - 1).unwrap().end(),
+                    ) // read the last capture group
                 })
             })
-            .max_by(|(_, matched_a), (_, matched_b)| {
-                matched_a.end().cmp(&matched_b.end())
-                // need to order by precedence because keywords and identifiers may match
-                // results with the same length, and in this case the keyword is always
-                // preferred.
+            .max_by(|(token_a, end_a), (token_b, end_b)| {
+                end_a.cmp(end_b).then_with(|| {
+                    let token_a_precedence: usize =
+                        (!matches!(token_a, Token::Identifier(_))).into();
+                    let token_b_precedence: usize =
+                        (!matches!(token_b, Token::Identifier(_))).into();
+                    token_a_precedence.cmp(&token_b_precedence)
+                })
             })
             .ok_or::<Box<dyn Error>>("Invalid token detected".into())
     }
@@ -234,8 +228,8 @@ pub fn lex(mut contents: &str) -> Result<VecDeque<Token>, Box<dyn Error>> {
 
     contents = contents.trim_start();
     while !contents.is_empty() {
-        let (possible_token, matched): (Token, Match) = Token::find_next(contents)?;
-        let (substring, remainder) = contents.split_at(matched.end());
+        let (possible_token, end): (Token, usize) = Token::find_next(contents)?;
+        let (substring, remainder) = contents.split_at(end);
         contents = remainder;
 
         tokens.push_back(possible_token.instantiate(substring));

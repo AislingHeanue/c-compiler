@@ -1,5 +1,3 @@
-use itertools::Itertools;
-
 use super::{
     BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
     ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, Parse, ProgramNode,
@@ -216,8 +214,12 @@ impl Parse for Type {
         if out.is_empty() {
             return Err("No type tokens found".into());
         }
-        if out.len() != out.iter().unique().collect_vec().len() {
-            return Err("Repeated token in type definition".into());
+        let mut seen = Vec::new();
+        for i in out.iter() {
+            if seen.contains(i) {
+                return Err("Repeated token in type definition".into());
+            }
+            seen.push(i.clone());
         }
         if out.contains(&Token::KeywordSigned) && out.contains(&Token::KeywordUnsigned) {
             return Err("Type specified as both signed and unsigned".into());
