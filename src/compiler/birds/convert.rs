@@ -28,14 +28,15 @@ fn new_temp_variable(type_to_store: Type, context: &mut ConvertContext) -> Birds
     BirdsValueNode::Var(new_name)
 }
 
+// purely-for-utility function for getting constants (almost always 0 or 1) in the appropriate type
 fn get_typed_constant(value: u32, target: &ExpressionNode) -> BirdsValueNode {
     match target.1.as_ref().unwrap() {
         Type::Integer => BirdsValueNode::Constant(Constant::Integer(value.try_into().unwrap())),
         Type::Long => BirdsValueNode::Constant(Constant::Long(value.into())),
         Type::UnsignedInteger => BirdsValueNode::Constant(Constant::UnsignedInteger(value)),
         Type::UnsignedLong => BirdsValueNode::Constant(Constant::UnsignedLong(value.into())),
+        Type::Double => BirdsValueNode::Constant(Constant::Double(value.into())),
         Type::Function(_, _) => unreachable!(),
-        Type::Double => todo!(),
     }
 }
 
@@ -724,9 +725,34 @@ impl Convert for ExpressionNode {
                 if target_type == this_type {
                     return Ok((instructions, new_src));
                 }
-
                 let new_dst = new_temp_variable(target_type.clone(), context);
-                if target_type.get_size() == this_type.get_size() {
+                if target_type == Type::Double {
+                    match this_type {
+                        Type::Integer | Type::Long => {
+                            instructions
+                                .push(BirdsInstructionNode::IntToDouble(new_src, new_dst.clone()));
+                        }
+                        Type::UnsignedInteger | Type::UnsignedLong => {
+                            instructions
+                                .push(BirdsInstructionNode::UintToDouble(new_src, new_dst.clone()));
+                        }
+                        Type::Double => unreachable!(),
+                        Type::Function(_, _) => unreachable!(),
+                    }
+                } else if this_type == Type::Double {
+                    match target_type {
+                        Type::Integer | Type::Long => {
+                            instructions
+                                .push(BirdsInstructionNode::DoubleToInt(new_src, new_dst.clone()));
+                        }
+                        Type::UnsignedInteger | Type::UnsignedLong => {
+                            instructions
+                                .push(BirdsInstructionNode::DoubleToUint(new_src, new_dst.clone()));
+                        }
+                        Type::Double => unreachable!(),
+                        Type::Function(_, _) => unreachable!(),
+                    }
+                } else if target_type.get_size() == this_type.get_size() {
                     // mov the old type into the new type directly
                     // C casting behaviour basically ends up saying "never alter the
                     // underlying binary unless to extend or truncate it", indirectly

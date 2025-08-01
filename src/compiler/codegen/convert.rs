@@ -471,6 +471,10 @@ impl Convert for Instruction {
                     Operand::convert(dst, context)?,
                 )]
             }
+            BirdsInstructionNode::DoubleToInt(_, _) => todo!(),
+            BirdsInstructionNode::DoubleToUint(_, _) => todo!(),
+            BirdsInstructionNode::IntToDouble(_, _) => todo!(),
+            BirdsInstructionNode::UintToDouble(_, _) => todo!(),
         })
     }
 }

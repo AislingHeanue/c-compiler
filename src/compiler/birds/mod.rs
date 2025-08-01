@@ -42,6 +42,10 @@ pub enum BirdsInstructionNode {
     Truncate(BirdsValueNode, BirdsValueNode),
     // src (32 bits) to dst (64 bits) for unsigned values
     ZeroExtend(BirdsValueNode, BirdsValueNode),
+    DoubleToInt(BirdsValueNode, BirdsValueNode),
+    DoubleToUint(BirdsValueNode, BirdsValueNode),
+    IntToDouble(BirdsValueNode, BirdsValueNode),
+    UintToDouble(BirdsValueNode, BirdsValueNode),
 }
 
 #[derive(Clone, Debug)]
