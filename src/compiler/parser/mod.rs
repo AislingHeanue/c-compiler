@@ -21,7 +21,7 @@ pub struct FunctionDeclaration {
     pub storage_class: Option<StorageClass>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ExpressionNode(pub ExpressionWithoutType, pub Option<Type>);
 
 #[derive(Debug)]
@@ -52,6 +52,7 @@ pub enum Type {
     Long,
     UnsignedInteger,
     UnsignedLong,
+    Double,
     // return type, param types
     Function(Box<Type>, Vec<Type>),
 }
@@ -62,6 +63,7 @@ impl Type {
         match self {
             Type::Integer => 4,
             Type::Long => 8,
+            Type::Double => 8,
             Type::UnsignedInteger => 4,
             Type::UnsignedLong => 8,
             Type::Function(_, _) => unreachable!(),
@@ -74,17 +76,19 @@ impl Type {
             Type::Long => true,
             Type::UnsignedInteger => false,
             Type::UnsignedLong => false,
+            Type::Double => true,
             Type::Function(_, _) => unreachable!(),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Constant {
     Integer(i32),
     Long(i64),
     UnsignedInteger(u32),
     UnsignedLong(u64),
+    Double(f64),
 }
 
 #[derive(Debug, Clone)]
@@ -174,7 +178,7 @@ pub enum ForInitialiserNode {
     Expression(Option<ExpressionNode>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ExpressionWithoutType {
     Constant(Constant),
     Unary(UnaryOperatorNode, Box<ExpressionNode>),

@@ -34,6 +34,7 @@ fn get_typed_constant(value: u32, target: &ExpressionNode) -> BirdsValueNode {
         Type::Long => BirdsValueNode::Constant(Constant::Long(value.into())),
         Type::UnsignedInteger => BirdsValueNode::Constant(Constant::UnsignedInteger(value)),
         Type::UnsignedLong => BirdsValueNode::Constant(Constant::UnsignedLong(value.into())),
+        Type::Double => todo!(),
         Type::Function(_, _) => unreachable!(),
     }
 }

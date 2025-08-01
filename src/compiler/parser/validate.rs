@@ -243,6 +243,7 @@ impl VariableDeclaration {
                             InitialValue::Initial(StaticInitial::UnsignedInteger(0))
                         }
                         Type::UnsignedLong => InitialValue::Initial(StaticInitial::UnsignedLong(0)),
+                        Type::Double => todo!(),
                         Type::Function(_, _) => unreachable!(),
                     },
                     _ => {
@@ -291,11 +292,13 @@ impl Constant {
             (Constant::Long(l), Type::Integer) => StaticInitial::Integer(*l as i32),
             (Constant::UnsignedInteger(i), Type::Integer) => StaticInitial::Integer(*i as i32),
             (Constant::UnsignedLong(l), Type::Integer) => StaticInitial::Integer(*l as i32),
+            (Constant::Double(_), Type::Integer) => todo!(),
 
             (Constant::Integer(i), Type::Long) => StaticInitial::Long(*i as i64),
             (Constant::Long(l), Type::Long) => StaticInitial::Long(*l),
             (Constant::UnsignedInteger(i), Type::Long) => StaticInitial::Long(*i as i64),
             (Constant::UnsignedLong(l), Type::Long) => StaticInitial::Long(*l as i64),
+            (Constant::Double(_), Type::Long) => todo!(),
 
             (Constant::Integer(i), Type::UnsignedInteger) => {
                 StaticInitial::UnsignedInteger(*i as u32)
@@ -307,6 +310,7 @@ impl Constant {
             (Constant::UnsignedLong(l), Type::UnsignedInteger) => {
                 StaticInitial::UnsignedInteger(*l as u32)
             }
+            (Constant::Double(_), Type::UnsignedInteger) => todo!(),
 
             (Constant::Integer(i), Type::UnsignedLong) => StaticInitial::UnsignedLong(*i as u64),
             (Constant::Long(l), Type::UnsignedLong) => StaticInitial::UnsignedLong(*l as u64),
@@ -314,6 +318,13 @@ impl Constant {
                 StaticInitial::UnsignedLong(*i as u64)
             }
             (Constant::UnsignedLong(l), Type::UnsignedLong) => StaticInitial::UnsignedLong(*l),
+            (Constant::Double(_), Type::UnsignedLong) => todo!(),
+
+            (Constant::Integer(_), Type::Double) => todo!(),
+            (Constant::Long(_), Type::Double) => todo!(),
+            (Constant::UnsignedInteger(_), Type::Double) => todo!(),
+            (Constant::UnsignedLong(_), Type::Double) => todo!(),
+            (Constant::Double(_), Type::Double) => todo!(),
 
             (_, Type::Function(_, _)) => unreachable!(),
         }
@@ -825,6 +836,7 @@ impl ExpressionNode {
                 Constant::Long(_) => Type::Long,
                 Constant::UnsignedInteger(_) => Type::UnsignedInteger,
                 Constant::UnsignedLong(_) => Type::UnsignedLong,
+                Constant::Double(_) => Type::Double,
             },
             ExpressionWithoutType::Unary(ref op, ref mut src) => {
                 // replace src in-place in the expression (oh wait i can probably do this

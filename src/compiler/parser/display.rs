@@ -240,6 +240,7 @@ impl CodeDisplay for Type {
             Type::Function(output, inputs) => {
                 format!("func ({}) {}", inputs.show(context), output.show(context))
             }
+            Type::Double => "float64".to_string(),
         }
     }
 }
@@ -326,6 +327,7 @@ impl CodeDisplay for Constant {
             Constant::Long(c) => format!("int64({})", c),
             Constant::UnsignedInteger(c) => format!("uint32({})", c),
             Constant::UnsignedLong(c) => format!("uint64({})", c),
+            Constant::Double(c) => format!("float64({})", c),
         }
     }
 }

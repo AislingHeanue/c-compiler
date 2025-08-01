@@ -38,6 +38,7 @@ impl Convert for AssemblyType {
             Type::Long => Ok(AssemblyType::Quadword),
             Type::UnsignedInteger => Ok(AssemblyType::Longword),
             Type::UnsignedLong => Ok(AssemblyType::Quadword),
+            Type::Double => Ok(AssemblyType::Quadword),
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
         }
     }
@@ -56,6 +57,7 @@ impl AssemblyType {
                 (AssemblyType::Longword, false)
             }
             BirdsValueNode::Constant(Constant::UnsignedLong(_)) => (AssemblyType::Quadword, false),
+            BirdsValueNode::Constant(Constant::Double(_)) => (AssemblyType::Quadword, true),
             BirdsValueNode::Var(name) => {
                 let var_type = context.symbols.get(name).unwrap().symbol_type.clone();
                 let signed = var_type.is_signed();
@@ -499,6 +501,10 @@ impl Convert for Operand {
             }
             BirdsValueNode::Constant(Constant::UnsignedLong(c)) => {
                 Ok(Operand::Imm(ImmediateValue::Unsigned(c)))
+            }
+            BirdsValueNode::Constant(Constant::Double(_c)) => {
+                todo!()
+                // Ok(Operand::Imm(ImmediateValue::Unsigned(c)))
             }
             BirdsValueNode::Var(s) => Ok(Operand::MockReg(s)),
         }

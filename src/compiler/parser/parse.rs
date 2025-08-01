@@ -17,7 +17,11 @@ fn match_specifier(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
 fn match_type(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
     Ok(matches!(
         peek(tokens)?,
-        Token::KeywordLong | Token::KeywordInt | Token::KeywordUnsigned | Token::KeywordSigned
+        Token::KeywordLong
+            | Token::KeywordInt
+            | Token::KeywordUnsigned
+            | Token::KeywordSigned
+            | Token::KeywordDouble
     ))
 }
 
@@ -39,6 +43,7 @@ fn match_constant(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
             | Token::LongConstant(_)
             | Token::UnsignedIntegerConstant(_)
             | Token::UnsignedLongConstant(_)
+            | Token::DoubleConstant(_)
     ))
 }
 
@@ -220,6 +225,13 @@ impl Parse for Type {
                 return Err("Repeated token in type definition".into());
             }
             seen.push(i.clone());
+        }
+        if out.contains(&Token::KeywordDouble) {
+            if out.len() == 1 {
+                return Ok(Type::Double);
+            } else {
+                return Err("Double cannot be used with other type specifiers".into());
+            }
         }
         if out.contains(&Token::KeywordSigned) && out.contains(&Token::KeywordUnsigned) {
             return Err("Type specified as both signed and unsigned".into());
@@ -859,6 +871,7 @@ impl Parse for Constant {
             }),
             Token::LongConstant(v) => Ok(Constant::Long(v)),
             Token::UnsignedLongConstant(v) => Ok(Constant::UnsignedLong(v)),
+            Token::DoubleConstant(v) => Ok(Constant::Double(v)),
             _ => unreachable!(),
         }
     }
