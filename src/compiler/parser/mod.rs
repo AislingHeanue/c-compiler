@@ -57,17 +57,18 @@ pub enum Type {
 }
 
 impl Type {
-    fn get_size(&self) -> i32 {
+    pub fn get_size(&self) -> i32 {
+        // bytes
         match self {
-            Type::Integer => 32,
-            Type::Long => 64,
-            Type::UnsignedInteger => 32,
-            Type::UnsignedLong => 64,
+            Type::Integer => 4,
+            Type::Long => 8,
+            Type::UnsignedInteger => 4,
+            Type::UnsignedLong => 8,
             Type::Function(_, _) => unreachable!(),
         }
     }
 
-    fn is_signed(&self) -> bool {
+    pub fn is_signed(&self) -> bool {
         match self {
             Type::Integer => true,
             Type::Long => true,

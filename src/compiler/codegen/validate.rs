@@ -3,12 +3,16 @@ use std::collections::HashMap;
 use itertools::Itertools;
 
 use super::{
-    AssemblySymbolInfo, AssemblyType, BinaryOperator, Instruction, Operand, Program, Register,
-    TopLevel, Validate, ValidateContext, ValidationPass,
+    AssemblySymbolInfo, AssemblyType, BinaryOperator, ImmediateValue, Instruction, Operand,
+    Program, Register, TopLevel, Validate, ValidateContext, ValidationPass,
 };
 
 fn align_stack_size(initial: i32, alignment: i32) -> i32 {
     initial + (alignment - initial).rem_euclid(alignment)
+}
+
+fn match_in_memory(operand: &Operand) -> bool {
+    matches!(operand, &Operand::Stack(_) | &Operand::Data(_))
 }
 
 impl Validate for Program {
@@ -85,7 +89,9 @@ impl Validate for Vec<Instruction> {
                     Instruction::Binary(
                         BinaryOperator::Sub,
                         AssemblyType::Quadword,
-                        Operand::Imm(align_stack_size(*stack_size, 16).into()),
+                        Operand::Imm(ImmediateValue::Signed(
+                            align_stack_size(*stack_size, 16).into(),
+                        )),
                         Operand::Reg(Register::SP),
                     ),
                 ]
@@ -135,6 +141,13 @@ impl Validate for Vec<Instruction> {
                     Instruction::fix_large_ints,
                 );
             }
+            ValidationPass::RewriteMovZeroExtend => {
+                *self = Instruction::update_instructions(
+                    self.drain(..).collect_vec(),
+                    context,
+                    Instruction::rewrite_mov_zero_extend,
+                );
+            }
         };
 
         Ok(())
@@ -163,6 +176,10 @@ impl Instruction {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
             }
+            Instruction::MovZeroExtend(ref mut src, ref mut dst) => {
+                src.replace_mock_register(context);
+                dst.replace_mock_register(context);
+            }
             Instruction::Unary(_, _, ref mut dst) => {
                 dst.replace_mock_register(context);
             }
@@ -171,6 +188,9 @@ impl Instruction {
                 dst.replace_mock_register(context);
             }
             Instruction::Idiv(_, ref mut src) => {
+                src.replace_mock_register(context);
+            }
+            Instruction::Div(_, ref mut src) => {
                 src.replace_mock_register(context);
             }
             Instruction::Cmp(_, ref mut src, ref mut dst) => {
@@ -204,9 +224,7 @@ impl Instruction {
             // Instruction::Movsx(ref src, ref dst) => (src, dst),
             _ => return vec![self],
         };
-        if matches!(src, &Operand::Stack(_) | &Operand::Data(_))
-            && matches!(dst, &Operand::Stack(_) | &Operand::Data(_))
-        {
+        if match_in_memory(src) && match_in_memory(dst) {
             match self {
                 Instruction::Mov(t, src, dst) => vec![
                     Instruction::Mov(t, src, Operand::Reg(Register::R10)),
@@ -240,6 +258,15 @@ impl Instruction {
                     Operand::Reg(Register::R10),
                 ),
                 Instruction::Idiv(t, Operand::Reg(Register::R10)),
+            ],
+            Instruction::Div(t, Operand::Imm(value)) => vec![
+                Instruction::Mov(
+                    t,
+                    Operand::Imm(value),
+                    // we use r10d to fix src's
+                    Operand::Reg(Register::R10),
+                ),
+                Instruction::Div(t, Operand::Reg(Register::R10)),
             ],
             Instruction::Movsx(Operand::Imm(value), dst) => vec![
                 Instruction::Mov(
@@ -279,26 +306,18 @@ impl Instruction {
 
     fn fix_shift_operation_register(self, _context: &mut ValidateContext) -> Vec<Instruction> {
         match self {
-            Instruction::Binary(BinaryOperator::ShiftLeft, t, left, right) => {
+            Instruction::Binary(op, t, left, right)
+                if matches!(
+                    op,
+                    BinaryOperator::ShiftLeft
+                        | BinaryOperator::ShiftRight
+                        | BinaryOperator::UnsignedShiftLeft
+                        | BinaryOperator::UnsignedShiftRight
+                ) =>
+            {
                 vec![
                     Instruction::Mov(t, left, Operand::Reg(Register::CX)),
-                    Instruction::Binary(
-                        BinaryOperator::ShiftLeft,
-                        t,
-                        Operand::Reg(Register::CX),
-                        right,
-                    ),
-                ]
-            }
-            Instruction::Binary(BinaryOperator::ShiftRight, t, left, right) => {
-                vec![
-                    Instruction::Mov(t, left, Operand::Reg(Register::CX)),
-                    Instruction::Binary(
-                        BinaryOperator::ShiftRight,
-                        t,
-                        Operand::Reg(Register::CX),
-                        right,
-                    ),
+                    Instruction::Binary(op, t, Operand::Reg(Register::CX), right),
                 ]
             }
             _ => vec![self],
@@ -320,7 +339,7 @@ impl Instruction {
     fn fix_large_ints(self, _context: &mut ValidateContext) -> Vec<Instruction> {
         match self {
             Instruction::Binary(op, AssemblyType::Quadword, Operand::Imm(value), dst)
-                if value > i32::MAX.into()
+                if !value.can_fit_in_longword()
                     && matches!(
                         op,
                         BinaryOperator::Add
@@ -346,7 +365,7 @@ impl Instruction {
                 ]
             }
             Instruction::Cmp(AssemblyType::Quadword, Operand::Imm(value), dst)
-                if value > i32::MAX.into() =>
+                if !value.can_fit_in_longword() =>
             {
                 vec![
                     Instruction::Mov(
@@ -357,7 +376,7 @@ impl Instruction {
                     Instruction::Cmp(AssemblyType::Quadword, Operand::Reg(Register::R10), dst),
                 ]
             }
-            Instruction::Push(Operand::Imm(value)) if value > i32::MAX.into() => {
+            Instruction::Push(Operand::Imm(value)) if !value.can_fit_in_longword() => {
                 vec![
                     Instruction::Mov(
                         AssemblyType::Quadword,
@@ -367,8 +386,8 @@ impl Instruction {
                     Instruction::Push(Operand::Reg(Register::R10)),
                 ]
             }
-            Instruction::Mov(AssemblyType::Quadword, Operand::Imm(value), Operand::Stack(loc))
-                if value > i32::MAX.into() =>
+            Instruction::Mov(AssemblyType::Quadword, Operand::Imm(value), dst)
+                if match_in_memory(&dst) && !value.can_fit_in_longword() =>
             {
                 vec![
                     Instruction::Mov(
@@ -376,41 +395,37 @@ impl Instruction {
                         Operand::Imm(value),
                         Operand::Reg(Register::R10),
                     ),
-                    Instruction::Mov(
-                        AssemblyType::Quadword,
-                        Operand::Reg(Register::R10),
-                        Operand::Stack(loc),
-                    ),
-                ]
-            }
-            Instruction::Mov(AssemblyType::Quadword, Operand::Imm(value), Operand::Data(loc))
-                if value > i32::MAX.into() =>
-            {
-                vec![
-                    Instruction::Mov(
-                        AssemblyType::Quadword,
-                        Operand::Imm(value),
-                        Operand::Reg(Register::R10),
-                    ),
-                    Instruction::Mov(
-                        AssemblyType::Quadword,
-                        Operand::Reg(Register::R10),
-                        Operand::Data(loc),
-                    ),
+                    Instruction::Mov(AssemblyType::Quadword, Operand::Reg(Register::R10), dst),
                 ]
             }
             // truncation instruction can generate this kind of move. This check isn't strictly
             // needed but still may prevent some very hard-to-find errors otherwise
-            Instruction::Mov(AssemblyType::Longword, Operand::Imm(value), dst)
-                if value > i32::MAX.into() =>
+            Instruction::Mov(AssemblyType::Longword, Operand::Imm(mut value), dst)
+                if !value.can_fit_in_longword() =>
             {
+                value.truncate();
                 vec![Instruction::Mov(
-                    AssemblyType::Quadword,
-                    Operand::Imm((value as i32).into()),
+                    AssemblyType::Longword,
+                    Operand::Imm(value),
                     dst,
                 )]
             }
 
+            _ => vec![self],
+        }
+    }
+
+    fn rewrite_mov_zero_extend(self, _context: &mut ValidateContext) -> Vec<Instruction> {
+        match self {
+            Instruction::MovZeroExtend(src, dst) if match_in_memory(&dst) => {
+                vec![
+                    Instruction::Mov(AssemblyType::Longword, src, Operand::Reg(Register::R11)),
+                    Instruction::Mov(AssemblyType::Quadword, Operand::Reg(Register::R11), dst),
+                ]
+            }
+            Instruction::MovZeroExtend(src, dst) => {
+                vec![Instruction::Mov(AssemblyType::Longword, src, dst)]
+            }
             _ => vec![self],
         }
     }

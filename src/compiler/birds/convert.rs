@@ -711,42 +711,28 @@ impl Convert for ExpressionNode {
                 Ok((instructions, new_dst))
             }
             ExpressionWithoutType::Cast(target_type, e) => {
-                match (target_type, e.1.as_ref().unwrap()) {
-                    (a, b) if a == *b => Ok(e.convert(context)?),
-                    (Type::Integer, Type::Long) => {
-                        let (mut instructions, new_src) = e.convert(context)?;
+                let this_type = e.1.clone().unwrap();
 
-                        let new_dst = new_temp_variable(Type::Integer, context);
-
-                        instructions.push(BirdsInstructionNode::Truncate(new_src, new_dst.clone()));
-                        Ok((instructions, new_dst))
-                    }
-                    (Type::Long, Type::Integer) => {
-                        let (mut instructions, new_src) = e.convert(context)?;
-
-                        let new_dst = new_temp_variable(Type::Long, context);
-
-                        instructions
-                            .push(BirdsInstructionNode::SignedExtend(new_src, new_dst.clone()));
-                        Ok((instructions, new_dst))
-                    }
-                    (Type::Integer, Type::UnsignedInteger) => todo!(),
-                    (Type::Integer, Type::UnsignedLong) => todo!(),
-                    (Type::Long, Type::UnsignedInteger) => todo!(),
-                    (Type::Long, Type::UnsignedLong) => todo!(),
-                    (Type::UnsignedInteger, Type::Integer) => todo!(),
-                    (Type::UnsignedInteger, Type::Long) => todo!(),
-                    (Type::UnsignedInteger, Type::UnsignedInteger) => todo!(),
-                    (Type::UnsignedInteger, Type::UnsignedLong) => todo!(),
-                    (Type::UnsignedLong, Type::Integer) => todo!(),
-                    (Type::UnsignedLong, Type::Long) => todo!(),
-                    (Type::UnsignedLong, Type::UnsignedInteger) => todo!(),
-                    (Type::UnsignedLong, Type::UnsignedLong) => todo!(),
-                    (_, Type::Function(_, _)) => unreachable!(),
-                    (Type::Function(_, _), _) => unreachable!(),
-                    (Type::Integer, Type::Integer) => unreachable!(),
-                    (Type::Long, Type::Long) => unreachable!(),
+                let (mut instructions, new_src) = e.convert(context)?;
+                if target_type == this_type {
+                    return Ok((instructions, new_src));
                 }
+
+                let new_dst = new_temp_variable(target_type.clone(), context);
+                if target_type.get_size() == this_type.get_size() {
+                    // mov the old type into the new type directly
+                    // C casting behaviour basically ends up saying "never alter the
+                    // underlying binary unless to extend or truncate it", indirectly
+                    instructions.push(BirdsInstructionNode::Copy(new_src, new_dst.clone()));
+                } else if target_type.get_size() < this_type.get_size() {
+                    instructions.push(BirdsInstructionNode::Truncate(new_src, new_dst.clone()));
+                } else if this_type.is_signed() {
+                    instructions.push(BirdsInstructionNode::SignedExtend(new_src, new_dst.clone()));
+                } else {
+                    instructions.push(BirdsInstructionNode::ZeroExtend(new_src, new_dst.clone()));
+                }
+
+                Ok((instructions, new_dst))
             }
         }
     }

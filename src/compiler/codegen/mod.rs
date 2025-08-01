@@ -40,6 +40,9 @@ enum Instruction {
     Mov(AssemblyType, Operand, Operand),
     // Mov Signed Extend src (32-bit) dst (64-bit)
     Movsx(Operand, Operand),
+    // Unsigned counterpart to Movsx
+    MovZeroExtend(Operand, Operand),
+    // operand is both src and dst
     Unary(UnaryOperator, AssemblyType, Operand), // Operand here is both the src and dst.
     // op src, dst. dst is the *first* number in the operation
     Binary(BinaryOperator, AssemblyType, Operand, Operand),
@@ -48,6 +51,8 @@ enum Instruction {
     Cmp(AssemblyType, Operand, Operand),
     // dividend comes from EDX+EAX. quotient -> EDX, remainder -> EAX.
     Idiv(AssemblyType, Operand),
+    // unsigned div
+    Div(AssemblyType, Operand),
     // expand a 32 bit number to 64 bits. EAX -> EDX+EAX.
     Cdq(AssemblyType),
     Jmp(String),
@@ -65,11 +70,34 @@ enum Instruction {
 
 #[derive(Clone, Debug)]
 enum Operand {
-    Imm(i64),        //constant numeric value
-    Reg(Register),   // register in assembly
-    MockReg(String), // mocked register for temporary use.
-    Stack(i32),      // Stack entry whose value is the offset from RSP.
-    Data(String),    // used for static and global variables
+    Imm(ImmediateValue), //constant numeric value
+    Reg(Register),       // register in assembly
+    MockReg(String),     // mocked register for temporary use.
+    Stack(i32),          // Stack entry whose value is the offset from RSP.
+    Data(String),        // used for static and global variables
+}
+
+#[derive(Clone, Debug)]
+enum ImmediateValue {
+    Signed(i64),
+    Unsigned(u64),
+}
+
+impl ImmediateValue {
+    fn can_fit_in_longword(&self) -> bool {
+        match self {
+            ImmediateValue::Signed(value) => *value < i32::MAX.into() && *value > i32::MIN.into(),
+            // the boundary for immediate values being too big is ALWAYS 2^31 - 1, not 2^32 - 1 for
+            // unsigned
+            ImmediateValue::Unsigned(value) => *value < i32::MAX.try_into().unwrap() && *value > 0,
+        }
+    }
+    fn truncate(&mut self) {
+        match self {
+            ImmediateValue::Signed(ref mut value) => *value = (*value as i32).into(),
+            ImmediateValue::Unsigned(ref mut value) => *value = (*value as u32).into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -109,6 +137,8 @@ enum BinaryOperator {
     Mult,
     ShiftLeft,
     ShiftRight,
+    UnsignedShiftLeft,
+    UnsignedShiftRight,
     BitwiseAnd,
     BitwiseXor,
     BitwiseOr,
@@ -122,6 +152,11 @@ enum ConditionCode {
     Ge,
     L,
     Le,
+    // unsigned counterparts to g and l, 'above' and 'below'
+    A,
+    Ae,
+    B,
+    Be,
 }
 
 trait Convert
@@ -252,6 +287,7 @@ pub fn codegen(
         ValidationPass::FixMemoryAsDst,
         ValidationPass::FixConstantAsDst,
         ValidationPass::FixLargeInts,
+        ValidationPass::RewriteMovZeroExtend,
     ];
 
     for pass in validation_passes {
@@ -291,6 +327,7 @@ pub enum ValidationPass {
     FixConstantAsDst,
     FixShiftOperatorRegister,
     FixLargeInts,
+    RewriteMovZeroExtend,
 }
 
 struct ValidateContext {

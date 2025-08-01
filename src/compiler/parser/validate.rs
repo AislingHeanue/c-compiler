@@ -239,8 +239,10 @@ impl VariableDeclaration {
                     None => match self.variable_type {
                         Type::Integer => InitialValue::Initial(StaticInitial::Integer(0)),
                         Type::Long => InitialValue::Initial(StaticInitial::Long(0)),
-                        Type::UnsignedInteger => todo!(),
-                        Type::UnsignedLong => todo!(),
+                        Type::UnsignedInteger => {
+                            InitialValue::Initial(StaticInitial::UnsignedInteger(0))
+                        }
+                        Type::UnsignedLong => InitialValue::Initial(StaticInitial::UnsignedLong(0)),
                         Type::Function(_, _) => unreachable!(),
                     },
                     _ => {

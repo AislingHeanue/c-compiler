@@ -3,8 +3,8 @@ use itertools::Itertools;
 use crate::compiler::{codegen::AssemblySymbolInfo, parser::StaticInitial};
 
 use super::{
-    AssemblyType, BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, Instruction, Operand,
-    Program, Register, TopLevel, UnaryOperator,
+    AssemblyType, BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, ImmediateValue,
+    Instruction, Operand, Program, Register, TopLevel, UnaryOperator,
 };
 use std::fmt::Display;
 
@@ -122,10 +122,10 @@ impl CodeDisplay for StaticInitial {
             StaticInitial::Integer(i) => format!(".long {}", i),
             StaticInitial::Long(0) => ".zero 8".to_string(),
             StaticInitial::Long(l) => format!(".quad {}", l),
-            StaticInitial::UnsignedInteger(0) => todo!(),
-            StaticInitial::UnsignedInteger(_i) => todo!(),
-            StaticInitial::UnsignedLong(0) => todo!(),
-            StaticInitial::UnsignedLong(_i) => todo!(),
+            StaticInitial::UnsignedInteger(0) => ".zero 4".to_string(),
+            StaticInitial::UnsignedInteger(i) => format!(".long {}", i),
+            StaticInitial::UnsignedLong(0) => ".zero 8".to_string(),
+            StaticInitial::UnsignedLong(l) => format!(".quad {}", l),
         };
 
         format!("{:indent$}{}", "", s, indent = context.indent)
@@ -217,6 +217,31 @@ impl CodeDisplay for Instruction {
                 )
             }
             Instruction::Binary(op, t, src, dst)
+                if matches!(
+                    op,
+                    BinaryOperator::ShiftLeft
+                        | BinaryOperator::ShiftRight
+                        | BinaryOperator::UnsignedShiftLeft
+                        | BinaryOperator::UnsignedShiftRight
+                ) =>
+            {
+                // bit-shift operations (as of today) require that the first argument, ie the
+                // number to shift by, is 1 byte long. This is sensible since we don't represent
+                // any numbers higher than 2^256 anyway. I'm just not sure why this seems to have
+                // come up as a regression in my code today, maybe a sneaky GCC change...?
+                context.short();
+                let shift_by = src.show(context);
+                format!(
+                    "{:indent$}{}{} {}, {}",
+                    "",
+                    op.show(context),
+                    context.suffix_for_type(t),
+                    shift_by,
+                    dst.show(context),
+                    indent = context.indent
+                )
+            }
+            Instruction::Binary(op, t, src, dst)
                 if matches!(op, BinaryOperator::ShiftLeft | BinaryOperator::ShiftRight) =>
             {
                 // bit-shift operations (as of today) require that the first argument, ie the
@@ -270,6 +295,15 @@ impl CodeDisplay for Instruction {
                         indent = context.indent
                     )
                 }
+            }
+            Instruction::Div(t, src) => {
+                format!(
+                    "{:indent$}div{} {}",
+                    "",
+                    context.suffix_for_type(t),
+                    src.show(context),
+                    indent = context.indent
+                )
             }
             Instruction::Cdq(AssemblyType::Longword) => {
                 if context.comments {
@@ -377,6 +411,7 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
+            Instruction::MovZeroExtend(_, _) => panic!("This was a placeholder instruction"),
         }
     }
 }
@@ -384,9 +419,10 @@ impl CodeDisplay for Instruction {
 impl CodeDisplay for Operand {
     fn show(&self, context: &mut DisplayContext) -> String {
         match self {
-            Operand::Imm(int) => {
-                format!("${}", int)
-            }
+            Operand::Imm(value) => match value {
+                ImmediateValue::Signed(i) => format!("${}", i),
+                ImmediateValue::Unsigned(i) => format!("${}", i),
+            },
             Operand::Reg(reg) => match context.word_length_bytes {
                 1 => match reg {
                     Register::AX => "%al",
@@ -464,6 +500,8 @@ impl CodeDisplay for BinaryOperator {
             BinaryOperator::Mult => "imul",
             BinaryOperator::ShiftLeft => "sal",
             BinaryOperator::ShiftRight => "sar",
+            BinaryOperator::UnsignedShiftLeft => "shl",
+            BinaryOperator::UnsignedShiftRight => "shr",
             BinaryOperator::BitwiseAnd => "and",
             BinaryOperator::BitwiseXor => "xor",
             BinaryOperator::BitwiseOr => "or",
@@ -481,6 +519,10 @@ impl CodeDisplay for ConditionCode {
             ConditionCode::Ge => "ge",
             ConditionCode::L => "l",
             ConditionCode::Le => "le",
+            ConditionCode::A => "a",
+            ConditionCode::Ae => "ae",
+            ConditionCode::B => "b",
+            ConditionCode::Be => "be",
         }
         .to_string()
     }

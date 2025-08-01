@@ -40,6 +40,8 @@ pub enum BirdsInstructionNode {
     SignedExtend(BirdsValueNode, BirdsValueNode),
     // src (64 bits) to dst (32 bits)
     Truncate(BirdsValueNode, BirdsValueNode),
+    // src (32 bits) to dst (64 bits) for unsigned values
+    ZeroExtend(BirdsValueNode, BirdsValueNode),
 }
 
 #[derive(Clone, Debug)]
