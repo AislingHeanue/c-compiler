@@ -4,9 +4,9 @@ use itertools::process_results;
 
 use crate::compiler::parser::{
     BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
-    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialValue, ProgramNode,
-    StatementNode, StaticInitial, StorageInfo, SwitchMapKey, SymbolInfo, Type, UnaryOperatorNode,
-    VariableDeclaration,
+    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialValue, OrdinalStatic,
+    ProgramNode, StatementNode, StaticInitial, StorageInfo, SwitchMapKey, SymbolInfo, Type,
+    UnaryOperatorNode, VariableDeclaration,
 };
 
 use super::{
@@ -34,8 +34,8 @@ fn get_typed_constant(value: u32, target: &ExpressionNode) -> BirdsValueNode {
         Type::Long => BirdsValueNode::Constant(Constant::Long(value.into())),
         Type::UnsignedInteger => BirdsValueNode::Constant(Constant::UnsignedInteger(value)),
         Type::UnsignedLong => BirdsValueNode::Constant(Constant::UnsignedLong(value.into())),
-        Type::Double => todo!(),
         Type::Function(_, _) => unreachable!(),
+        Type::Double => todo!(),
     }
 }
 
@@ -59,9 +59,10 @@ impl Convert for ProgramNode {
                 .filter_map(|(name, info)| match &info.storage {
                     StorageInfo::Static(init, global) => {
                         let initial = match init {
-                            InitialValue::Tentative => {
-                                Constant::convert_to(&Constant::Integer(0), &info.symbol_type)
-                            }
+                            InitialValue::Tentative => Constant::convert_ordinal_to(
+                                &Constant::Integer(0),
+                                &info.symbol_type,
+                            ),
                             InitialValue::Initial(i) => i.clone(),
                             InitialValue::None => return None,
                         };
@@ -329,7 +330,7 @@ impl Convert for StatementNode {
                             BirdsInstructionNode::Binary(
                                 BirdsBinaryOperatorNode::Equal,
                                 new_src.clone(),
-                                c.convert(context)?,
+                                StaticInitial::Ordinal(c).convert(context)?,
                                 new_tmp_results.clone(),
                             ),
                             BirdsInstructionNode::JumpNotZero(new_tmp_results.clone(), v.clone()),
@@ -370,14 +371,19 @@ impl Convert for StaticInitial {
 
     fn convert(self, _context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         match self {
-            StaticInitial::Integer(i) => Ok(BirdsValueNode::Constant(Constant::Integer(i))),
-            StaticInitial::Long(l) => Ok(BirdsValueNode::Constant(Constant::Long(l))),
-            StaticInitial::UnsignedInteger(i) => {
+            StaticInitial::Ordinal(OrdinalStatic::Integer(i)) => {
+                Ok(BirdsValueNode::Constant(Constant::Integer(i)))
+            }
+            StaticInitial::Ordinal(OrdinalStatic::Long(l)) => {
+                Ok(BirdsValueNode::Constant(Constant::Long(l)))
+            }
+            StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(i)) => {
                 Ok(BirdsValueNode::Constant(Constant::UnsignedInteger(i)))
             }
-            StaticInitial::UnsignedLong(l) => {
+            StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(l)) => {
                 Ok(BirdsValueNode::Constant(Constant::UnsignedLong(l)))
             }
+            StaticInitial::Double(_) => todo!(),
         }
     }
 }

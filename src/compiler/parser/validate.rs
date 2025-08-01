@@ -1,10 +1,12 @@
 use std::{collections::HashMap, error::Error};
 
+use conv::{ApproxInto, ConvUtil, RoundToZero, Wrapping};
+
 use super::{
     BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
-    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialValue, ProgramNode,
-    StatementNode, StaticInitial, StorageClass, StorageInfo, SwitchMapKey, SymbolInfo, Type,
-    UnaryOperatorNode, Validate, ValidateContext, ValidationPass, VariableDeclaration,
+    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialValue, OrdinalStatic,
+    ProgramNode, StatementNode, StaticInitial, StorageClass, StorageInfo, SwitchMapKey, SymbolInfo,
+    Type, UnaryOperatorNode, Validate, ValidateContext, ValidationPass, VariableDeclaration,
 };
 
 impl<T> Validate for Option<T>
@@ -237,12 +239,14 @@ impl VariableDeclaration {
                         InitialValue::Initial(c.convert_to(&self.variable_type))
                     }
                     None => match self.variable_type {
-                        Type::Integer => InitialValue::Initial(StaticInitial::Integer(0)),
-                        Type::Long => InitialValue::Initial(StaticInitial::Long(0)),
+                        Type::Integer => InitialValue::Initial(StaticInitial::integer(0)),
+                        Type::Long => InitialValue::Initial(StaticInitial::long(0)),
                         Type::UnsignedInteger => {
-                            InitialValue::Initial(StaticInitial::UnsignedInteger(0))
+                            InitialValue::Initial(StaticInitial::unsigned_integer(0))
                         }
-                        Type::UnsignedLong => InitialValue::Initial(StaticInitial::UnsignedLong(0)),
+                        Type::UnsignedLong => {
+                            InitialValue::Initial(StaticInitial::unsigned_long(0))
+                        }
                         Type::Double => todo!(),
                         Type::Function(_, _) => unreachable!(),
                     },
@@ -282,52 +286,110 @@ impl VariableDeclaration {
     }
 }
 
+// trait Castable: NumCast + ::Sized {}
 // this block will likely move to a type-conversion module of some kind in part 3 for compile-time
 // constant-folding
 impl Constant {
     pub fn convert_to(&self, target: &Type) -> StaticInitial {
-        match (&self, target) {
-            // this would be a good time for a macro huh
-            (Constant::Integer(i), Type::Integer) => StaticInitial::Integer(*i),
-            (Constant::Long(l), Type::Integer) => StaticInitial::Integer(*l as i32),
-            (Constant::UnsignedInteger(i), Type::Integer) => StaticInitial::Integer(*i as i32),
-            (Constant::UnsignedLong(l), Type::Integer) => StaticInitial::Integer(*l as i32),
-            (Constant::Double(_), Type::Integer) => todo!(),
-
-            (Constant::Integer(i), Type::Long) => StaticInitial::Long(*i as i64),
-            (Constant::Long(l), Type::Long) => StaticInitial::Long(*l),
-            (Constant::UnsignedInteger(i), Type::Long) => StaticInitial::Long(*i as i64),
-            (Constant::UnsignedLong(l), Type::Long) => StaticInitial::Long(*l as i64),
-            (Constant::Double(_), Type::Long) => todo!(),
-
-            (Constant::Integer(i), Type::UnsignedInteger) => {
-                StaticInitial::UnsignedInteger(*i as u32)
-            }
-            (Constant::Long(l), Type::UnsignedInteger) => StaticInitial::UnsignedInteger(*l as u32),
-            (Constant::UnsignedInteger(i), Type::UnsignedInteger) => {
-                StaticInitial::UnsignedInteger(*i)
-            }
-            (Constant::UnsignedLong(l), Type::UnsignedInteger) => {
-                StaticInitial::UnsignedInteger(*l as u32)
-            }
-            (Constant::Double(_), Type::UnsignedInteger) => todo!(),
-
-            (Constant::Integer(i), Type::UnsignedLong) => StaticInitial::UnsignedLong(*i as u64),
-            (Constant::Long(l), Type::UnsignedLong) => StaticInitial::UnsignedLong(*l as u64),
-            (Constant::UnsignedInteger(i), Type::UnsignedLong) => {
-                StaticInitial::UnsignedLong(*i as u64)
-            }
-            (Constant::UnsignedLong(l), Type::UnsignedLong) => StaticInitial::UnsignedLong(*l),
-            (Constant::Double(_), Type::UnsignedLong) => todo!(),
-
-            (Constant::Integer(_), Type::Double) => todo!(),
-            (Constant::Long(_), Type::Double) => todo!(),
-            (Constant::UnsignedInteger(_), Type::Double) => todo!(),
-            (Constant::UnsignedLong(_), Type::Double) => todo!(),
-            (Constant::Double(_), Type::Double) => todo!(),
-
-            (_, Type::Function(_, _)) => unreachable!(),
+        match self {
+            Constant::Double(_) => Self::convert_double_to(self, target),
+            _ => Self::convert_ordinal_to(self, target),
         }
+    }
+    pub fn convert_ordinal_to(&self, target: &Type) -> StaticInitial {
+        // match target {}
+        match self {
+            Constant::Integer(i) => StaticInitial::from_number(*i, target),
+            Constant::Long(i) => StaticInitial::from_number(*i, target),
+            Constant::UnsignedInteger(i) => StaticInitial::from_number(*i, target),
+            Constant::UnsignedLong(i) => StaticInitial::from_number(*i, target),
+            Constant::Double(_) => unreachable!(), // StaticInitial::from_number(*i, target),
+        }
+    }
+    pub fn convert_double_to(&self, target: &Type) -> StaticInitial {
+        // match target {}
+        match self {
+            Constant::Integer(i) => StaticInitial::from_number(*i, target),
+            Constant::Long(i) => StaticInitial::from_number(*i, target),
+            Constant::UnsignedInteger(i) => StaticInitial::from_number(*i, target),
+            Constant::UnsignedLong(i) => StaticInitial::from_number(*i, target),
+            Constant::Double(i) => StaticInitial::from_double(*i, target),
+        }
+    }
+}
+
+trait ApproximableOrdinal:
+    ApproxInto<i32, Wrapping>
+    + ApproxInto<i64, Wrapping>
+    + ApproxInto<u32, Wrapping>
+    + ApproxInto<u64, Wrapping>
+    + ApproxInto<f64>
+{
+}
+impl ApproximableOrdinal for i32 {}
+impl ApproximableOrdinal for i64 {}
+impl ApproximableOrdinal for u32 {}
+impl ApproximableOrdinal for u64 {}
+
+impl StaticInitial {
+    fn from_double(i: f64, target: &Type) -> StaticInitial {
+        match target {
+            Type::Integer => StaticInitial::integer_from_double(i),
+            Type::Long => StaticInitial::long_from_double(i),
+            Type::UnsignedInteger => StaticInitial::unsigned_integer_from_double(i),
+            Type::UnsignedLong => StaticInitial::unsigned_long_from_double(i),
+            Type::Double => StaticInitial::Double(i),
+            Type::Function(_, _) => unreachable!(),
+        }
+    }
+
+    fn from_number<T: ApproximableOrdinal>(i: T, target: &Type) -> StaticInitial {
+        match target {
+            Type::Integer => StaticInitial::integer(i),
+            Type::Long => StaticInitial::long(i),
+            Type::UnsignedInteger => StaticInitial::unsigned_integer(i),
+            Type::UnsignedLong => StaticInitial::unsigned_long(i),
+            Type::Double => StaticInitial::double(i),
+            Type::Function(_, _) => unreachable!(),
+        }
+    }
+
+    fn integer<T: ApproxInto<i32, Wrapping>>(i: T) -> StaticInitial {
+        StaticInitial::Ordinal(OrdinalStatic::Integer(ConvUtil::approx_as_by(i).unwrap()))
+    }
+    fn long<T: ApproxInto<i64, Wrapping>>(i: T) -> StaticInitial {
+        StaticInitial::Ordinal(OrdinalStatic::Long(ConvUtil::approx_as_by(i).unwrap()))
+    }
+    fn unsigned_integer<T: ApproxInto<u32, Wrapping>>(i: T) -> StaticInitial {
+        StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(
+            ConvUtil::approx_as_by(i).unwrap(),
+        ))
+    }
+    fn unsigned_long<T: ApproxInto<u64, Wrapping>>(i: T) -> StaticInitial {
+        StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(
+            ConvUtil::approx_as_by(i).unwrap(),
+        ))
+    }
+
+    fn double<T: ApproxInto<f64>>(i: T) -> StaticInitial {
+        StaticInitial::Double(ConvUtil::approx_as(i).unwrap())
+    }
+
+    fn integer_from_double<T: ApproxInto<i32, RoundToZero>>(i: T) -> StaticInitial {
+        StaticInitial::Ordinal(OrdinalStatic::Integer(ConvUtil::approx_as_by(i).unwrap()))
+    }
+    fn long_from_double<T: ApproxInto<i64, RoundToZero>>(i: T) -> StaticInitial {
+        StaticInitial::Ordinal(OrdinalStatic::Long(ConvUtil::approx_as_by(i).unwrap()))
+    }
+    fn unsigned_integer_from_double<T: ApproxInto<u32, RoundToZero>>(i: T) -> StaticInitial {
+        StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(
+            ConvUtil::approx_as_by(i).unwrap(),
+        ))
+    }
+    fn unsigned_long_from_double<T: ApproxInto<u64, RoundToZero>>(i: T) -> StaticInitial {
+        StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(
+            ConvUtil::approx_as_by(i).unwrap(),
+        ))
     }
 }
 
@@ -580,9 +642,16 @@ impl StatementNode {
                     .ok_or::<Box<dyn Error>>("Case is not in a switch statement".into())?;
 
                 let constant_value = if let ExpressionWithoutType::Constant(ref mut c) = e.0 {
-                    c.convert_to(&target_type)
+                    c.convert_ordinal_to(&target_type)
                 } else {
-                    return Err("None constant expression found in case statement".into());
+                    return Err("Non constant expression found in case statement".into());
+                };
+                let ordinal = if let StaticInitial::Ordinal(ref o) = constant_value {
+                    o
+                } else {
+                    return Err(
+                        "None ordinal (eg Double) expression found in case statement".into(),
+                    );
                 };
 
                 let already_present = context
@@ -590,7 +659,7 @@ impl StatementNode {
                     .as_mut()
                     .ok_or("Switch label map not found")?
                     .insert(
-                        SwitchMapKey::Constant(constant_value.clone()),
+                        SwitchMapKey::Constant(ordinal.clone()),
                         label.as_ref().unwrap().clone(),
                     );
 
@@ -770,6 +839,8 @@ impl ExpressionNode {
     fn get_common_type(t1: &Type, t2: &Type) -> Type {
         if t1 == t2 {
             t1.clone()
+        } else if t1 == &Type::Double || t2 == &Type::Double {
+            Type::Double
         } else if t1.get_size() == t2.get_size() {
             if t1.is_signed() {
                 t2.clone()
@@ -844,6 +915,12 @@ impl ExpressionNode {
                 src.check_types(context)?;
                 match op {
                     UnaryOperatorNode::Not => Type::Integer, // returns 0 or 1 (eg boolean-like)
+                    UnaryOperatorNode::Complement => {
+                        if src.1.as_ref().unwrap() == &Type::Double {
+                            return Err("'~' cannot operate on a double".into());
+                        }
+                        src.1.clone().unwrap()
+                    }
                     _ => src.1.clone().unwrap(),
                 }
             }
@@ -869,12 +946,26 @@ impl ExpressionNode {
                         BinaryOperatorNode::Add
                         | BinaryOperatorNode::Subtract
                         | BinaryOperatorNode::Multiply
-                        | BinaryOperatorNode::Divide
-                        | BinaryOperatorNode::Mod
-                        | BinaryOperatorNode::BitwiseOr
+                        | BinaryOperatorNode::Divide => common_type,
+                        BinaryOperatorNode::BitwiseOr
                         | BinaryOperatorNode::BitwiseAnd
-                        | BinaryOperatorNode::BitwiseXor => common_type,
-                        BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight => {
+                        | BinaryOperatorNode::BitwiseXor => {
+                            if left.1.as_ref().unwrap() == &Type::Double {
+                                return Err("Bitwise operations cannot operate on a double".into());
+                            }
+                            common_type
+                        }
+                        BinaryOperatorNode::ShiftLeft
+                        | BinaryOperatorNode::ShiftRight
+                        | BinaryOperatorNode::Mod => {
+                            if left.1.as_ref().unwrap() == &Type::Double {
+                                return Err("Bitwise operations cannot operate on a double".into());
+                            }
+                            if right.1.as_ref().unwrap() == &Type::Double
+                                && op != &BinaryOperatorNode::Mod
+                            {
+                                return Err("Bitwise operations cannot operate on a double".into());
+                            }
                             left.1.clone().unwrap()
                         }
                         BinaryOperatorNode::And

@@ -1,6 +1,9 @@
 use itertools::Itertools;
 
-use crate::compiler::{codegen::AssemblySymbolInfo, parser::StaticInitial};
+use crate::compiler::{
+    codegen::AssemblySymbolInfo,
+    parser::{OrdinalStatic, StaticInitial},
+};
 
 use super::{
     AssemblyType, BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, ImmediateValue,
@@ -81,8 +84,8 @@ impl CodeDisplay for TopLevel {
                 } else {
                     (name.to_string(), ".align")
                 };
-                let init_is_zero =
-                    matches!(init, StaticInitial::Integer(0) | StaticInitial::Long(0));
+                let init_is_zero = todo!();
+                // matches!(init, StaticInitial::Integer(0) | StaticInitial::Long(0));
 
                 context.indent();
                 let mut out = "".to_string();
@@ -118,14 +121,15 @@ impl CodeDisplay for TopLevel {
 impl CodeDisplay for StaticInitial {
     fn show(&self, context: &mut DisplayContext) -> String {
         let s = match self {
-            StaticInitial::Integer(0) => ".zero 4".to_string(),
-            StaticInitial::Integer(i) => format!(".long {}", i),
-            StaticInitial::Long(0) => ".zero 8".to_string(),
-            StaticInitial::Long(l) => format!(".quad {}", l),
-            StaticInitial::UnsignedInteger(0) => ".zero 4".to_string(),
-            StaticInitial::UnsignedInteger(i) => format!(".long {}", i),
-            StaticInitial::UnsignedLong(0) => ".zero 8".to_string(),
-            StaticInitial::UnsignedLong(l) => format!(".quad {}", l),
+            StaticInitial::Ordinal(OrdinalStatic::Integer(0)) => ".zero 4".to_string(),
+            StaticInitial::Ordinal(OrdinalStatic::Integer(i)) => format!(".long {}", i),
+            StaticInitial::Ordinal(OrdinalStatic::Long(0)) => ".zero 8".to_string(),
+            StaticInitial::Ordinal(OrdinalStatic::Long(l)) => format!(".quad {}", l),
+            StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(0)) => ".zero 4".to_string(),
+            StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(i)) => format!(".long {}", i),
+            StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(0)) => ".zero 8".to_string(),
+            StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(l)) => format!(".quad {}", l),
+            StaticInitial::Double(_) => todo!(),
         };
 
         format!("{:indent$}{}", "", s, indent = context.indent)

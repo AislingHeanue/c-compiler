@@ -98,8 +98,14 @@ pub enum InitialValue {
     None,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StaticInitial {
+    Ordinal(OrdinalStatic),
+    Double(f64),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum OrdinalStatic {
     Integer(i32),
     Long(i64),
     UnsignedInteger(u32),
@@ -169,7 +175,7 @@ pub enum StatementNode {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SwitchMapKey {
     Default,
-    Constant(StaticInitial),
+    Constant(OrdinalStatic),
 }
 
 #[derive(Debug)]
