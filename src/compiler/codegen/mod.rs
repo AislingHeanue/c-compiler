@@ -18,18 +18,25 @@ enum TopLevel {
     // header instructions, name, body, global
     Function(String, Vec<Instruction>, bool),
     // name global alignment init
-    StaticVariable(String, bool, u64, StaticInitial),
+    StaticVariable(String, bool, u32, StaticInitial),
+    // used for all floating point constants. Needed anytime we need eg.
+    // 'float(1)' or 'float(0)' or 'float(i64::MAX+1)'
+    // will be extended to other types later.
+    // name alignment init
+    StaticConstant(String, u32, StaticInitial),
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum AssemblyType {
     Longword, // i32, int
     Quadword, // i64, long
+    Double,   // oh boy
 }
 
+#[derive(Debug)]
 pub enum AssemblySymbolInfo {
-    // type, is_static
-    Object(AssemblyType, bool),
+    // type, is_static is_a_top_level_constant
+    Object(AssemblyType, bool, bool),
     // is_defined
     Function(bool),
 }
@@ -42,6 +49,13 @@ enum Instruction {
     Movsx(Operand, Operand),
     // Unsigned counterpart to Movsx
     MovZeroExtend(Operand, Operand),
+    // named after a good friend of mine with the same name
+    // Double to Signed Int
+    // dst_type, src, dst
+    Cvttsd2si(AssemblyType, Operand, Operand),
+    // Signed Int to Double
+    // src_type, src, dst
+    Cvtsi2sd(AssemblyType, Operand, Operand),
     // operand is both src and dst
     Unary(UnaryOperator, AssemblyType, Operand), // Operand here is both the src and dst.
     // op src, dst. dst is the *first* number in the operation
@@ -89,7 +103,7 @@ impl ImmediateValue {
             ImmediateValue::Signed(value) => *value < i32::MAX.into() && *value > i32::MIN.into(),
             // the boundary for immediate values being too big is ALWAYS 2^31 - 1, not 2^32 - 1 for
             // unsigned
-            ImmediateValue::Unsigned(value) => *value < i32::MAX.try_into().unwrap() && *value > 0,
+            ImmediateValue::Unsigned(value) => *value < i32::MAX as u64 && *value > 0,
         }
     }
     fn truncate(&mut self) {
@@ -113,6 +127,16 @@ enum Register {
     R11,
     SP, // the stack pointer!! eg %rsp
     BP, // %rbp for function stack frame setup
+    XMM0,
+    XMM1,
+    XMM2,
+    XMM3,
+    XMM4,
+    XMM5,
+    XMM6,
+    XMM7,
+    XMM14,
+    XMM15,
 }
 
 static FUNCTION_PARAM_REGISTERS: [Register; 6] = [
@@ -122,6 +146,17 @@ static FUNCTION_PARAM_REGISTERS: [Register; 6] = [
     Register::CX,
     Register::R8,
     Register::R9,
+];
+
+static DOUBLE_PARAM_REGISTERS: [Register; 8] = [
+    Register::XMM0,
+    Register::XMM1,
+    Register::XMM2,
+    Register::XMM3,
+    Register::XMM4,
+    Register::XMM5,
+    Register::XMM6,
+    Register::XMM7,
 ];
 
 #[derive(Clone, Debug)]
@@ -138,10 +173,11 @@ enum BinaryOperator {
     ShiftLeft,
     ShiftRight,
     UnsignedShiftLeft,
-    UnsignedShiftRight,
-    BitwiseAnd,
-    BitwiseXor,
-    BitwiseOr,
+    UnsignedShiftRight, //shr
+    DivDouble,
+    And,
+    Xor,
+    Or,
 }
 
 #[derive(Debug)]
@@ -157,6 +193,7 @@ enum ConditionCode {
     Ae,
     B,
     Be,
+    P, // parity, needed for NaN
 }
 
 trait Convert
@@ -176,6 +213,8 @@ pub struct ConvertContext {
     is_mac: bool,
     is_linux: bool,
     symbols: HashMap<String, SymbolInfo>,
+    constants: HashMap<String, (u32, StaticInitial)>,
+    num_labels: u32,
 }
 
 trait CodeDisplay {
@@ -192,44 +231,6 @@ pub struct DisplayContext {
     symbols: HashMap<String, AssemblySymbolInfo>,
 }
 
-impl DisplayContext {
-    fn indent(&mut self) -> &mut DisplayContext {
-        self.indent += 4;
-        self
-    }
-    fn unindent(&mut self) -> &mut DisplayContext {
-        self.indent -= 4;
-        self
-    }
-    fn short(&mut self) -> &mut DisplayContext {
-        self.word_length_bytes = 1;
-        self.instruction_suffix = "".to_string(); // unused
-        self
-    }
-    fn regular(&mut self) -> &mut DisplayContext {
-        self.word_length_bytes = 4;
-        self.instruction_suffix = "l".to_string();
-        self
-    }
-    fn long(&mut self) -> &mut DisplayContext {
-        self.word_length_bytes = 8;
-        self.instruction_suffix = "q".to_string();
-        self
-    }
-    fn suffix_for_type(&mut self, t: &AssemblyType) -> String {
-        match t {
-            AssemblyType::Longword => {
-                self.regular();
-                "l".to_string()
-            }
-            AssemblyType::Quadword => {
-                self.long();
-                "q".to_string()
-            }
-        }
-    }
-}
-
 pub fn codegen(
     parsed: BirdsProgramNode,
     comments: bool,
@@ -242,6 +243,8 @@ pub fn codegen(
         is_linux: linux,
         is_mac: mac,
         symbols,
+        constants: HashMap::new(),
+        num_labels: 0,
     };
     let mut converted = Program::convert(parsed, &mut context)?;
 
@@ -258,13 +261,22 @@ pub fn codegen(
                 panic!("Function storage info has the wrong type")
             }
         } else {
-            // only remaining options are int and long
+            // only remaining options are int and long and double
             let is_static = matches!(v.storage, StorageInfo::Static(_, _));
             let assembly_type = AssemblyType::convert(v.symbol_type, &mut context).unwrap();
 
             assembly_map.insert(
                 k.clone(),
-                AssemblySymbolInfo::Object(assembly_type, is_static),
+                AssemblySymbolInfo::Object(assembly_type, is_static, false),
+            );
+            // TODO: also parse the constants map into here
+        }
+    }
+    for top_level in &converted.body {
+        if let TopLevel::StaticConstant(name, _, _) = top_level {
+            assembly_map.insert(
+                name.clone(),
+                AssemblySymbolInfo::Object(AssemblyType::Double, true, true),
             );
         }
     }
@@ -278,20 +290,8 @@ pub fn codegen(
         current_function_name: None,
     };
 
-    let validation_passes = vec![
-        ValidationPass::ReplaceMockRegisters,
-        ValidationPass::AllocateFunctionStack,
-        ValidationPass::FixShiftOperatorRegister,
-        ValidationPass::FixTwoMemoryAccesses,
-        ValidationPass::FixBadImmValues,
-        ValidationPass::FixMemoryAsDst,
-        ValidationPass::FixConstantAsDst,
-        ValidationPass::FixLargeInts,
-        ValidationPass::RewriteMovZeroExtend,
-    ];
-
-    for pass in validation_passes {
-        validate_context.pass = Some(pass);
+    for pass in VALIDATION_PASSES.iter() {
+        validate_context.pass = Some(pass.clone());
         converted.validate(&mut validate_context)?;
     }
 
@@ -316,6 +316,22 @@ where
 {
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
 }
+
+static VALIDATION_PASSES: [ValidationPass; 9] = [
+    // always first
+    ValidationPass::ReplaceMockRegisters,
+    // always second, sets stack sizes for each function based on the previous pass.
+    ValidationPass::AllocateFunctionStack,
+    ValidationPass::FixShiftOperatorRegister,
+    ValidationPass::FixBadImmValues,
+    ValidationPass::FixMemoryAsDst,
+    ValidationPass::FixConstantAsDst,
+    ValidationPass::FixLargeInts,
+    ValidationPass::RewriteMovZeroExtend,
+    // moving the double memory access instruction lower because many other passes may fix the
+    // issue that this addresses, saving a Mov instruction.
+    ValidationPass::FixTwoMemoryAccesses,
+];
 
 #[derive(Clone, Debug)]
 pub enum ValidationPass {

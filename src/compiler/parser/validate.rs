@@ -115,6 +115,7 @@ impl FunctionDeclaration {
         // because it allows those parameters to be type checked in the scope that they are
         // actually used (ie, params names from declarations which don't have bodies are thrown
         // out either way).
+        // NOTE: PARAMS ARE ADDED TO THE SYMBOL MAP WITH TYPES HERE (this took ages to confirm)
         if self.body.is_some() {
             for (param, arg) in self.params.iter().zip(arg_types.iter()) {
                 context.symbols.insert(
@@ -247,7 +248,7 @@ impl VariableDeclaration {
                         Type::UnsignedLong => {
                             InitialValue::Initial(StaticInitial::unsigned_long(0))
                         }
-                        Type::Double => todo!(),
+                        Type::Double => InitialValue::Initial(StaticInitial::Double(0.)),
                         Type::Function(_, _) => unreachable!(),
                     },
                     _ => {

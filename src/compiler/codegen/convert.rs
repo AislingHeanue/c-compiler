@@ -3,15 +3,72 @@ use crate::compiler::{
         BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsProgramNode, BirdsTopLevel,
         BirdsUnaryOperatorNode, BirdsValueNode,
     },
-    parser::{Constant, Type},
+    parser::{Constant, StaticInitial, Type},
 };
-use itertools::{izip, process_results};
-use std::{cmp::min, error::Error};
+use itertools::{process_results, Itertools};
+use std::error::Error;
 
 use super::{
     AssemblyType, BinaryOperator, ConditionCode, Convert, ConvertContext, ImmediateValue,
-    Instruction, Operand, Program, Register, TopLevel, UnaryOperator, FUNCTION_PARAM_REGISTERS,
+    Instruction, Operand, Program, Register, TopLevel, UnaryOperator, DOUBLE_PARAM_REGISTERS,
+    FUNCTION_PARAM_REGISTERS,
 };
+
+fn create_static_constant(
+    alignment: u32,
+    value: StaticInitial,
+    context: &mut ConvertContext,
+) -> Operand {
+    if let Some(key) = context
+        .constants
+        .iter()
+        .find(|(_, v)| **v == (alignment, value.clone()))
+        .map(|(k, _)| k)
+    {
+        return Operand::MockReg(key.clone());
+    }
+
+    let new_name = format!("constant_{}", context.constants.len() + 1);
+    context
+        .constants
+        .insert(new_name.clone(), (alignment, value));
+
+    Operand::MockReg(new_name)
+}
+
+struct Args {
+    double: Vec<Operand>,
+    integer: Vec<(Operand, AssemblyType)>,
+    stack: Vec<(Operand, AssemblyType)>,
+}
+
+fn classify_function_args(
+    values: Vec<BirdsValueNode>,
+    context: &mut ConvertContext,
+) -> Result<Args, Box<dyn Error>> {
+    let mut args = Args {
+        integer: Vec::new(),
+        double: Vec::new(),
+        stack: Vec::new(),
+    };
+
+    for v in values {
+        let t = AssemblyType::infer(&v, context)?.0;
+        if t == AssemblyType::Double {
+            if args.double.len() < 8 {
+                args.double.push(Operand::convert(v, context)?);
+            } else {
+                args.stack.push((Operand::convert(v, context)?, t));
+            }
+        } else if args.integer.len() < 6 {
+            args.integer.push((Operand::convert(v, context)?, t));
+        } else {
+            args.stack.push((Operand::convert(v, context)?, t));
+        }
+    }
+
+    Ok(args)
+}
 
 impl Convert for Program {
     type Input = BirdsProgramNode;
@@ -21,8 +78,18 @@ impl Convert for Program {
         parsed: BirdsProgramNode,
         context: &mut ConvertContext,
     ) -> Result<Self, Box<dyn Error>> {
+        let mut body = Vec::<TopLevel>::convert(parsed.body, context)?;
+
+        for (name, (align, value)) in context.constants.iter() {
+            body.push(TopLevel::StaticConstant(
+                name.clone(),
+                *align,
+                value.clone(),
+            ))
+        }
+
         Ok(Program {
-            body: Vec::<TopLevel>::convert(parsed.body, context)?,
+            body,
             displaying_context: None,
         })
     }
@@ -38,7 +105,7 @@ impl Convert for AssemblyType {
             Type::Long => Ok(AssemblyType::Quadword),
             Type::UnsignedInteger => Ok(AssemblyType::Longword),
             Type::UnsignedLong => Ok(AssemblyType::Quadword),
-            Type::Double => Ok(AssemblyType::Quadword),
+            Type::Double => Ok(AssemblyType::Double),
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
         }
     }
@@ -57,7 +124,7 @@ impl AssemblyType {
                 (AssemblyType::Longword, false)
             }
             BirdsValueNode::Constant(Constant::UnsignedLong(_)) => (AssemblyType::Quadword, false),
-            BirdsValueNode::Constant(Constant::Double(_)) => (AssemblyType::Quadword, true),
+            BirdsValueNode::Constant(Constant::Double(_)) => (AssemblyType::Double, true),
             BirdsValueNode::Var(name) => {
                 let var_type = context.symbols.get(name).unwrap().symbol_type.clone();
                 let signed = var_type.is_signed();
@@ -66,10 +133,11 @@ impl AssemblyType {
         })
     }
 
-    pub fn get_alignment(&self) -> i32 {
+    pub fn get_alignment(&self) -> u32 {
         match self {
             AssemblyType::Longword => 4,
             AssemblyType::Quadword => 8,
+            AssemblyType::Double => 8,
         }
     }
 }
@@ -107,10 +175,7 @@ impl Convert for TopLevel {
             BirdsTopLevel::StaticVariable(t, name, init, global) => Ok(TopLevel::StaticVariable(
                 name,
                 global,
-                AssemblyType::convert(t, context)?
-                    .get_alignment()
-                    .try_into()
-                    .unwrap(),
+                AssemblyType::convert(t, context)?.get_alignment(),
                 init,
             )),
         }
@@ -125,32 +190,38 @@ impl TopLevel {
             BirdsTopLevel::Function(a, b, c, d) => (a, b, c, d),
             _ => unreachable!(),
         };
-        let param_types = if let Type::Function(_, ref param_types) =
-            context.symbols.get(&name).unwrap().symbol_type
-        {
-            param_types.clone()
-        } else {
-            unreachable!()
-        };
+        let params_vars = params
+            .iter()
+            .map(|name| BirdsValueNode::Var(name.to_string()))
+            .collect_vec();
+
+        let params = classify_function_args(params_vars, context)?;
 
         let mut instructions: Vec<Instruction> = Vec::new();
 
         // ZEROTH PASS: Copy all the params out of registers onto the stack.
-        for (i, param_name, t) in izip!(0.., params, param_types) {
-            if i < 6 {
-                instructions.push(Instruction::Mov(
-                    AssemblyType::convert(t.clone(), context)?,
-                    Operand::Reg(FUNCTION_PARAM_REGISTERS[i].clone()),
-                    Operand::MockReg(param_name.to_string()),
-                ));
-            } else {
-                let unsigned_i: i32 = i.try_into().unwrap();
-                instructions.push(Instruction::Mov(
-                    AssemblyType::convert(t.clone(), context)?,
-                    Operand::Stack(8 * (unsigned_i - 4)), // +24 as in, this is copying from the CALLER's frame
-                    Operand::MockReg(param_name.to_string()),
-                ));
-            }
+        for (i, (param, param_type)) in params.integer.into_iter().enumerate() {
+            instructions.push(Instruction::Mov(
+                param_type,
+                Operand::Reg(FUNCTION_PARAM_REGISTERS[i].clone()),
+                param,
+            ));
+        }
+
+        for (i, param) in params.double.into_iter().enumerate() {
+            instructions.push(Instruction::Mov(
+                AssemblyType::Double,
+                Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
+                param,
+            ));
+        }
+
+        for (i, (param, param_type)) in params.stack.into_iter().enumerate() {
+            instructions.push(Instruction::Mov(
+                param_type,
+                Operand::Stack(16 + 8 * (i as i32)),
+                param,
+            ));
         }
 
         // FIRST PASS: create a bunch of mock registers to be replaced with stack entries later
@@ -176,25 +247,45 @@ impl Convert for Instruction {
         Ok(match input {
             BirdsInstructionNode::Return(src) => {
                 let this_type = AssemblyType::infer(&src, context)?.0;
-                vec![
-                    Instruction::Mov(
-                        this_type,
-                        Operand::convert(src, context)?,
-                        Operand::Reg(Register::AX),
-                    ),
-                    Instruction::Ret,
-                ]
+                if this_type == AssemblyType::Double {
+                    vec![
+                        Instruction::Mov(
+                            this_type,
+                            Operand::convert(src, context)?,
+                            Operand::Reg(Register::XMM0),
+                        ),
+                        Instruction::Ret,
+                    ]
+                } else {
+                    vec![
+                        Instruction::Mov(
+                            this_type,
+                            Operand::convert(src, context)?,
+                            Operand::Reg(Register::AX),
+                        ),
+                        Instruction::Ret,
+                    ]
+                }
             }
             BirdsInstructionNode::Unary(BirdsUnaryOperatorNode::Not, src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
                 let dst_type = AssemblyType::infer(&dst, context)?.0;
                 vec![
+                    if src_type == AssemblyType::Double {
+                        let zero = create_static_constant(
+                            src_type.get_alignment(),
+                            StaticInitial::Double(0.),
+                            context,
+                        );
+                        Instruction::Cmp(src_type, zero, Operand::convert(src, context)?)
+                    } else {
+                        Instruction::Cmp(
+                            src_type,
+                            Operand::Imm(ImmediateValue::Signed(0)),
+                            Operand::convert(src, context)?,
+                        )
+                    },
                     // Not returns 1 is src is zero, and 0 otherwise.
-                    Instruction::Cmp(
-                        src_type,
-                        Operand::Imm(ImmediateValue::Signed(0)),
-                        Operand::convert(src, context)?,
-                    ),
                     // zero out the destination (since SetCondition only affects the first byte).
                     Instruction::Mov(
                         dst_type,
@@ -206,20 +297,41 @@ impl Convert for Instruction {
             }
             BirdsInstructionNode::Unary(op, src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
-                vec![
-                    Instruction::Mov(
-                        src_type,
-                        Operand::convert(src, context)?,
-                        Operand::convert(dst.clone(), context)?,
-                    ),
-                    Instruction::Unary(
-                        UnaryOperator::convert(op, context)?,
-                        src_type,
-                        Operand::convert(dst, context)?,
-                    ),
-                ]
+                if src_type == AssemblyType::Double && op == BirdsUnaryOperatorNode::Negate {
+                    let negative_zero =
+                        create_static_constant(16, StaticInitial::Double(-0.0), context);
+
+                    vec![
+                        Instruction::Mov(
+                            src_type,
+                            Operand::convert(src, context)?,
+                            Operand::convert(dst.clone(), context)?,
+                        ),
+                        Instruction::Binary(
+                            BinaryOperator::Xor,
+                            src_type,
+                            negative_zero,
+                            Operand::convert(dst, context)?,
+                        ),
+                    ]
+                } else {
+                    vec![
+                        Instruction::Mov(
+                            src_type,
+                            Operand::convert(src, context)?,
+                            Operand::convert(dst.clone(), context)?,
+                        ),
+                        Instruction::Unary(
+                            UnaryOperator::convert(op, context)?,
+                            src_type,
+                            Operand::convert(dst, context)?,
+                        ),
+                    ]
+                }
             }
-            BirdsInstructionNode::Binary(BirdsBinaryOperatorNode::Divide, left, right, dst) => {
+            BirdsInstructionNode::Binary(BirdsBinaryOperatorNode::Divide, left, right, dst)
+                if AssemblyType::infer(&left, context)?.0 != AssemblyType::Double =>
+            {
                 let (left_type, is_signed) = AssemblyType::infer(&left, context)?;
                 if is_signed {
                     vec![
@@ -300,7 +412,7 @@ impl Convert for Instruction {
             BirdsInstructionNode::Binary(op, left, right, dst) if op.is_relational() => {
                 let (left_type, is_signed) = AssemblyType::infer(&left, context)?;
                 // use different condition codes if the expression type is unsigned
-                let instruction = if is_signed {
+                let instruction = if is_signed && left_type != AssemblyType::Double {
                     Instruction::SetCondition(
                         ConditionCode::convert(op, context)?,
                         Operand::convert(dst.clone(), context)?,
@@ -320,7 +432,8 @@ impl Convert for Instruction {
                     ),
                     // zero out the destination (since SetCondition only affects the first byte).
                     Instruction::Mov(
-                        left_type,
+                        // always returns an integer
+                        AssemblyType::Longword,
                         Operand::Imm(ImmediateValue::Signed(0)),
                         Operand::convert(dst, context)?,
                     ),
@@ -362,30 +475,68 @@ impl Convert for Instruction {
             BirdsInstructionNode::Jump(s) => vec![Instruction::Jmp(s)],
             BirdsInstructionNode::JumpZero(src, s) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
-                vec![
-                    Instruction::Cmp(
-                        src_type,
-                        Operand::Imm(ImmediateValue::Signed(0)),
-                        Operand::convert(src, context)?,
-                    ),
-                    Instruction::JmpCondition(ConditionCode::E, s),
-                ]
+                if src_type == AssemblyType::Double {
+                    vec![
+                        // Zero out XMM0 (this is the quickest way to get zero in double-land)
+                        Instruction::Binary(
+                            BinaryOperator::Xor,
+                            src_type,
+                            Operand::Reg(Register::XMM0),
+                            Operand::Reg(Register::XMM0),
+                        ),
+                        Instruction::Cmp(
+                            src_type,
+                            Operand::Reg(Register::XMM0),
+                            Operand::convert(src, context)?,
+                        ),
+                        Instruction::JmpCondition(ConditionCode::P, s.clone()),
+                        Instruction::JmpCondition(ConditionCode::E, s),
+                    ]
+                } else {
+                    vec![
+                        Instruction::Cmp(
+                            src_type,
+                            Operand::Imm(ImmediateValue::Signed(0)),
+                            Operand::convert(src, context)?,
+                        ),
+                        Instruction::JmpCondition(ConditionCode::P, s.clone()),
+                        Instruction::JmpCondition(ConditionCode::E, s),
+                    ]
+                }
             }
             BirdsInstructionNode::JumpNotZero(src, s) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
-                vec![
-                    Instruction::Cmp(
-                        src_type,
-                        Operand::Imm(ImmediateValue::Signed(0)),
-                        Operand::convert(src, context)?,
-                    ),
-                    Instruction::JmpCondition(ConditionCode::Ne, s),
-                ]
+                if src_type == AssemblyType::Double {
+                    vec![
+                        // Zero out XMM0 (this is the quickest way to get zero in double-land)
+                        Instruction::Binary(
+                            BinaryOperator::Xor,
+                            src_type,
+                            Operand::Reg(Register::XMM0),
+                            Operand::Reg(Register::XMM0),
+                        ),
+                        Instruction::Cmp(
+                            src_type,
+                            Operand::Reg(Register::XMM0),
+                            Operand::convert(src, context)?,
+                        ),
+                        Instruction::JmpCondition(ConditionCode::Ne, s),
+                    ]
+                } else {
+                    vec![
+                        Instruction::Cmp(
+                            src_type,
+                            Operand::Imm(ImmediateValue::Signed(0)),
+                            Operand::convert(src, context)?,
+                        ),
+                        Instruction::JmpCondition(ConditionCode::Ne, s),
+                    ]
+                }
             }
             BirdsInstructionNode::Label(s) => vec![Instruction::Label(s)],
             BirdsInstructionNode::FunctionCall(name, args, dst) => {
                 let mut instructions = Vec::new();
-                let (register_args, stack_args) = split(args, 6);
+                let args = classify_function_args(args, context)?;
 
                 let return_type = if let Type::Function(ref ret, _) =
                     context.symbols.get(&name).unwrap().symbol_type
@@ -395,7 +546,8 @@ impl Convert for Instruction {
                     return Err("Function is not listed as a function type".into());
                 };
 
-                let stack_padding: i64 = if stack_args.len() % 2 == 1 { 8 } else { 0 };
+                let len_stack_args = args.stack.len();
+                let stack_padding: i64 = if len_stack_args % 2 == 1 { 8 } else { 0 };
                 if stack_padding != 0 {
                     instructions.push(Instruction::Binary(
                         BinaryOperator::Sub,
@@ -405,27 +557,31 @@ impl Convert for Instruction {
                     ));
                 }
 
-                for (i, arg) in register_args.iter().enumerate() {
-                    let arg_type = AssemblyType::infer(arg, context)?.0;
+                for (i, (arg, arg_type)) in args.integer.into_iter().enumerate() {
                     instructions.push(Instruction::Mov(
                         arg_type,
-                        Operand::convert(arg.clone(), context)?,
+                        arg,
                         Operand::Reg(FUNCTION_PARAM_REGISTERS[i].clone()),
                     ));
                 }
 
-                for arg in stack_args.iter().rev() {
-                    let converted_arg = Operand::convert(arg.clone(), context)?;
-                    let arg_type = AssemblyType::infer(arg, context)?.0;
+                for (i, arg) in args.double.into_iter().enumerate() {
+                    instructions.push(Instruction::Mov(
+                        AssemblyType::Double,
+                        arg,
+                        Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
+                    ));
+                }
 
-                    if matches!(converted_arg, Operand::Reg(_) | Operand::Imm(_))
-                        || arg_type == AssemblyType::Quadword
+                for (arg, arg_type) in args.stack.into_iter().rev() {
+                    if matches!(arg, Operand::Imm(_) | Operand::Reg(_))
+                        || matches!(arg_type, AssemblyType::Quadword | AssemblyType::Double)
                     {
-                        instructions.push(Instruction::Push(converted_arg));
+                        instructions.push(Instruction::Push(arg));
                     } else {
                         instructions.push(Instruction::Mov(
                             arg_type,
-                            converted_arg.clone(),
+                            arg,
                             Operand::Reg(Register::AX),
                         ));
                         instructions.push(Instruction::Push(Operand::Reg(Register::AX)));
@@ -434,7 +590,7 @@ impl Convert for Instruction {
 
                 instructions.push(Instruction::Call(name));
 
-                let callee_stack_size: i64 = 8 * stack_args.len() as i64 + stack_padding;
+                let callee_stack_size: i64 = 8 * len_stack_args as i64 + stack_padding;
                 if callee_stack_size != 0 {
                     instructions.push(Instruction::Binary(
                         BinaryOperator::Add,
@@ -444,11 +600,20 @@ impl Convert for Instruction {
                     ));
                 }
 
-                instructions.push(Instruction::Mov(
-                    AssemblyType::convert(*return_type, context)?,
-                    Operand::Reg(Register::AX),
-                    Operand::convert(dst.clone(), context)?,
-                ));
+                // read returned value from XMM0 if the return type is a double
+                if *return_type == Type::Double {
+                    instructions.push(Instruction::Mov(
+                        AssemblyType::Double,
+                        Operand::Reg(Register::XMM0),
+                        Operand::convert(dst.clone(), context)?,
+                    ));
+                } else {
+                    instructions.push(Instruction::Mov(
+                        AssemblyType::convert(*return_type, context)?,
+                        Operand::Reg(Register::AX),
+                        Operand::convert(dst.clone(), context)?,
+                    ));
+                }
 
                 instructions
             }
@@ -471,18 +636,177 @@ impl Convert for Instruction {
                     Operand::convert(dst, context)?,
                 )]
             }
-            BirdsInstructionNode::DoubleToInt(_, _) => todo!(),
-            BirdsInstructionNode::DoubleToUint(_, _) => todo!(),
-            BirdsInstructionNode::IntToDouble(_, _) => todo!(),
-            BirdsInstructionNode::UintToDouble(_, _) => todo!(),
+            BirdsInstructionNode::DoubleToInt(src, dst) => {
+                let dst_type = AssemblyType::infer(&dst, context)?.0;
+                vec![Instruction::Cvttsd2si(
+                    dst_type,
+                    Operand::convert(src, context)?,
+                    Operand::convert(dst, context)?,
+                )]
+            }
+            BirdsInstructionNode::DoubleToUint(src, dst) => {
+                let dst_type = AssemblyType::infer(&dst, context)?.0;
+                match dst_type {
+                    AssemblyType::Longword => vec![
+                        Instruction::Cvttsd2si(
+                            AssemblyType::Quadword,
+                            Operand::Reg(Register::XMM0),
+                            Operand::Reg(Register::AX),
+                        ),
+                        Instruction::Mov(
+                            AssemblyType::Longword,
+                            Operand::Reg(Register::AX),
+                            Operand::convert(dst, context)?,
+                        ),
+                    ],
+                    AssemblyType::Quadword => {
+                        context.num_labels += 1;
+                        let instruction_label = format!("double_to_uint_{}", context.num_labels);
+                        let i_max_value = i64::MAX as u64 + 1;
+                        let i_max = create_static_constant(
+                            8,
+                            StaticInitial::Double(i_max_value as f64),
+                            context,
+                        );
+
+                        vec![
+                            Instruction::Cmp(
+                                AssemblyType::Double,
+                                i_max.clone(),
+                                Operand::convert(src.clone(), context)?,
+                            ),
+                            Instruction::JmpCondition(
+                                ConditionCode::Ae,
+                                format!("out_of_range_{}", &instruction_label),
+                            ),
+                            Instruction::Cvttsd2si(
+                                AssemblyType::Quadword,
+                                Operand::convert(src.clone(), context)?,
+                                Operand::convert(dst.clone(), context)?,
+                            ),
+                            Instruction::Jmp(format!("end_{}", &instruction_label)),
+                            Instruction::Label(format!("out_of_range_{}", &instruction_label)),
+                            // avoid overwriting src (eg. if it's a variable we want to reference
+                            // later)
+                            Instruction::Mov(
+                                AssemblyType::Double,
+                                Operand::convert(src, context)?,
+                                Operand::Reg(Register::XMM0),
+                            ),
+                            Instruction::Binary(
+                                BinaryOperator::Sub,
+                                AssemblyType::Double,
+                                i_max,
+                                Operand::Reg(Register::XMM0),
+                            ),
+                            Instruction::Cvttsd2si(
+                                AssemblyType::Quadword,
+                                Operand::Reg(Register::XMM0),
+                                Operand::convert(dst.clone(), context)?,
+                            ),
+                            Instruction::Binary(
+                                BinaryOperator::Add,
+                                AssemblyType::Quadword,
+                                Operand::Imm(ImmediateValue::Unsigned(i_max_value)),
+                                Operand::convert(dst, context)?,
+                            ),
+                            Instruction::Label(format!("end_{}", &instruction_label)),
+                        ]
+                    }
+                    AssemblyType::Double => unreachable!(),
+                }
+            }
+            BirdsInstructionNode::IntToDouble(src, dst) => {
+                let src_type = AssemblyType::infer(&src, context)?.0;
+                vec![Instruction::Cvtsi2sd(
+                    src_type,
+                    Operand::convert(src, context)?,
+                    Operand::convert(dst, context)?,
+                )]
+            }
+            BirdsInstructionNode::UintToDouble(src, dst) => {
+                let src_type = AssemblyType::infer(&src, context)?.0;
+                match src_type {
+                    AssemblyType::Longword => {
+                        vec![
+                            Instruction::MovZeroExtend(
+                                Operand::convert(src, context)?,
+                                Operand::Reg(Register::AX),
+                            ),
+                            Instruction::Cvtsi2sd(
+                                AssemblyType::Quadword,
+                                Operand::Reg(Register::AX),
+                                Operand::convert(dst, context)?,
+                            ),
+                        ]
+                    }
+                    AssemblyType::Quadword => {
+                        context.num_labels += 1;
+                        let instruction_label = format!("uint_to_double_{}", context.num_labels);
+                        vec![
+                            Instruction::Cmp(
+                                AssemblyType::Quadword,
+                                Operand::Imm(ImmediateValue::Signed(0)),
+                                Operand::convert(src.clone(), context)?,
+                            ),
+                            Instruction::JmpCondition(
+                                ConditionCode::L,
+                                format!("out_of_range_{}", &instruction_label),
+                            ),
+                            Instruction::Cvtsi2sd(
+                                AssemblyType::Quadword,
+                                Operand::convert(src.clone(), context)?,
+                                Operand::convert(dst.clone(), context)?,
+                            ),
+                            Instruction::Jmp(format!("end_{}", &instruction_label)),
+                            Instruction::Label(format!("out_of_range_{}", &instruction_label)),
+                            Instruction::Mov(
+                                AssemblyType::Quadword,
+                                Operand::convert(src, context)?,
+                                Operand::Reg(Register::AX),
+                            ),
+                            Instruction::Mov(
+                                AssemblyType::Quadword,
+                                Operand::Reg(Register::AX),
+                                Operand::Reg(Register::DX),
+                            ),
+                            Instruction::Binary(
+                                BinaryOperator::UnsignedShiftRight,
+                                AssemblyType::Quadword,
+                                Operand::Imm(ImmediateValue::Signed(1)),
+                                Operand::Reg(Register::DX),
+                            ),
+                            Instruction::Binary(
+                                BinaryOperator::And,
+                                AssemblyType::Quadword,
+                                Operand::Imm(ImmediateValue::Signed(1)),
+                                Operand::Reg(Register::AX),
+                            ),
+                            Instruction::Binary(
+                                BinaryOperator::Or,
+                                AssemblyType::Quadword,
+                                Operand::Reg(Register::AX),
+                                Operand::Reg(Register::DX),
+                            ),
+                            Instruction::Cvtsi2sd(
+                                AssemblyType::Quadword,
+                                Operand::Reg(Register::DX),
+                                Operand::convert(dst.clone(), context)?,
+                            ),
+                            Instruction::Binary(
+                                BinaryOperator::Add,
+                                AssemblyType::Double,
+                                Operand::convert(dst.clone(), context)?,
+                                Operand::convert(dst, context)?,
+                            ),
+                            Instruction::Label(format!("end_{}", &instruction_label)),
+                        ]
+                    }
+                    AssemblyType::Double => unreachable!(),
+                }
+            }
         })
     }
-}
-
-fn split<T>(vec: Vec<T>, index: usize) -> (Vec<T>, Vec<T>) {
-    let mut right = vec;
-    let left = right.drain(..min(index, right.len())).collect();
-    (left, right)
 }
 
 impl Convert for Operand {
@@ -491,7 +815,7 @@ impl Convert for Operand {
 
     fn convert(
         input: BirdsValueNode,
-        _context: &mut ConvertContext,
+        context: &mut ConvertContext,
     ) -> Result<Operand, Box<dyn Error>> {
         match input {
             BirdsValueNode::Constant(Constant::Integer(c)) => {
@@ -506,9 +830,8 @@ impl Convert for Operand {
             BirdsValueNode::Constant(Constant::UnsignedLong(c)) => {
                 Ok(Operand::Imm(ImmediateValue::Unsigned(c)))
             }
-            BirdsValueNode::Constant(Constant::Double(_c)) => {
-                todo!()
-                // Ok(Operand::Imm(ImmediateValue::Unsigned(c)))
+            BirdsValueNode::Constant(Constant::Double(c)) => {
+                Ok(create_static_constant(8, StaticInitial::Double(c), context))
             }
             BirdsValueNode::Var(s) => Ok(Operand::MockReg(s)),
         }
@@ -545,13 +868,14 @@ impl Convert for BinaryOperator {
             BirdsBinaryOperatorNode::Add => Ok(BinaryOperator::Add),
             BirdsBinaryOperatorNode::Subtract => Ok(BinaryOperator::Sub),
             BirdsBinaryOperatorNode::Multiply => Ok(BinaryOperator::Mult),
-            BirdsBinaryOperatorNode::BitwiseAnd => Ok(BinaryOperator::BitwiseAnd),
-            BirdsBinaryOperatorNode::BitwiseXor => Ok(BinaryOperator::BitwiseXor),
-            BirdsBinaryOperatorNode::BitwiseOr => Ok(BinaryOperator::BitwiseOr),
+            BirdsBinaryOperatorNode::BitwiseAnd => Ok(BinaryOperator::And),
+            BirdsBinaryOperatorNode::BitwiseXor => Ok(BinaryOperator::Xor),
+            BirdsBinaryOperatorNode::BitwiseOr => Ok(BinaryOperator::Or),
             BirdsBinaryOperatorNode::ShiftLeft => Ok(BinaryOperator::ShiftLeft),
             BirdsBinaryOperatorNode::ShiftRight => Ok(BinaryOperator::ShiftRight),
-            BirdsBinaryOperatorNode::Divide | BirdsBinaryOperatorNode::Mod => {
-                panic!("should not treat mod and divide as binary expressions during codegen")
+            BirdsBinaryOperatorNode::Divide => Ok(BinaryOperator::DivDouble),
+            BirdsBinaryOperatorNode::Mod => {
+                panic!("should not treat mod as binary expressions during codegen")
             }
             BirdsBinaryOperatorNode::Equal
             | BirdsBinaryOperatorNode::NotEqual

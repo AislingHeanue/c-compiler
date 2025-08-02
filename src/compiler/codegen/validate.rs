@@ -39,6 +39,7 @@ impl Validate for TopLevel {
                 context.current_function_name = None
             }
             TopLevel::StaticVariable(_name, _global, _alignment, _init) => {}
+            TopLevel::StaticConstant(_name, _alignment, _init) => {}
         }
         Ok(())
     }
@@ -110,7 +111,7 @@ impl Validate for Vec<Instruction> {
                 *self = Instruction::update_instructions(
                     self.drain(..).collect_vec(),
                     context,
-                    Instruction::fix_instructions_with_two_stack_entries,
+                    Instruction::fix_instructions_with_two_memory_accesses,
                 );
             }
             ValidationPass::FixBadImmValues => {
@@ -180,6 +181,14 @@ impl Instruction {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
             }
+            Instruction::Cvttsd2si(_, ref mut src, ref mut dst) => {
+                src.replace_mock_register(context);
+                dst.replace_mock_register(context);
+            }
+            Instruction::Cvtsi2sd(_, ref mut src, ref mut dst) => {
+                src.replace_mock_register(context);
+                dst.replace_mock_register(context);
+            }
             Instruction::Unary(_, _, ref mut dst) => {
                 dst.replace_mock_register(context);
             }
@@ -213,7 +222,7 @@ impl Instruction {
         vec![self]
     }
 
-    fn fix_instructions_with_two_stack_entries(
+    fn fix_instructions_with_two_memory_accesses(
         self,
         _context: &mut ValidateContext,
     ) -> Vec<Instruction> {
@@ -226,6 +235,10 @@ impl Instruction {
         };
         if match_in_memory(src) && match_in_memory(dst) {
             match self {
+                Instruction::Mov(AssemblyType::Double, src, dst) => vec![
+                    Instruction::Mov(AssemblyType::Double, src, Operand::Reg(Register::XMM14)),
+                    Instruction::Mov(AssemblyType::Double, Operand::Reg(Register::XMM14), dst),
+                ],
                 Instruction::Mov(t, src, dst) => vec![
                     Instruction::Mov(t, src, Operand::Reg(Register::R10)),
                     Instruction::Mov(t, Operand::Reg(Register::R10), dst),
@@ -276,30 +289,78 @@ impl Instruction {
                 ),
                 Instruction::Movsx(Operand::Reg(Register::R10), dst),
             ],
+            Instruction::Cvtsi2sd(src_t, Operand::Imm(value), dst) => vec![
+                Instruction::Mov(src_t, Operand::Imm(value), Operand::Reg(Register::R10)),
+                Instruction::Cvtsi2sd(src_t, Operand::Reg(Register::R10), dst),
+            ],
             _ => vec![self],
         }
     }
 
     fn fix_memory_address_as_dst(self, _context: &mut ValidateContext) -> Vec<Instruction> {
         match self {
-            Instruction::Binary(BinaryOperator::Mult, t, src, Operand::Stack(value)) => vec![
-                Instruction::Mov(t, Operand::Stack(value), Operand::Reg(Register::R11)),
-                Instruction::Binary(
-                    BinaryOperator::Mult,
-                    t,
-                    src.clone(),
-                    Operand::Reg(Register::R11), // we use r11d to fix dst's
-                ),
-                Instruction::Mov(t, Operand::Reg(Register::R11), Operand::Stack(value)),
-            ],
-            Instruction::Movsx(src, Operand::Stack(value)) => vec![
+            Instruction::Binary(BinaryOperator::Mult, t, src, dst) if match_in_memory(&dst) => {
+                let scratch_register = if t == AssemblyType::Double {
+                    Operand::Reg(Register::XMM15)
+                } else {
+                    Operand::Reg(Register::R11)
+                };
+                vec![
+                    Instruction::Mov(t, dst.clone(), scratch_register.clone()),
+                    Instruction::Binary(BinaryOperator::Mult, t, src, scratch_register.clone()),
+                    Instruction::Mov(t, scratch_register, dst),
+                ]
+            }
+            Instruction::Movsx(src, dst) if match_in_memory(&dst) => vec![
                 Instruction::Movsx(src, Operand::Reg(Register::R11)),
-                Instruction::Mov(
-                    AssemblyType::Quadword,
-                    Operand::Reg(Register::R11),
-                    Operand::Stack(value),
-                ),
+                Instruction::Mov(AssemblyType::Quadword, Operand::Reg(Register::R11), dst),
             ],
+            Instruction::Cvttsd2si(dst_t, src, dst) if match_in_memory(&dst) => {
+                vec![
+                    Instruction::Cvttsd2si(dst_t, src, Operand::Reg(Register::R11)),
+                    Instruction::Mov(dst_t, Operand::Reg(Register::R11), dst),
+                ]
+            }
+            Instruction::Cvtsi2sd(src_t, src, dst) if match_in_memory(&dst) => {
+                vec![
+                    Instruction::Cvtsi2sd(src_t, src, Operand::Reg(Register::XMM15)),
+                    Instruction::Mov(AssemblyType::Double, Operand::Reg(Register::XMM15), dst),
+                ]
+            }
+            Instruction::Cmp(AssemblyType::Double, left, right) if match_in_memory(&right) => {
+                vec![
+                    // do Mov and then Cmp here and not the other way around. This is because we
+                    // typically need to read the flags set by Cmp immediately after the
+                    // instruction is run, so we can't append extra instructions after it.
+                    Instruction::Mov(AssemblyType::Double, right, Operand::Reg(Register::XMM15)),
+                    Instruction::Cmp(AssemblyType::Double, left, Operand::Reg(Register::XMM15)),
+                ]
+            }
+            Instruction::Binary(op, AssemblyType::Double, src, dst)
+                if matches!(
+                    op,
+                    BinaryOperator::Add
+                        | BinaryOperator::Sub
+                        | BinaryOperator::Mult
+                        | BinaryOperator::DivDouble
+                        | BinaryOperator::Xor
+                ) =>
+            {
+                vec![
+                    Instruction::Mov(
+                        AssemblyType::Double,
+                        dst.clone(),
+                        Operand::Reg(Register::XMM15),
+                    ),
+                    Instruction::Binary(
+                        op,
+                        AssemblyType::Double,
+                        src,
+                        Operand::Reg(Register::XMM15),
+                    ),
+                    Instruction::Mov(AssemblyType::Double, Operand::Reg(Register::XMM15), dst),
+                ]
+            }
             _ => vec![self],
         }
     }
@@ -313,7 +374,7 @@ impl Instruction {
                         | BinaryOperator::ShiftRight
                         | BinaryOperator::UnsignedShiftLeft
                         | BinaryOperator::UnsignedShiftRight
-                ) =>
+                ) && t != AssemblyType::Double =>
             {
                 vec![
                     Instruction::Mov(t, left, Operand::Reg(Register::CX)),
@@ -345,9 +406,9 @@ impl Instruction {
                         BinaryOperator::Add
                             | BinaryOperator::Sub
                             | BinaryOperator::Mult
-                            | BinaryOperator::BitwiseAnd
-                            | BinaryOperator::BitwiseXor
-                            | BinaryOperator::BitwiseOr
+                            | BinaryOperator::And
+                            | BinaryOperator::Xor
+                            | BinaryOperator::Or
                     ) =>
             {
                 vec![
@@ -440,23 +501,27 @@ impl Operand {
                 return;
             }
             match context.symbols.get(name) {
-                Some(AssemblySymbolInfo::Object(_, true)) => {
+                Some(AssemblySymbolInfo::Object(_, true, _)) => {
                     // static objects go to data
                     *self = Operand::Data(name.clone());
                 }
-                Some(AssemblySymbolInfo::Object(t, false)) => {
+                Some(AssemblySymbolInfo::Object(t, false, false)) => {
                     let alignment = t.get_alignment();
                     // align to 'alignment', eg if alignment = 8 make sure that stack_size is a
                     // multiple of 8
-                    context.current_stack_size =
-                        align_stack_size(context.current_stack_size + alignment, alignment);
+                    context.current_stack_size = align_stack_size(
+                        context.current_stack_size + alignment as i32,
+                        alignment as i32,
+                    );
                     let new_location = -context.current_stack_size;
                     context
                         .current_stack_locations
                         .insert(name.clone(), new_location);
                     *self = Operand::Stack(new_location);
                 }
-                None | Some(AssemblySymbolInfo::Function(_)) => {}
+                None => panic!("Could not find matching declaration for {:?}", name),
+                Some(AssemblySymbolInfo::Object(_, false, true)) => unreachable!(),
+                Some(AssemblySymbolInfo::Function(_)) => unreachable!(),
             }
         }
     }

@@ -54,7 +54,7 @@ pub enum BirdsValueNode {
     Var(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum BirdsUnaryOperatorNode {
     Complement,
     Negate,

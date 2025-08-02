@@ -104,6 +104,20 @@ pub enum StaticInitial {
     Double(f64),
 }
 
+impl StaticInitial {
+    pub fn is_zero(&self) -> bool {
+        matches!(
+            self,
+            // doubles are never treated as zero initialisations to sidestep confusion over 0.0
+            // and -0.0
+            StaticInitial::Ordinal(OrdinalStatic::Integer(0))
+                | StaticInitial::Ordinal(OrdinalStatic::Long(0))
+                | StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(0))
+                | StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(0))
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OrdinalStatic {
     Integer(i32),

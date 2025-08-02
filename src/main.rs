@@ -49,6 +49,7 @@ fn main() {
     let object_filename = stripped_filename.clone() + ".o";
     let mut asm_filenames: Vec<String> = Vec::new();
     for filename in filenames {
+        println!("{:?}", filename);
         let stripped_filename = filename.strip_suffix(".c").unwrap_or(&filename).to_owned();
         let preprocessed_filename = stripped_filename.clone() + ".i";
         let asm_filename = stripped_filename.clone() + ".s";
@@ -95,8 +96,12 @@ fn main() {
             args
         } else {
             let mut args = vec!["-o", &stripped_filename];
+            args.push(
+                "../../nlsandler/writing-a-c-compiler-tests/tests/chapter_13/helper_libs/nan.c",
+            );
             args.append(&mut asm_filenames.iter().map(|s| s.as_str()).collect());
             args.append(&mut linker_args.iter().map(|s| s.as_str()).collect());
+            println!("{:?}", args);
             args
         })
         .output()

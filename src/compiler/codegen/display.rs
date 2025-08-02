@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use ryu::Buffer;
 
 use crate::compiler::{
     codegen::AssemblySymbolInfo,
@@ -10,6 +11,51 @@ use super::{
     Instruction, Operand, Program, Register, TopLevel, UnaryOperator,
 };
 use std::fmt::Display;
+
+impl DisplayContext {
+    fn indent(&mut self) -> &mut DisplayContext {
+        self.indent += 4;
+        self
+    }
+    fn unindent(&mut self) -> &mut DisplayContext {
+        self.indent -= 4;
+        self
+    }
+    fn short(&mut self) -> &mut DisplayContext {
+        self.word_length_bytes = 1;
+        self.instruction_suffix = "".to_string(); // unused
+        self
+    }
+    fn regular(&mut self) -> &mut DisplayContext {
+        self.word_length_bytes = 4;
+        self.instruction_suffix = "l".to_string();
+        self
+    }
+    fn long(&mut self) -> &mut DisplayContext {
+        self.word_length_bytes = 8;
+        self.instruction_suffix = "q".to_string();
+        self
+    }
+    fn double(&mut self) -> &mut DisplayContext {
+        self.word_length_bytes = 8;
+        self.instruction_suffix = "sd".to_string();
+        self
+    }
+    fn suffix_for_type(&mut self, t: &AssemblyType) -> String {
+        match t {
+            AssemblyType::Longword => {
+                self.regular();
+            }
+            AssemblyType::Quadword => {
+                self.long();
+            }
+            AssemblyType::Double => {
+                self.double();
+            }
+        }
+        self.instruction_suffix.clone()
+    }
+}
 
 impl<T> CodeDisplay for Vec<T>
 where
@@ -84,33 +130,89 @@ impl CodeDisplay for TopLevel {
                 } else {
                     (name.to_string(), ".align")
                 };
-                let init_is_zero = todo!();
-                // matches!(init, StaticInitial::Integer(0) | StaticInitial::Long(0));
+
+                let section = if init.is_zero() {
+                    ".bss".to_string()
+                } else {
+                    ".data".to_string()
+                };
+
+                let global_string = if *global {
+                    format!(".globl {}\n", address.clone())
+                } else {
+                    "".to_string()
+                };
 
                 context.indent();
                 let mut out = "".to_string();
-                if *global {
-                    out += format!(".globl {}", address).show(context).as_str();
-                    out += "\n";
-                }
-
-                if init_is_zero {
-                    out += ".bss".to_string().show(context).as_str();
-                } else {
-                    out += ".data".to_string().show(context).as_str();
-                };
+                out += global_string.show(context).as_str();
+                out += section.to_string().show(context).as_str();
                 out += "\n";
-
                 out += format!("{} {}", align, alignment).show(context).as_str();
                 out += "\n";
-
                 context.unindent();
                 out += format!("{}:", address).show(context).as_str();
                 out += "\n";
-
                 context.indent();
                 out += init.show(context).as_str();
                 out += "\n";
+                context.unindent();
+                out
+            }
+            TopLevel::StaticConstant(name, alignment, init) => {
+                let label_start = if let AssemblySymbolInfo::Object(_, _, is_top_level_constant) =
+                    context.symbols.get(name).unwrap()
+                {
+                    if *is_top_level_constant && context.is_mac {
+                        "L"
+                    } else if *is_top_level_constant {
+                        ".L"
+                    } else if context.is_mac {
+                        "_"
+                    } else {
+                        ""
+                    }
+                } else {
+                    unreachable!()
+                };
+
+                let (address, align) = if context.is_mac {
+                    (format!("_{}", name), ".balign")
+                } else {
+                    (name.to_string(), ".align")
+                };
+
+                let section = if context.is_mac {
+                    match alignment {
+                        8 => ".literal8",
+                        16 => ".literal16",
+                        _ => unreachable!(),
+                    }
+                } else {
+                    ".section .rodata"
+                };
+
+                context.indent();
+                let mut out = "".to_string();
+                out += section.to_string().show(context).as_str();
+                out += "\n";
+                out += format!("{} {}", align, alignment).show(context).as_str();
+                out += "\n";
+                context.unindent();
+                out += format!("{}{}:", label_start, address)
+                    .show(context)
+                    .as_str();
+                out += "\n";
+                context.indent();
+                out += init.show(context).as_str();
+                out += "\n";
+                if context.is_mac && *alignment == 16 {
+                    // here, alignment is 16 but we allocate 8 bytes for
+                    // negative_zero, which is currently our only use of 16-alignment
+                    // Allocate 8 more to avoid confusing the linker.
+                    out += ".quad 0".to_string().show(context).as_str();
+                    out += "\n";
+                }
                 context.unindent();
                 out
             }
@@ -129,7 +231,20 @@ impl CodeDisplay for StaticInitial {
             StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(i)) => format!(".long {}", i),
             StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(0)) => ".zero 8".to_string(),
             StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(l)) => format!(".quad {}", l),
-            StaticInitial::Double(_) => todo!(),
+            // print 17 digits of precision so that when the linker re-converts this to a real
+            // double value, this has enough precision to guarantee the original value.
+            // no special case for zero values here, so that we can avoid confusion about
+            // 0.0 vs -0.0
+            StaticInitial::Double(d) => {
+                // use the actual bits of the f64 value in the assembly
+                // more precise (if needed), but less nice to look at/debug
+                // let as_number = d.to_bits();
+                // format!(".quad {}", as_number)
+
+                // alternatively, pretty print
+                let mut ryu_buffer = Buffer::new();
+                format!(".double {}", ryu_buffer.format(*d))
+            }
         };
 
         format!("{:indent$}{}", "", s, indent = context.indent)
@@ -210,6 +325,26 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
+            Instruction::Cvttsd2si(dst_type, src, dst) => {
+                format!(
+                    "{:indent$}cvttsd2si{} {}, {}",
+                    "",
+                    context.suffix_for_type(dst_type),
+                    src.show(context),
+                    dst.show(context),
+                    indent = context.indent
+                )
+            }
+            Instruction::Cvtsi2sd(src_type, src, dst) => {
+                format!(
+                    "{:indent$}cvtsi2sd{} {}, {}",
+                    "",
+                    context.suffix_for_type(src_type),
+                    src.show(context),
+                    dst.show(context),
+                    indent = context.indent
+                )
+            }
             Instruction::Unary(op, t, src) => {
                 format!(
                     "{:indent$}{}{} {}",
@@ -245,35 +380,28 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
-            Instruction::Binary(op, t, src, dst)
-                if matches!(op, BinaryOperator::ShiftLeft | BinaryOperator::ShiftRight) =>
-            {
-                // bit-shift operations (as of today) require that the first argument, ie the
-                // number to shift by, is 1 byte long. This is sensible since we don't represent
-                // any numbers higher than 2^256 anyway. I'm just not sure why this seems to have
-                // come up as a regression in my code today, maybe a sneaky GCC change...?
-                context.short();
-                let shift_by = src.show(context);
-                format!(
-                    "{:indent$}{}{} {}, {}",
-                    "",
-                    op.show(context),
-                    context.suffix_for_type(t),
-                    shift_by,
-                    dst.show(context),
-                    indent = context.indent
-                )
-            }
             Instruction::Binary(op, t, src, dst) => {
-                format!(
-                    "{:indent$}{}{} {}, {}",
-                    "",
-                    op.show(context),
-                    context.suffix_for_type(t),
-                    src.show(context),
-                    dst.show(context),
-                    indent = context.indent
-                )
+                if *t == AssemblyType::Double {
+                    context.double();
+                    format!(
+                        "{:indent$}{} {}, {}",
+                        "",
+                        op.show_double(context),
+                        src.show(context),
+                        dst.show(context),
+                        indent = context.indent
+                    )
+                } else {
+                    format!(
+                        "{:indent$}{}{} {}, {}",
+                        "",
+                        op.show(context),
+                        context.suffix_for_type(t),
+                        src.show(context),
+                        dst.show(context),
+                        indent = context.indent
+                    )
+                }
             }
             Instruction::Idiv(t, src) => {
                 if context.comments {
@@ -324,18 +452,29 @@ impl CodeDisplay for Instruction {
                     format!("{:indent$}cdq", "", indent = context.indent)
                 }
             }
-            Instruction::Cdq(AssemblyType::Quadword) => {
+            Instruction::Cdq(AssemblyType::Quadword | AssemblyType::Double) => {
                 format!("{:indent$}cqo", "", indent = context.indent)
             }
             Instruction::Cmp(t, left, right) => {
-                format!(
-                    "{:indent$}cmp{} {}, {}",
-                    "",
-                    context.suffix_for_type(t),
-                    left.show(context),
-                    right.show(context),
-                    indent = context.indent
-                )
+                if *t == AssemblyType::Double {
+                    format!(
+                        "{:indent$}comi{} {}, {}",
+                        "",
+                        context.suffix_for_type(t),
+                        left.show(context),
+                        right.show(context),
+                        indent = context.indent
+                    )
+                } else {
+                    format!(
+                        "{:indent$}cmp{} {}, {}",
+                        "",
+                        context.suffix_for_type(t),
+                        left.show(context),
+                        right.show(context),
+                        indent = context.indent
+                    )
+                }
             }
             Instruction::Jmp(s) => {
                 let label_start = if context.is_mac { "L" } else { ".L" };
@@ -415,7 +554,7 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
-            Instruction::MovZeroExtend(_, _) => panic!("This was a placeholder instruction"),
+            Instruction::MovZeroExtend(_, _) => unreachable!("This was a placeholder instruction"),
         }
     }
 }
@@ -440,6 +579,16 @@ impl CodeDisplay for Operand {
                     Register::R11 => "%r11b",
                     Register::SP => "%rsp",
                     Register::BP => "%rbp",
+                    Register::XMM0 => "%xmm0",
+                    Register::XMM1 => "%xmm1",
+                    Register::XMM2 => "%xmm2",
+                    Register::XMM3 => "%xmm3",
+                    Register::XMM4 => "%xmm4",
+                    Register::XMM5 => "%xmm5",
+                    Register::XMM6 => "%xmm6",
+                    Register::XMM7 => "%xmm7",
+                    Register::XMM14 => "%xmm14",
+                    Register::XMM15 => "%xmm15",
                 },
                 4 => match reg {
                     Register::AX => "%eax",
@@ -453,6 +602,16 @@ impl CodeDisplay for Operand {
                     Register::R11 => "%r11d",
                     Register::SP => "%rsp",
                     Register::BP => "%rbp",
+                    Register::XMM0 => "%xmm0",
+                    Register::XMM1 => "%xmm1",
+                    Register::XMM2 => "%xmm2",
+                    Register::XMM3 => "%xmm3",
+                    Register::XMM4 => "%xmm4",
+                    Register::XMM5 => "%xmm5",
+                    Register::XMM6 => "%xmm6",
+                    Register::XMM7 => "%xmm7",
+                    Register::XMM14 => "%xmm14",
+                    Register::XMM15 => "%xmm15",
                 },
                 8 => match reg {
                     Register::AX => "%rax",
@@ -466,6 +625,16 @@ impl CodeDisplay for Operand {
                     Register::R11 => "%r11",
                     Register::SP => "%rsp",
                     Register::BP => "%rbp",
+                    Register::XMM0 => "%xmm0",
+                    Register::XMM1 => "%xmm1",
+                    Register::XMM2 => "%xmm2",
+                    Register::XMM3 => "%xmm3",
+                    Register::XMM4 => "%xmm4",
+                    Register::XMM5 => "%xmm5",
+                    Register::XMM6 => "%xmm6",
+                    Register::XMM7 => "%xmm7",
+                    Register::XMM14 => "%xmm14",
+                    Register::XMM15 => "%xmm15",
                 },
                 _ => panic!("Invalid word length: {}", context.word_length_bytes),
             }
@@ -476,11 +645,23 @@ impl CodeDisplay for Operand {
             ),
             Operand::Stack(num) => format!("{}(%rbp)", num),
             Operand::Data(name) => {
-                if context.is_mac {
-                    format!("_{}(%rip)", name)
+                let label_start = if let AssemblySymbolInfo::Object(_, _, is_top_level_constant) =
+                    context.symbols.get(name).unwrap()
+                {
+                    if *is_top_level_constant && context.is_mac {
+                        "L"
+                    } else if *is_top_level_constant {
+                        ".L"
+                    } else if context.is_mac {
+                        "_"
+                    } else {
+                        ""
+                    }
                 } else {
-                    format!("{}(%rip)", name)
-                }
+                    unreachable!()
+                };
+
+                format!("{}{}(%rip)", label_start, name)
             }
         }
     }
@@ -506,11 +687,22 @@ impl CodeDisplay for BinaryOperator {
             BinaryOperator::ShiftRight => "sar",
             BinaryOperator::UnsignedShiftLeft => "shl",
             BinaryOperator::UnsignedShiftRight => "shr",
-            BinaryOperator::BitwiseAnd => "and",
-            BinaryOperator::BitwiseXor => "xor",
-            BinaryOperator::BitwiseOr => "or",
+            BinaryOperator::And => "and",
+            BinaryOperator::Xor => "xor",
+            BinaryOperator::Or => "or",
+            BinaryOperator::DivDouble => "div",
         }
         .to_string()
+    }
+}
+
+impl BinaryOperator {
+    fn show_double(&self, context: &mut DisplayContext) -> String {
+        match self {
+            BinaryOperator::Mult => "mulsd".to_string(),
+            BinaryOperator::Xor => "xorpd".to_string(),
+            op => format!("{}{}", op.show(context), context.instruction_suffix),
+        }
     }
 }
 
@@ -527,6 +719,7 @@ impl CodeDisplay for ConditionCode {
             ConditionCode::Ae => "ae",
             ConditionCode::B => "b",
             ConditionCode::Be => "be",
+            ConditionCode::P => "p",
         }
         .to_string()
     }

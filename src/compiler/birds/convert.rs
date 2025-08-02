@@ -384,7 +384,7 @@ impl Convert for StaticInitial {
             StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(l)) => {
                 Ok(BirdsValueNode::Constant(Constant::UnsignedLong(l)))
             }
-            StaticInitial::Double(_) => todo!(),
+            StaticInitial::Double(d) => Ok(BirdsValueNode::Constant(Constant::Double(d))),
         }
     }
 }
@@ -542,9 +542,8 @@ impl Convert for ExpressionNode {
                 Ok((instructions, new_dst))
             }
             ExpressionWithoutType::Unary(op, src) => {
-                let new_dst_type = src.1.clone().unwrap();
+                let src_type = src.1.clone().unwrap();
                 let (mut instructions, new_src) = src.clone().convert(context)?;
-                let new_dst = new_temp_variable(new_dst_type, context);
 
                 let bird_op = match op {
                     UnaryOperatorNode::Complement => BirdsUnaryOperatorNode::Complement,
@@ -556,6 +555,14 @@ impl Convert for ExpressionNode {
                     | UnaryOperatorNode::SuffixDecrement => unreachable!(),
                 };
 
+                let new_dst_type = if bird_op == BirdsUnaryOperatorNode::Not {
+                    Type::Integer
+                } else {
+                    src_type
+                };
+
+                let new_dst = new_temp_variable(new_dst_type, context);
+
                 instructions.push(BirdsInstructionNode::Unary(
                     bird_op,
                     new_src,
@@ -564,7 +571,7 @@ impl Convert for ExpressionNode {
                 Ok((instructions, new_dst))
             }
             ExpressionWithoutType::Binary(op, left, right) => {
-                let mut new_dst_type = left.1.clone().unwrap();
+                let left_type = left.1.clone().unwrap();
                 let (mut instructions, new_left) = left.convert(context)?;
 
                 let (mut instructions_from_right, new_right) = right.convert(context)?;
@@ -575,21 +582,26 @@ impl Convert for ExpressionNode {
                     BinaryOperatorNode::Multiply => Some(BirdsBinaryOperatorNode::Multiply),
                     BinaryOperatorNode::Divide => Some(BirdsBinaryOperatorNode::Divide),
                     BinaryOperatorNode::Mod => Some(BirdsBinaryOperatorNode::Mod),
+                    BinaryOperatorNode::BitwiseAnd => Some(BirdsBinaryOperatorNode::BitwiseAnd),
+                    BinaryOperatorNode::BitwiseXor => Some(BirdsBinaryOperatorNode::BitwiseXor),
+                    BinaryOperatorNode::BitwiseOr => Some(BirdsBinaryOperatorNode::BitwiseOr),
+                    BinaryOperatorNode::ShiftLeft => Some(BirdsBinaryOperatorNode::ShiftLeft),
+                    BinaryOperatorNode::ShiftRight => Some(BirdsBinaryOperatorNode::ShiftRight),
                     BinaryOperatorNode::Equal => Some(BirdsBinaryOperatorNode::Equal),
                     BinaryOperatorNode::NotEqual => Some(BirdsBinaryOperatorNode::NotEqual),
                     BinaryOperatorNode::Less => Some(BirdsBinaryOperatorNode::Less),
                     BinaryOperatorNode::Greater => Some(BirdsBinaryOperatorNode::Greater),
                     BinaryOperatorNode::LessEqual => Some(BirdsBinaryOperatorNode::LessEqual),
                     BinaryOperatorNode::GreaterEqual => Some(BirdsBinaryOperatorNode::GreaterEqual),
-                    BinaryOperatorNode::BitwiseAnd => Some(BirdsBinaryOperatorNode::BitwiseAnd),
-                    BinaryOperatorNode::BitwiseXor => Some(BirdsBinaryOperatorNode::BitwiseXor),
-                    BinaryOperatorNode::BitwiseOr => Some(BirdsBinaryOperatorNode::BitwiseOr),
-                    BinaryOperatorNode::ShiftLeft => Some(BirdsBinaryOperatorNode::ShiftLeft),
-                    BinaryOperatorNode::ShiftRight => Some(BirdsBinaryOperatorNode::ShiftRight),
                     // process these in the 'else' block below instead
                     BinaryOperatorNode::And | BinaryOperatorNode::Or => None,
                 };
                 let new_dst = if let Some(bird_op_found) = bird_op {
+                    let new_dst_type = if bird_op_found.is_relational() {
+                        Type::Integer
+                    } else {
+                        left_type
+                    };
                     let new_dst = new_temp_variable(new_dst_type, context);
                     instructions.append(&mut instructions_from_right);
                     instructions.push(BirdsInstructionNode::Binary(
@@ -601,7 +613,7 @@ impl Convert for ExpressionNode {
                     new_dst
                 } else {
                     // 'And' and 'Or' always return ints
-                    new_dst_type = Type::Integer;
+                    let new_dst_type = Type::Integer;
                     let new_dst = new_temp_variable(new_dst_type, context);
 
                     context.last_end_label_number += 1;
