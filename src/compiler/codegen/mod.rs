@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, error::Error, mem::swap};
 
 use super::{
     birds::BirdsProgramNode,
-    parser::{StaticInitial, StorageInfo, SymbolInfo, Type},
+    types::{StaticInitial, StorageInfo, SymbolInfo, Type},
 };
 
 mod convert;

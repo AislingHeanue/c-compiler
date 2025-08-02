@@ -2,11 +2,13 @@ use std::{collections::HashMap, error::Error};
 
 use conv::{ApproxInto, ConvUtil, RoundToZero, Wrapping};
 
+use crate::compiler::types::{InitialValue, StaticInitial};
+
 use super::{
     BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
-    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialValue, OrdinalStatic,
-    ProgramNode, StatementNode, StaticInitial, StorageClass, StorageInfo, SwitchMapKey, SymbolInfo,
-    Type, UnaryOperatorNode, Validate, ValidateContext, ValidationPass, VariableDeclaration,
+    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, OrdinalStatic, ProgramNode,
+    StatementNode, StorageClass, StorageInfo, SwitchMapKey, SymbolInfo, Type, UnaryOperatorNode,
+    Validate, ValidateContext, ValidationPass, VariableDeclaration,
 };
 
 impl<T> Validate for Option<T>
@@ -249,6 +251,7 @@ impl VariableDeclaration {
                             InitialValue::Initial(StaticInitial::unsigned_long(0))
                         }
                         Type::Double => InitialValue::Initial(StaticInitial::Double(0.)),
+                        Type::Pointer(_) => todo!(),
                         Type::Function(_, _) => unreachable!(),
                     },
                     _ => {
@@ -341,6 +344,7 @@ impl StaticInitial {
             Type::UnsignedLong => StaticInitial::unsigned_long_from_double(i),
             Type::Double => StaticInitial::Double(i),
             Type::Function(_, _) => unreachable!(),
+            Type::Pointer(_) => todo!(),
         }
     }
 
@@ -352,6 +356,7 @@ impl StaticInitial {
             Type::UnsignedLong => StaticInitial::unsigned_long(i),
             Type::Double => StaticInitial::double(i),
             Type::Function(_, _) => unreachable!(),
+            Type::Pointer(_) => todo!(),
         }
     }
 
@@ -797,6 +802,8 @@ impl Validate for ExpressionNode {
             ExpressionWithoutType::Cast(_, ref mut expression) => {
                 expression.validate(context)?;
             }
+            ExpressionWithoutType::Dereference(_) => todo!(),
+            ExpressionWithoutType::AddressOf(_) => todo!(),
         };
         Ok(())
     }
@@ -1003,6 +1010,8 @@ impl ExpressionNode {
                 e.check_types(context)?;
                 target.clone()
             }
+            ExpressionWithoutType::Dereference(_) => todo!(),
+            ExpressionWithoutType::AddressOf(_) => todo!(),
         });
         Ok(())
     }

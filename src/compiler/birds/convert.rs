@@ -2,11 +2,13 @@ use std::error::Error;
 
 use itertools::process_results;
 
-use crate::compiler::parser::{
-    BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
-    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialValue, OrdinalStatic,
-    ProgramNode, StatementNode, StaticInitial, StorageInfo, SwitchMapKey, SymbolInfo, Type,
-    UnaryOperatorNode, VariableDeclaration,
+use crate::compiler::{
+    parser::{
+        BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode,
+        ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, ProgramNode, StatementNode,
+        SwitchMapKey, UnaryOperatorNode, VariableDeclaration,
+    },
+    types::{Constant, InitialValue, OrdinalStatic, StaticInitial, StorageInfo, SymbolInfo, Type},
 };
 
 use super::{
@@ -36,6 +38,7 @@ fn get_typed_constant(value: u32, target: &ExpressionNode) -> BirdsValueNode {
         Type::UnsignedInteger => BirdsValueNode::Constant(Constant::UnsignedInteger(value)),
         Type::UnsignedLong => BirdsValueNode::Constant(Constant::UnsignedLong(value.into())),
         Type::Double => BirdsValueNode::Constant(Constant::Double(value.into())),
+        Type::Pointer(_) => unreachable!(),
         Type::Function(_, _) => unreachable!(),
     }
 }
@@ -256,7 +259,7 @@ impl Convert for StatementNode {
 
                 instructions.push(BirdsInstructionNode::JumpZero(
                     new_src,
-                    format!("break_{}", this_loop_label),
+                    format!("start_{}", this_loop_label),
                 ));
                 instructions.push(BirdsInstructionNode::Jump(format!(
                     "start_{}",
@@ -752,6 +755,7 @@ impl Convert for ExpressionNode {
                             instructions
                                 .push(BirdsInstructionNode::UintToDouble(new_src, new_dst.clone()));
                         }
+                        Type::Pointer(_) => todo!(),
                         Type::Double => unreachable!(),
                         Type::Function(_, _) => unreachable!(),
                     }
@@ -765,6 +769,7 @@ impl Convert for ExpressionNode {
                             instructions
                                 .push(BirdsInstructionNode::DoubleToUint(new_src, new_dst.clone()));
                         }
+                        Type::Pointer(_) => todo!(),
                         Type::Double => unreachable!(),
                         Type::Function(_, _) => unreachable!(),
                     }
@@ -783,6 +788,8 @@ impl Convert for ExpressionNode {
 
                 Ok((instructions, new_dst))
             }
+            ExpressionWithoutType::Dereference(_) => todo!(),
+            ExpressionWithoutType::AddressOf(_) => todo!(),
         }
     }
 }

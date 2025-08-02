@@ -10,6 +10,7 @@ pub mod birds;
 pub mod codegen;
 pub mod lexer;
 pub mod parser;
+pub mod types;
 
 static IS_LINUX: bool = true;
 static IS_MAC: bool = false;

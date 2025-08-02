@@ -3,7 +3,7 @@ use crate::compiler::{
         BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsProgramNode, BirdsTopLevel,
         BirdsUnaryOperatorNode, BirdsValueNode,
     },
-    parser::{Constant, StaticInitial, Type},
+    types::{Constant, StaticInitial, Type},
 };
 use itertools::{process_results, Itertools};
 use std::error::Error;
@@ -106,6 +106,7 @@ impl Convert for AssemblyType {
             Type::UnsignedInteger => Ok(AssemblyType::Longword),
             Type::UnsignedLong => Ok(AssemblyType::Quadword),
             Type::Double => Ok(AssemblyType::Double),
+            Type::Pointer(_) => todo!(),
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
         }
     }

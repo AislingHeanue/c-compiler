@@ -241,6 +241,7 @@ impl CodeDisplay for Type {
                 format!("func ({}) {}", inputs.show(context), output.show(context))
             }
             Type::Double => "float64".to_string(),
+            Type::Pointer(t) => format!("*{}", t.show(context)),
         }
     }
 }
@@ -316,6 +317,8 @@ impl CodeDisplay for ExpressionWithoutType {
             ExpressionWithoutType::Cast(target_type, e) => {
                 format!("{}({})", target_type.show(context), e.show(context))
             }
+            ExpressionWithoutType::Dereference(_) => todo!(),
+            ExpressionWithoutType::AddressOf(_) => todo!(),
         }
     }
 }

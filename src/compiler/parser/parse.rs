@@ -1,9 +1,9 @@
 use super::{
-    BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
+    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode,
     ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, Parse, ProgramNode,
     StatementNode, StorageClass, Type, UnaryOperatorNode, VariableDeclaration,
 };
-use crate::compiler::{lexer::Token, parser::ParseContext};
+use crate::compiler::{lexer::Token, parser::ParseContext, types::Constant};
 use std::{
     collections::{HashMap, VecDeque},
     error::Error,
@@ -28,7 +28,13 @@ fn match_type(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
 fn match_unary_operator(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
     Ok(matches!(
         peek(tokens)?,
-        Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement
+        Token::Hyphen
+            | Token::Tilde
+            | Token::Not
+            | Token::Increment
+            | Token::Decrement
+            | Token::And
+            | Token::Star
     ))
 }
 

@@ -3,7 +3,7 @@ use ryu::Buffer;
 
 use crate::compiler::{
     codegen::AssemblySymbolInfo,
-    parser::{OrdinalStatic, StaticInitial},
+    types::{OrdinalStatic, StaticInitial},
 };
 
 use super::{

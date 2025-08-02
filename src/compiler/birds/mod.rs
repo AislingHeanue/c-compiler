@@ -1,4 +1,7 @@
-use super::parser::{Constant, ProgramNode, StaticInitial, SymbolInfo, Type};
+use super::{
+    parser::ProgramNode,
+    types::{Constant, StaticInitial, SymbolInfo, Type},
+};
 use std::{collections::HashMap, error::Error};
 
 mod convert;
