@@ -254,10 +254,14 @@ impl Convert for StatementNode {
                 let (mut instructions_from_condition, new_src) = expression.convert(context)?;
                 instructions.append(&mut instructions_from_condition);
 
-                instructions.push(BirdsInstructionNode::JumpNotZero(
+                instructions.push(BirdsInstructionNode::JumpZero(
                     new_src,
-                    format!("start_{}", this_loop_label),
+                    format!("break_{}", this_loop_label),
                 ));
+                instructions.push(BirdsInstructionNode::Jump(format!(
+                    "start_{}",
+                    this_loop_label
+                )));
                 instructions.push(BirdsInstructionNode::Label(format!(
                     "break_{}",
                     this_loop_label

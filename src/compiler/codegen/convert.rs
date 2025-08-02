@@ -489,7 +489,6 @@ impl Convert for Instruction {
                             Operand::Reg(Register::XMM0),
                             Operand::convert(src, context)?,
                         ),
-                        Instruction::JmpCondition(ConditionCode::P, s.clone()),
                         Instruction::JmpCondition(ConditionCode::E, s),
                     ]
                 } else {
@@ -499,7 +498,6 @@ impl Convert for Instruction {
                             Operand::Imm(ImmediateValue::Signed(0)),
                             Operand::convert(src, context)?,
                         ),
-                        Instruction::JmpCondition(ConditionCode::P, s.clone()),
                         Instruction::JmpCondition(ConditionCode::E, s),
                     ]
                 }

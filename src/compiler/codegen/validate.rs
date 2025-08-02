@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use itertools::Itertools;
 
 use super::{
-    AssemblySymbolInfo, AssemblyType, BinaryOperator, ImmediateValue, Instruction, Operand,
-    Program, Register, TopLevel, Validate, ValidateContext, ValidationPass,
+    AssemblySymbolInfo, AssemblyType, BinaryOperator, ConditionCode, ImmediateValue, Instruction,
+    Operand, Program, Register, TopLevel, Validate, ValidateContext, ValidationPass,
 };
 
 fn align_stack_size(initial: i32, alignment: i32) -> i32 {
@@ -147,6 +147,13 @@ impl Validate for Vec<Instruction> {
                     self.drain(..).collect_vec(),
                     context,
                     Instruction::rewrite_mov_zero_extend,
+                );
+            }
+            ValidationPass::CheckNaNComparisons => {
+                *self = Instruction::update_instructions(
+                    self.drain(..).collect_vec(),
+                    context,
+                    Instruction::check_unordered_comparisons,
                 );
             }
         };
@@ -486,6 +493,94 @@ impl Instruction {
             }
             Instruction::MovZeroExtend(src, dst) => {
                 vec![Instruction::Mov(AssemblyType::Longword, src, dst)]
+            }
+            _ => vec![self],
+        }
+    }
+
+    // ge sf = of       -> do cmp 0,1 !!
+    // e ZF             -> do cmp 1,0
+    // l sf != of       -> do cmp 1,0
+    // le ZF or sf = of -> do cmp 1,0
+    // b CF             -> do cmp 1,0
+    // be CF or ZF      -> do cmp 1,0
+    fn check_unordered_comparisons(self, context: &mut ValidateContext) -> Vec<Instruction> {
+        match self {
+            Instruction::SetCondition(c, dst)
+                // these ones will normally give a positive result on an unordered operation, which
+                // means they all need to be overwritten if PF,ZF and CF are set
+                if matches!(
+                    c,
+                    ConditionCode::Ge
+                        | ConditionCode::E
+                        | ConditionCode::L
+                        | ConditionCode::Le
+                        | ConditionCode::B
+                        | ConditionCode::Be
+                        // Should always resolve to True when NaN is found
+                        | ConditionCode::Ne
+                ) =>
+            {
+                context.num_labels += 1;
+                let label_name_nan = format!("nan_{}", context.num_labels);
+                let label_name_not_nan = format!("not_nan_{}", context.num_labels);
+                let (first_value,second_value) = if c == ConditionCode::Ge {
+                    (1,0)
+                } else {
+                    (0,1)
+                };
+                vec![
+                    // check ZF not set
+                    Instruction::JmpCondition(ConditionCode::Ne, label_name_not_nan.clone()),
+                    // check CF not set
+                    Instruction::JmpCondition(ConditionCode::Ae, label_name_not_nan.clone()),
+                    // check PF is set
+                    Instruction::JmpCondition(ConditionCode::P, label_name_nan.clone()),
+                    Instruction::Jmp(label_name_not_nan.clone()),
+                    Instruction::Label(label_name_nan),
+                    Instruction::Mov(AssemblyType::Longword, Operand::Imm(ImmediateValue::Signed(second_value)), Operand::Reg(Register::R11)),
+                    Instruction::Cmp(AssemblyType::Longword, Operand::Imm(ImmediateValue::Signed(first_value)), Operand::Reg(Register::R11)),
+                    Instruction::Label(label_name_not_nan),
+                    Instruction::SetCondition(c, dst)
+                ]
+            },
+            Instruction::JmpCondition(c, label)
+                // these ones will normally give a positive result on an unordered operation, which
+                // means they all need to be overwritten if PF,ZF and CF are set
+                if matches!(
+                    c,
+                    ConditionCode::Ge
+                        | ConditionCode::E
+                        | ConditionCode::L
+                        | ConditionCode::Le
+                        | ConditionCode::B
+                        | ConditionCode::Be
+                        // Should always resolve to True when NaN is found
+                        | ConditionCode::Ne
+                ) =>
+            {
+                context.num_labels += 1;
+                let label_name_nan = format!("nan_{}", context.num_labels);
+                let label_name_not_nan = format!("not_nan_{}", context.num_labels);
+                let (first_value,second_value) = if c == ConditionCode::Ge {
+                    (0,1)
+                } else {
+                    (1,0)
+                };
+                vec![
+                    // check ZF not set
+                    Instruction::JmpCondition(ConditionCode::Ne, label_name_not_nan.clone()),
+                    // check CF not set
+                    Instruction::JmpCondition(ConditionCode::Ae, label_name_not_nan.clone()),
+                    // check PF is set
+                    Instruction::JmpCondition(ConditionCode::P, label_name_nan.clone()),
+                    Instruction::Jmp(label_name_not_nan.clone()),
+                    Instruction::Label(label_name_nan),
+                    Instruction::Mov(AssemblyType::Longword, Operand::Imm(ImmediateValue::Signed(second_value)), Operand::Reg(Register::R11)),
+                    Instruction::Cmp(AssemblyType::Longword, Operand::Imm(ImmediateValue::Signed(first_value)), Operand::Reg(Register::R11)),
+                    Instruction::Label(label_name_not_nan),
+                    Instruction::JmpCondition(c, label)
+                ]
             }
             _ => vec![self],
         }

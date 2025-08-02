@@ -180,7 +180,7 @@ enum BinaryOperator {
     Or,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum ConditionCode {
     E,
     Ne,
@@ -288,6 +288,7 @@ pub fn codegen(
         current_stack_locations: HashMap::new(),
         stack_sizes: HashMap::new(),
         current_function_name: None,
+        num_labels: context.num_labels,
     };
 
     for pass in VALIDATION_PASSES.iter() {
@@ -317,7 +318,7 @@ where
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
 }
 
-static VALIDATION_PASSES: [ValidationPass; 9] = [
+static VALIDATION_PASSES: [ValidationPass; 10] = [
     // always first
     ValidationPass::ReplaceMockRegisters,
     // always second, sets stack sizes for each function based on the previous pass.
@@ -328,6 +329,7 @@ static VALIDATION_PASSES: [ValidationPass; 9] = [
     ValidationPass::FixConstantAsDst,
     ValidationPass::FixLargeInts,
     ValidationPass::RewriteMovZeroExtend,
+    ValidationPass::CheckNaNComparisons,
     // moving the double memory access instruction lower because many other passes may fix the
     // issue that this addresses, saving a Mov instruction.
     ValidationPass::FixTwoMemoryAccesses,
@@ -344,6 +346,7 @@ pub enum ValidationPass {
     FixShiftOperatorRegister,
     FixLargeInts,
     RewriteMovZeroExtend,
+    CheckNaNComparisons,
 }
 
 struct ValidateContext {
@@ -353,4 +356,5 @@ struct ValidateContext {
     current_stack_locations: HashMap<String, i32>,
     stack_sizes: HashMap<String, i32>,
     current_function_name: Option<String>,
+    num_labels: u32,
 }
