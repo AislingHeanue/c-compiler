@@ -555,6 +555,17 @@ impl CodeDisplay for Instruction {
                 )
             }
             Instruction::MovZeroExtend(_, _) => unreachable!("This was a placeholder instruction"),
+            Instruction::Lea(src, dst) => {
+                context.long();
+                format!(
+                    "{:indent$}lea{} {}, {}",
+                    "",
+                    context.instruction_suffix.clone(),
+                    src.show(context),
+                    dst.show(context),
+                    indent = context.indent
+                )
+            }
         }
     }
 }
@@ -566,84 +577,18 @@ impl CodeDisplay for Operand {
                 ImmediateValue::Signed(i) => format!("${}", i),
                 ImmediateValue::Unsigned(i) => format!("${}", i),
             },
-            Operand::Reg(reg) => match context.word_length_bytes {
-                1 => match reg {
-                    Register::AX => "%al",
-                    Register::CX => "%cl",
-                    Register::DI => "%dil",
-                    Register::DX => "%dl",
-                    Register::SI => "%sil",
-                    Register::R8 => "%r8b",
-                    Register::R9 => "%r9b",
-                    Register::R10 => "%r10b",
-                    Register::R11 => "%r11b",
-                    Register::SP => "%rsp",
-                    Register::BP => "%rbp",
-                    Register::XMM0 => "%xmm0",
-                    Register::XMM1 => "%xmm1",
-                    Register::XMM2 => "%xmm2",
-                    Register::XMM3 => "%xmm3",
-                    Register::XMM4 => "%xmm4",
-                    Register::XMM5 => "%xmm5",
-                    Register::XMM6 => "%xmm6",
-                    Register::XMM7 => "%xmm7",
-                    Register::XMM14 => "%xmm14",
-                    Register::XMM15 => "%xmm15",
-                },
-                4 => match reg {
-                    Register::AX => "%eax",
-                    Register::CX => "%ecx",
-                    Register::DI => "%edi",
-                    Register::DX => "%edx",
-                    Register::SI => "%esi",
-                    Register::R8 => "%r8d",
-                    Register::R9 => "%r9d",
-                    Register::R10 => "%r10d",
-                    Register::R11 => "%r11d",
-                    Register::SP => "%rsp",
-                    Register::BP => "%rbp",
-                    Register::XMM0 => "%xmm0",
-                    Register::XMM1 => "%xmm1",
-                    Register::XMM2 => "%xmm2",
-                    Register::XMM3 => "%xmm3",
-                    Register::XMM4 => "%xmm4",
-                    Register::XMM5 => "%xmm5",
-                    Register::XMM6 => "%xmm6",
-                    Register::XMM7 => "%xmm7",
-                    Register::XMM14 => "%xmm14",
-                    Register::XMM15 => "%xmm15",
-                },
-                8 => match reg {
-                    Register::AX => "%rax",
-                    Register::CX => "%rcx",
-                    Register::DI => "%rdi",
-                    Register::DX => "%rdx",
-                    Register::SI => "%rsi",
-                    Register::R8 => "%r8",
-                    Register::R9 => "%r9",
-                    Register::R10 => "%r10",
-                    Register::R11 => "%r11",
-                    Register::SP => "%rsp",
-                    Register::BP => "%rbp",
-                    Register::XMM0 => "%xmm0",
-                    Register::XMM1 => "%xmm1",
-                    Register::XMM2 => "%xmm2",
-                    Register::XMM3 => "%xmm3",
-                    Register::XMM4 => "%xmm4",
-                    Register::XMM5 => "%xmm5",
-                    Register::XMM6 => "%xmm6",
-                    Register::XMM7 => "%xmm7",
-                    Register::XMM14 => "%xmm14",
-                    Register::XMM15 => "%xmm15",
-                },
-                _ => panic!("Invalid word length: {}", context.word_length_bytes),
-            }
-            .to_string(),
+            Operand::Reg(reg) => reg.show(context),
             Operand::MockReg(name) => panic!(
                 "Tried to generate assembly code with a mock register: {}",
                 name
             ),
-            Operand::Stack(num) => format!("{}(%rbp)", num),
+            Operand::Memory(reg, num) => {
+                let previous_word_length = context.word_length_bytes;
+                context.word_length_bytes = 8;
+                let out = format!("{}({})", num, reg.show(context));
+                context.word_length_bytes = previous_word_length;
+                out
+            }
             Operand::Data(name) => {
                 let label_start = if let AssemblySymbolInfo::Object(_, _, is_top_level_constant) =
                     context.symbols.get(name).unwrap()
@@ -664,6 +609,84 @@ impl CodeDisplay for Operand {
                 format!("{}{}(%rip)", label_start, name)
             }
         }
+    }
+}
+
+impl CodeDisplay for Register {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        match context.word_length_bytes {
+            1 => match self {
+                Register::AX => "%al",
+                Register::CX => "%cl",
+                Register::DI => "%dil",
+                Register::DX => "%dl",
+                Register::SI => "%sil",
+                Register::R8 => "%r8b",
+                Register::R9 => "%r9b",
+                Register::R10 => "%r10b",
+                Register::R11 => "%r11b",
+                Register::SP => "%rsp",
+                Register::BP => "%rbp",
+                Register::XMM0 => "%xmm0",
+                Register::XMM1 => "%xmm1",
+                Register::XMM2 => "%xmm2",
+                Register::XMM3 => "%xmm3",
+                Register::XMM4 => "%xmm4",
+                Register::XMM5 => "%xmm5",
+                Register::XMM6 => "%xmm6",
+                Register::XMM7 => "%xmm7",
+                Register::XMM14 => "%xmm14",
+                Register::XMM15 => "%xmm15",
+            },
+            4 => match self {
+                Register::AX => "%eax",
+                Register::CX => "%ecx",
+                Register::DI => "%edi",
+                Register::DX => "%edx",
+                Register::SI => "%esi",
+                Register::R8 => "%r8d",
+                Register::R9 => "%r9d",
+                Register::R10 => "%r10d",
+                Register::R11 => "%r11d",
+                Register::SP => "%rsp",
+                Register::BP => "%rbp",
+                Register::XMM0 => "%xmm0",
+                Register::XMM1 => "%xmm1",
+                Register::XMM2 => "%xmm2",
+                Register::XMM3 => "%xmm3",
+                Register::XMM4 => "%xmm4",
+                Register::XMM5 => "%xmm5",
+                Register::XMM6 => "%xmm6",
+                Register::XMM7 => "%xmm7",
+                Register::XMM14 => "%xmm14",
+                Register::XMM15 => "%xmm15",
+            },
+            8 => match self {
+                Register::AX => "%rax",
+                Register::CX => "%rcx",
+                Register::DI => "%rdi",
+                Register::DX => "%rdx",
+                Register::SI => "%rsi",
+                Register::R8 => "%r8",
+                Register::R9 => "%r9",
+                Register::R10 => "%r10",
+                Register::R11 => "%r11",
+                Register::SP => "%rsp",
+                Register::BP => "%rbp",
+                Register::XMM0 => "%xmm0",
+                Register::XMM1 => "%xmm1",
+                Register::XMM2 => "%xmm2",
+                Register::XMM3 => "%xmm3",
+                Register::XMM4 => "%xmm4",
+                Register::XMM5 => "%xmm5",
+                Register::XMM6 => "%xmm6",
+                Register::XMM7 => "%xmm7",
+                Register::XMM14 => "%xmm14",
+                Register::XMM15 => "%xmm15",
+            },
+            _ => panic!("Invalid word length: {}", context.word_length_bytes),
+        }
+        .to_string()
     }
 }
 

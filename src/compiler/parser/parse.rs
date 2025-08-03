@@ -796,16 +796,10 @@ impl ExpressionWithoutType {
                             unreachable!("Can't use {:?} as an assignment operator", operator_token)
                         }
                     };
-                    ExpressionWithoutType::Assignment(
-                        Box::new(left.clone().into()),
-                        Box::new(
-                            ExpressionWithoutType::Binary(
-                                operator,
-                                Box::new(left.into()),
-                                Box::new(right.unwrap().into()),
-                            )
-                            .into(),
-                        ),
+                    ExpressionWithoutType::Compound(
+                        operator,
+                        Box::new(left.into()),
+                        Box::new(right.unwrap().into()),
                     )
                 };
             } else {

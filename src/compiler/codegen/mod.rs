@@ -49,6 +49,9 @@ enum Instruction {
     Movsx(Operand, Operand),
     // Unsigned counterpart to Movsx
     MovZeroExtend(Operand, Operand),
+    // load effective address of src to dst
+    // src MUST be Memory or Data. Data is a quadword
+    Lea(Operand, Operand),
     // named after a good friend of mine with the same name
     // Double to Signed Int
     // dst_type, src, dst
@@ -84,11 +87,11 @@ enum Instruction {
 
 #[derive(Clone, Debug)]
 enum Operand {
-    Imm(ImmediateValue), //constant numeric value
-    Reg(Register),       // register in assembly
-    MockReg(String),     // mocked register for temporary use.
-    Stack(i32),          // Stack entry whose value is the offset from RSP.
-    Data(String),        // used for static and global variables
+    Imm(ImmediateValue),   //constant numeric value
+    Reg(Register),         // register in assembly
+    MockReg(String),       // mocked register for temporary use.
+    Memory(Register, i32), // entry whose value is the offset from the specified register.
+    Data(String),          // used for static and global variables
 }
 
 #[derive(Clone, Debug)]
@@ -318,18 +321,16 @@ where
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
 }
 
-static VALIDATION_PASSES: [ValidationPass; 10] = [
+static VALIDATION_PASSES: [ValidationPass; 8] = [
     // always first
     ValidationPass::ReplaceMockRegisters,
     // always second, sets stack sizes for each function based on the previous pass.
     ValidationPass::AllocateFunctionStack,
-    ValidationPass::FixShiftOperatorRegister,
-    ValidationPass::FixBadImmValues,
-    ValidationPass::FixMemoryAsDst,
-    ValidationPass::FixConstantAsDst,
-    ValidationPass::FixLargeInts,
-    ValidationPass::RewriteMovZeroExtend,
     ValidationPass::CheckNaNComparisons,
+    ValidationPass::FixShiftOperatorRegister,
+    ValidationPass::RewriteMovZeroExtend,
+    ValidationPass::FixBadSrc,
+    ValidationPass::FixBadDst,
     // moving the double memory access instruction lower because many other passes may fix the
     // issue that this addresses, saving a Mov instruction.
     ValidationPass::FixTwoMemoryAccesses,
@@ -339,14 +340,12 @@ static VALIDATION_PASSES: [ValidationPass; 10] = [
 pub enum ValidationPass {
     ReplaceMockRegisters,
     AllocateFunctionStack,
-    FixTwoMemoryAccesses,
-    FixBadImmValues,
-    FixMemoryAsDst,
-    FixConstantAsDst,
-    FixShiftOperatorRegister,
-    FixLargeInts,
-    RewriteMovZeroExtend,
     CheckNaNComparisons,
+    FixShiftOperatorRegister,
+    RewriteMovZeroExtend,
+    FixBadSrc,
+    FixBadDst,
+    FixTwoMemoryAccesses,
 }
 
 struct ValidateContext {

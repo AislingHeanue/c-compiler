@@ -299,6 +299,14 @@ impl CodeDisplay for ExpressionWithoutType {
                     right.show(&mut context.indent())
                 )
             }
+            ExpressionWithoutType::Compound(op, l, r) => {
+                format!(
+                    "{} {}= {}",
+                    l.show(&mut context.indent()),
+                    op.show(&mut context.indent()),
+                    r.show(&mut context.indent())
+                )
+            }
             ExpressionWithoutType::Var(s) => s.to_string(),
             ExpressionWithoutType::Assignment(l, r) => {
                 format!("{} = {}", l.show(context), r.show(context))

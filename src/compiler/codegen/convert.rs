@@ -106,7 +106,7 @@ impl Convert for AssemblyType {
             Type::UnsignedInteger => Ok(AssemblyType::Longword),
             Type::UnsignedLong => Ok(AssemblyType::Quadword),
             Type::Double => Ok(AssemblyType::Double),
-            Type::Pointer(_) => todo!(),
+            Type::Pointer(_) => Ok(AssemblyType::Quadword),
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
         }
     }
@@ -220,7 +220,7 @@ impl TopLevel {
         for (i, (param, param_type)) in params.stack.into_iter().enumerate() {
             instructions.push(Instruction::Mov(
                 param_type,
-                Operand::Stack(16 + 8 * (i as i32)),
+                Operand::Memory(Register::BP, 16 + 8 * (i as i32)),
                 param,
             ));
         }
@@ -301,7 +301,6 @@ impl Convert for Instruction {
                 if src_type == AssemblyType::Double && op == BirdsUnaryOperatorNode::Negate {
                     let negative_zero =
                         create_static_constant(16, StaticInitial::Double(-0.0), context);
-
                     vec![
                         Instruction::Mov(
                             src_type,
@@ -447,13 +446,8 @@ impl Convert for Instruction {
                 // This is 100% expected because the 'left' operand in a binary
                 // gets put into dst. Eg 1 - 2 turns into Sub(2, 1) and the result is
                 // read from where 1 is.
-                vec![
-                    Instruction::Mov(
-                        left_type,
-                        Operand::convert(left, context)?,
-                        Operand::convert(dst.clone(), context)?,
-                    ),
-                    Instruction::Binary(
+                if left == dst {
+                    vec![Instruction::Binary(
                         if is_signed {
                             BinaryOperator::convert(op, context)?
                         } else {
@@ -462,8 +456,26 @@ impl Convert for Instruction {
                         left_type,
                         Operand::convert(right, context)?,
                         Operand::convert(dst, context)?,
-                    ),
-                ]
+                    )]
+                } else {
+                    vec![
+                        Instruction::Mov(
+                            left_type,
+                            Operand::convert(left, context)?,
+                            Operand::convert(dst.clone(), context)?,
+                        ),
+                        Instruction::Binary(
+                            if is_signed {
+                                BinaryOperator::convert(op, context)?
+                            } else {
+                                BinaryOperator::convert_unsigned(op, context)?
+                            },
+                            left_type,
+                            Operand::convert(right, context)?,
+                            Operand::convert(dst, context)?,
+                        ),
+                    ]
+                }
             }
             BirdsInstructionNode::Copy(src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
@@ -649,7 +661,7 @@ impl Convert for Instruction {
                     AssemblyType::Longword => vec![
                         Instruction::Cvttsd2si(
                             AssemblyType::Quadword,
-                            Operand::Reg(Register::XMM0),
+                            Operand::convert(src, context)?,
                             Operand::Reg(Register::AX),
                         ),
                         Instruction::Mov(
@@ -803,6 +815,42 @@ impl Convert for Instruction {
                     }
                     AssemblyType::Double => unreachable!(),
                 }
+            }
+            BirdsInstructionNode::GetAddress(src, dst) => {
+                vec![Instruction::Lea(
+                    Operand::convert(src, context)?,
+                    Operand::convert(dst, context)?,
+                )]
+            }
+            BirdsInstructionNode::LoadFromPointer(src, dst) => {
+                let t = AssemblyType::infer(&dst, context)?.0;
+                vec![
+                    Instruction::Mov(
+                        AssemblyType::Quadword,
+                        Operand::convert(src, context)?,
+                        Operand::Reg(Register::AX),
+                    ),
+                    Instruction::Mov(
+                        t,
+                        Operand::Memory(Register::AX, 0),
+                        Operand::convert(dst, context)?,
+                    ),
+                ]
+            }
+            BirdsInstructionNode::StoreInPointer(src, dst) => {
+                let t = AssemblyType::infer(&src, context)?.0;
+                vec![
+                    Instruction::Mov(
+                        AssemblyType::Quadword,
+                        Operand::convert(dst, context)?,
+                        Operand::Reg(Register::AX),
+                    ),
+                    Instruction::Mov(
+                        t,
+                        Operand::convert(src, context)?,
+                        Operand::Memory(Register::AX, 0),
+                    ),
+                ]
             }
         })
     }

@@ -392,8 +392,17 @@ impl StaticInitial {
             Type::UnsignedInteger => StaticInitial::unsigned_integer(i),
             Type::UnsignedLong => StaticInitial::unsigned_long(i),
             Type::Double => StaticInitial::double(i),
+            Type::Pointer(_) => {
+                let value = StaticInitial::unsigned_long(i);
+                if !matches!(
+                    value,
+                    StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(0))
+                ) {
+                    panic!("Invalid numeric value for initialising pointer");
+                }
+                value
+            }
             Type::Function(_, _) => unreachable!(),
-            Type::Pointer(_) => unreachable!(),
         }
     }
 
@@ -565,6 +574,9 @@ impl Validate for StatementNode {
                             StatementNode::enter_switch_type_checking(expression, context);
 
                         expression.validate(context)?;
+                        if !expression.1.as_ref().unwrap().is_integer() {
+                            return Err("Cannot Switch on non-integer type".into());
+                        }
                         body.validate(context)?;
                         // only steal the map from the context after the switch body has been type
                         // checked
@@ -819,6 +831,10 @@ impl Validate for ExpressionNode {
             ExpressionWithoutType::Unary(_, ref mut src) => {
                 src.validate(context)?;
             }
+            ExpressionWithoutType::Compound(_, ref mut left, ref mut right) => {
+                left.validate(context)?;
+                right.validate(context)?;
+            }
             ExpressionWithoutType::Binary(_, ref mut left, ref mut right) => {
                 left.validate(context)?;
                 right.validate(context)?;
@@ -876,6 +892,11 @@ impl ExpressionNode {
             ExpressionWithoutType::Assignment(ref dst, _) => {
                 if !dst.0.is_lvalue() {
                     return Err(format!("Can't assign to non-variable: {:?}", dst).into());
+                }
+            }
+            ExpressionWithoutType::Compound(_, ref left, _) => {
+                if !left.0.is_lvalue() {
+                    return Err(format!("Can't assign to non-variable: {:?}", left).into());
                 }
             }
             _ => {}
@@ -1044,74 +1065,21 @@ impl ExpressionNode {
 
                 Type::Integer
             }
+            ExpressionWithoutType::Compound(ref op, ref mut left, ref mut right) => {
+                left.check_types(context)?;
+                right.check_types(context)?;
+                // undo type conversion on Left, it will be done manually in the birds generation
+                // stage
+                let common_type = ExpressionNode::check_types_binary(op, &mut left.clone(), right)?;
+                // verify that it is possible to assign from the common type to left, without
+                // actually doing the conversion yet.
+                left.clone().convert_type_by_assignment(&common_type)?;
+                common_type
+            }
             ExpressionWithoutType::Binary(ref op, ref mut left, ref mut right) => {
                 left.check_types(context)?;
                 right.check_types(context)?;
-                if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) {
-                    Type::Integer // returns 0 or 1 (eg boolean-like)
-                } else {
-                    let common_type = ExpressionNode::get_common_type(left, right);
-                    if !matches!(
-                        op,
-                        BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight
-                    ) {
-                        left.convert_type(&common_type);
-                        right.convert_type(&common_type);
-                    }
-                    if (matches!(left.1.as_ref().unwrap(), Type::Double)
-                        && matches!(
-                            op,
-                            BinaryOperatorNode::BitwiseAnd
-                                | BinaryOperatorNode::BitwiseXor
-                                | BinaryOperatorNode::BitwiseOr
-                                | BinaryOperatorNode::ShiftLeft
-                                | BinaryOperatorNode::ShiftRight
-                                | BinaryOperatorNode::Mod
-                        ))
-                        || (matches!(right.1.as_ref().unwrap(), Type::Double)
-                            && matches!(
-                                op,
-                                BinaryOperatorNode::Mod
-                                    | BinaryOperatorNode::ShiftLeft
-                                    | BinaryOperatorNode::ShiftRight
-                            ))
-                        || (matches!(common_type, Type::Pointer(_))
-                            && matches!(
-                                op,
-                                BinaryOperatorNode::Multiply
-                                    | BinaryOperatorNode::Divide
-                                    | BinaryOperatorNode::Mod
-                                    | BinaryOperatorNode::BitwiseAnd
-                                    | BinaryOperatorNode::BitwiseXor
-                                    | BinaryOperatorNode::BitwiseOr
-                                    | BinaryOperatorNode::ShiftLeft
-                                    | BinaryOperatorNode::ShiftRight
-                            ))
-                    {
-                        return Err("Incompatible types for this binary operation".into());
-                    }
-
-                    match op {
-                        BinaryOperatorNode::Add
-                        | BinaryOperatorNode::Subtract
-                        | BinaryOperatorNode::Multiply
-                        | BinaryOperatorNode::Divide => common_type,
-                        BinaryOperatorNode::BitwiseAnd
-                        | BinaryOperatorNode::BitwiseXor
-                        | BinaryOperatorNode::BitwiseOr => common_type,
-                        BinaryOperatorNode::ShiftLeft
-                        | BinaryOperatorNode::ShiftRight
-                        | BinaryOperatorNode::Mod => left.1.clone().unwrap(),
-                        BinaryOperatorNode::And
-                        | BinaryOperatorNode::Or
-                        | BinaryOperatorNode::Equal
-                        | BinaryOperatorNode::NotEqual
-                        | BinaryOperatorNode::Less
-                        | BinaryOperatorNode::Greater
-                        | BinaryOperatorNode::LessEqual
-                        | BinaryOperatorNode::GreaterEqual => Type::Integer,
-                    }
-                }
+                ExpressionNode::check_types_binary(op, left, right)?
             }
             ExpressionWithoutType::Assignment(ref mut dst, ref mut src) => {
                 dst.check_types(context)?;
@@ -1162,5 +1130,78 @@ impl ExpressionNode {
             }
         });
         Ok(())
+    }
+
+    fn check_types_binary(
+        op: &BinaryOperatorNode,
+        left: &mut ExpressionNode,
+        right: &mut ExpressionNode,
+    ) -> Result<Type, Box<dyn Error>> {
+        let t = if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) {
+            Type::Integer // returns 0 or 1 (eg boolean-like)
+        } else {
+            let common_type = ExpressionNode::get_common_type(left, right);
+            if !matches!(
+                op,
+                BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight
+            ) {
+                left.convert_type(&common_type);
+                right.convert_type(&common_type);
+            }
+            if (matches!(left.1.as_ref().unwrap(), Type::Double)
+                && matches!(
+                    op,
+                    BinaryOperatorNode::BitwiseAnd
+                        | BinaryOperatorNode::BitwiseXor
+                        | BinaryOperatorNode::BitwiseOr
+                        | BinaryOperatorNode::ShiftLeft
+                        | BinaryOperatorNode::ShiftRight
+                        | BinaryOperatorNode::Mod
+                ))
+                || (matches!(right.1.as_ref().unwrap(), Type::Double)
+                    && matches!(
+                        op,
+                        BinaryOperatorNode::Mod
+                            | BinaryOperatorNode::ShiftLeft
+                            | BinaryOperatorNode::ShiftRight
+                    ))
+                || (matches!(common_type, Type::Pointer(_))
+                    && matches!(
+                        op,
+                        BinaryOperatorNode::Multiply
+                            | BinaryOperatorNode::Divide
+                            | BinaryOperatorNode::Mod
+                            | BinaryOperatorNode::BitwiseAnd
+                            | BinaryOperatorNode::BitwiseXor
+                            | BinaryOperatorNode::BitwiseOr
+                            | BinaryOperatorNode::ShiftLeft
+                            | BinaryOperatorNode::ShiftRight
+                    ))
+            {
+                return Err("Incompatible types for this binary operation".into());
+            }
+
+            match op {
+                BinaryOperatorNode::Add
+                | BinaryOperatorNode::Subtract
+                | BinaryOperatorNode::Multiply
+                | BinaryOperatorNode::Divide => common_type,
+                BinaryOperatorNode::BitwiseAnd
+                | BinaryOperatorNode::BitwiseXor
+                | BinaryOperatorNode::BitwiseOr => common_type,
+                BinaryOperatorNode::ShiftLeft
+                | BinaryOperatorNode::ShiftRight
+                | BinaryOperatorNode::Mod => left.1.clone().unwrap(),
+                BinaryOperatorNode::And
+                | BinaryOperatorNode::Or
+                | BinaryOperatorNode::Equal
+                | BinaryOperatorNode::NotEqual
+                | BinaryOperatorNode::Less
+                | BinaryOperatorNode::Greater
+                | BinaryOperatorNode::LessEqual
+                | BinaryOperatorNode::GreaterEqual => Type::Integer,
+            }
+        };
+        Ok(t)
     }
 }

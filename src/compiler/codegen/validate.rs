@@ -12,7 +12,27 @@ fn align_stack_size(initial: i32, alignment: i32) -> i32 {
 }
 
 fn match_in_memory(operand: &Operand) -> bool {
-    matches!(operand, &Operand::Stack(_) | &Operand::Data(_))
+    matches!(operand, &Operand::Memory(_, _) | &Operand::Data(_))
+}
+
+fn match_double_register(operand: &Operand) -> bool {
+    if let Operand::Reg(r) = operand {
+        matches!(
+            r,
+            Register::XMM0
+                | Register::XMM1
+                | Register::XMM2
+                | Register::XMM3
+                | Register::XMM4
+                | Register::XMM5
+                | Register::XMM6
+                | Register::XMM7
+                | Register::XMM14
+                | Register::XMM15
+        )
+    } else {
+        false
+    }
 }
 
 impl Validate for Program {
@@ -100,46 +120,18 @@ impl Validate for Vec<Instruction> {
                 .chain(self.drain(..))
                 .collect();
             }
+            ValidationPass::CheckNaNComparisons => {
+                *self = Instruction::update_instructions(
+                    self.drain(..).collect_vec(),
+                    context,
+                    Instruction::check_unordered_comparisons,
+                );
+            }
             ValidationPass::FixShiftOperatorRegister => {
                 *self = Instruction::update_instructions(
                     self.drain(..).collect_vec(),
                     context,
                     Instruction::fix_shift_operation_register,
-                );
-            }
-            ValidationPass::FixTwoMemoryAccesses => {
-                *self = Instruction::update_instructions(
-                    self.drain(..).collect_vec(),
-                    context,
-                    Instruction::fix_instructions_with_two_memory_accesses,
-                );
-            }
-            ValidationPass::FixBadImmValues => {
-                *self = Instruction::update_instructions(
-                    self.drain(..).collect_vec(),
-                    context,
-                    Instruction::fix_immediate_values_in_bad_places,
-                );
-            }
-            ValidationPass::FixMemoryAsDst => {
-                *self = Instruction::update_instructions(
-                    self.drain(..).collect_vec(),
-                    context,
-                    Instruction::fix_memory_address_as_dst,
-                );
-            }
-            ValidationPass::FixConstantAsDst => {
-                *self = Instruction::update_instructions(
-                    self.drain(..).collect_vec(),
-                    context,
-                    Instruction::fix_constant_as_dst,
-                );
-            }
-            ValidationPass::FixLargeInts => {
-                *self = Instruction::update_instructions(
-                    self.drain(..).collect_vec(),
-                    context,
-                    Instruction::fix_large_ints,
                 );
             }
             ValidationPass::RewriteMovZeroExtend => {
@@ -149,11 +141,25 @@ impl Validate for Vec<Instruction> {
                     Instruction::rewrite_mov_zero_extend,
                 );
             }
-            ValidationPass::CheckNaNComparisons => {
+            ValidationPass::FixBadDst => {
                 *self = Instruction::update_instructions(
                     self.drain(..).collect_vec(),
                     context,
-                    Instruction::check_unordered_comparisons,
+                    Instruction::fix_bad_dst,
+                );
+            }
+            ValidationPass::FixBadSrc => {
+                *self = Instruction::update_instructions(
+                    self.drain(..).collect_vec(),
+                    context,
+                    Instruction::fix_bad_src,
+                );
+            }
+            ValidationPass::FixTwoMemoryAccesses => {
+                *self = Instruction::update_instructions(
+                    self.drain(..).collect_vec(),
+                    context,
+                    Instruction::fix_instructions_with_two_memory_accesses,
                 );
             }
         };
@@ -225,51 +231,52 @@ impl Instruction {
                 src.replace_mock_register(context);
             }
             Instruction::Call(_) => {}
+            Instruction::Lea(ref mut src, ref mut dst) => {
+                src.replace_mock_register(context);
+                dst.replace_mock_register(context);
+            }
         };
         vec![self]
     }
 
-    fn fix_instructions_with_two_memory_accesses(
-        self,
-        _context: &mut ValidateContext,
-    ) -> Vec<Instruction> {
-        let (src, dst) = match self {
-            Instruction::Mov(_, ref src, ref dst) => (src, dst),
-            Instruction::Binary(_, _, ref src, ref dst) => (src, dst),
-            Instruction::Cmp(_, ref left, ref right) => (left, right),
-            // Instruction::Movsx(ref src, ref dst) => (src, dst),
-            _ => return vec![self],
-        };
-        if match_in_memory(src) && match_in_memory(dst) {
-            match self {
-                Instruction::Mov(AssemblyType::Double, src, dst) => vec![
-                    Instruction::Mov(AssemblyType::Double, src, Operand::Reg(Register::XMM14)),
-                    Instruction::Mov(AssemblyType::Double, Operand::Reg(Register::XMM14), dst),
-                ],
-                Instruction::Mov(t, src, dst) => vec![
-                    Instruction::Mov(t, src, Operand::Reg(Register::R10)),
-                    Instruction::Mov(t, Operand::Reg(Register::R10), dst),
-                ],
-                Instruction::Binary(op, t, src, dst) => vec![
-                    Instruction::Mov(t, src, Operand::Reg(Register::R10)),
-                    Instruction::Binary(op, t, Operand::Reg(Register::R10), dst),
-                ],
-                Instruction::Cmp(t, left, right) => vec![
-                    Instruction::Mov(t, left, Operand::Reg(Register::R10)),
-                    Instruction::Cmp(t, Operand::Reg(Register::R10), right),
-                ],
-                _ => unreachable!(),
+    fn fix_shift_operation_register(self, _context: &mut ValidateContext) -> Vec<Instruction> {
+        match self {
+            Instruction::Binary(op, t, left, right)
+                if matches!(
+                    op,
+                    BinaryOperator::ShiftLeft
+                        | BinaryOperator::ShiftRight
+                        | BinaryOperator::UnsignedShiftLeft
+                        | BinaryOperator::UnsignedShiftRight
+                ) && t != AssemblyType::Double =>
+            {
+                vec![
+                    Instruction::Mov(t, left, Operand::Reg(Register::CX)),
+                    Instruction::Binary(op, t, Operand::Reg(Register::CX), right),
+                ]
             }
-        } else {
-            vec![self]
+            _ => vec![self],
         }
     }
 
-    fn fix_immediate_values_in_bad_places(
-        self,
-        _context: &mut ValidateContext,
-    ) -> Vec<Instruction> {
+    fn rewrite_mov_zero_extend(self, _context: &mut ValidateContext) -> Vec<Instruction> {
         match self {
+            Instruction::MovZeroExtend(src, dst) if match_in_memory(&dst) => {
+                vec![
+                    Instruction::Mov(AssemblyType::Longword, src, Operand::Reg(Register::R11)),
+                    Instruction::Mov(AssemblyType::Quadword, Operand::Reg(Register::R11), dst),
+                ]
+            }
+            Instruction::MovZeroExtend(src, dst) => {
+                vec![Instruction::Mov(AssemblyType::Longword, src, dst)]
+            }
+            _ => vec![self],
+        }
+    }
+
+    fn fix_bad_src(self, _context: &mut ValidateContext) -> Vec<Instruction> {
+        match self {
+            // FIX IMMEDIATE VALUES IN BAD PLACES
             Instruction::Idiv(t, Operand::Imm(value)) => vec![
                 Instruction::Mov(
                     t,
@@ -300,12 +307,98 @@ impl Instruction {
                 Instruction::Mov(src_t, Operand::Imm(value), Operand::Reg(Register::R10)),
                 Instruction::Cvtsi2sd(src_t, Operand::Reg(Register::R10), dst),
             ],
+            // FIX INSTRUCTIONS THAT CAN'T TAKE LARGE INTS
+            Instruction::Binary(op, AssemblyType::Quadword, Operand::Imm(value), dst)
+                if !value.can_fit_in_longword()
+                    && matches!(
+                        op,
+                        BinaryOperator::Add
+                            | BinaryOperator::Sub
+                            | BinaryOperator::Mult
+                            | BinaryOperator::And
+                            | BinaryOperator::Xor
+                            | BinaryOperator::Or
+                    ) =>
+            {
+                vec![
+                    Instruction::Mov(
+                        AssemblyType::Quadword,
+                        Operand::Imm(value),
+                        Operand::Reg(Register::R10),
+                    ),
+                    Instruction::Binary(
+                        op,
+                        AssemblyType::Quadword,
+                        Operand::Reg(Register::R10),
+                        dst,
+                    ),
+                ]
+            }
+            Instruction::Cmp(AssemblyType::Quadword, Operand::Imm(value), dst)
+                if !value.can_fit_in_longword() =>
+            {
+                vec![
+                    Instruction::Mov(
+                        AssemblyType::Quadword,
+                        Operand::Imm(value),
+                        Operand::Reg(Register::R10),
+                    ),
+                    Instruction::Cmp(AssemblyType::Quadword, Operand::Reg(Register::R10), dst),
+                ]
+            }
+            Instruction::Push(Operand::Imm(value)) if !value.can_fit_in_longword() => {
+                vec![
+                    Instruction::Mov(
+                        AssemblyType::Quadword,
+                        Operand::Imm(value),
+                        Operand::Reg(Register::R10),
+                    ),
+                    Instruction::Push(Operand::Reg(Register::R10)),
+                ]
+            }
+            Instruction::Mov(AssemblyType::Quadword, Operand::Imm(value), dst)
+                if match_in_memory(&dst) && !value.can_fit_in_longword() =>
+            {
+                vec![
+                    Instruction::Mov(
+                        AssemblyType::Quadword,
+                        Operand::Imm(value),
+                        Operand::Reg(Register::R10),
+                    ),
+                    Instruction::Mov(AssemblyType::Quadword, Operand::Reg(Register::R10), dst),
+                ]
+            }
+            Instruction::Mov(AssemblyType::Longword, Operand::Imm(mut value), dst)
+                if !value.can_fit_in_longword() =>
+            {
+                // truncation instruction can generate this kind of move. This check isn't strictly
+                // needed but still may prevent some very hard-to-find errors otherwise
+                value.truncate();
+                vec![Instruction::Mov(
+                    AssemblyType::Longword,
+                    Operand::Imm(value),
+                    dst,
+                )]
+            }
+            // FIX PUSHING AN XMM REGISTER
+            Instruction::Push(op) if match_double_register(&op) => {
+                vec![
+                    Instruction::Binary(
+                        BinaryOperator::Sub,
+                        AssemblyType::Quadword,
+                        Operand::Imm(ImmediateValue::Signed(8)),
+                        Operand::Reg(Register::SP),
+                    ),
+                    Instruction::Mov(AssemblyType::Double, op, Operand::Memory(Register::SP, 0)),
+                ]
+            }
             _ => vec![self],
         }
     }
 
-    fn fix_memory_address_as_dst(self, _context: &mut ValidateContext) -> Vec<Instruction> {
+    fn fix_bad_dst(self, _context: &mut ValidateContext) -> Vec<Instruction> {
         match self {
+            // FIX ILLEGAL MEMORY ADDRESSES AS DST
             Instruction::Binary(BinaryOperator::Mult, t, src, dst) if match_in_memory(&dst) => {
                 let scratch_register = if t == AssemblyType::Double {
                     Operand::Reg(Register::XMM15)
@@ -368,133 +461,57 @@ impl Instruction {
                     Instruction::Mov(AssemblyType::Double, Operand::Reg(Register::XMM15), dst),
                 ]
             }
-            _ => vec![self],
-        }
-    }
-
-    fn fix_shift_operation_register(self, _context: &mut ValidateContext) -> Vec<Instruction> {
-        match self {
-            Instruction::Binary(op, t, left, right)
-                if matches!(
-                    op,
-                    BinaryOperator::ShiftLeft
-                        | BinaryOperator::ShiftRight
-                        | BinaryOperator::UnsignedShiftLeft
-                        | BinaryOperator::UnsignedShiftRight
-                ) && t != AssemblyType::Double =>
-            {
-                vec![
-                    Instruction::Mov(t, left, Operand::Reg(Register::CX)),
-                    Instruction::Binary(op, t, Operand::Reg(Register::CX), right),
-                ]
-            }
-            _ => vec![self],
-        }
-    }
-
-    fn fix_constant_as_dst(self, _context: &mut ValidateContext) -> Vec<Instruction> {
-        match self {
+            // FIX CONSTANT VALUE AS DST
             Instruction::Cmp(t, left, Operand::Imm(value)) => {
                 vec![
                     Instruction::Mov(t, Operand::Imm(value), Operand::Reg(Register::R11)),
                     Instruction::Cmp(t, left, Operand::Reg(Register::R11)),
                 ]
             }
-            _ => vec![self],
-        }
-    }
-
-    fn fix_large_ints(self, _context: &mut ValidateContext) -> Vec<Instruction> {
-        match self {
-            Instruction::Binary(op, AssemblyType::Quadword, Operand::Imm(value), dst)
-                if !value.can_fit_in_longword()
-                    && matches!(
-                        op,
-                        BinaryOperator::Add
-                            | BinaryOperator::Sub
-                            | BinaryOperator::Mult
-                            | BinaryOperator::And
-                            | BinaryOperator::Xor
-                            | BinaryOperator::Or
-                    ) =>
-            {
+            // LEA MUST WRITE TO A REGISTER
+            Instruction::Lea(src, dst) if !matches!(dst, Operand::Reg(_)) => {
                 vec![
-                    Instruction::Mov(
-                        AssemblyType::Quadword,
-                        Operand::Imm(value),
-                        Operand::Reg(Register::R10),
-                    ),
-                    Instruction::Binary(
-                        op,
-                        AssemblyType::Quadword,
-                        Operand::Reg(Register::R10),
-                        dst,
-                    ),
-                ]
-            }
-            Instruction::Cmp(AssemblyType::Quadword, Operand::Imm(value), dst)
-                if !value.can_fit_in_longword() =>
-            {
-                vec![
-                    Instruction::Mov(
-                        AssemblyType::Quadword,
-                        Operand::Imm(value),
-                        Operand::Reg(Register::R10),
-                    ),
-                    Instruction::Cmp(AssemblyType::Quadword, Operand::Reg(Register::R10), dst),
-                ]
-            }
-            Instruction::Push(Operand::Imm(value)) if !value.can_fit_in_longword() => {
-                vec![
-                    Instruction::Mov(
-                        AssemblyType::Quadword,
-                        Operand::Imm(value),
-                        Operand::Reg(Register::R10),
-                    ),
-                    Instruction::Push(Operand::Reg(Register::R10)),
-                ]
-            }
-            Instruction::Mov(AssemblyType::Quadword, Operand::Imm(value), dst)
-                if match_in_memory(&dst) && !value.can_fit_in_longword() =>
-            {
-                vec![
-                    Instruction::Mov(
-                        AssemblyType::Quadword,
-                        Operand::Imm(value),
-                        Operand::Reg(Register::R10),
-                    ),
-                    Instruction::Mov(AssemblyType::Quadword, Operand::Reg(Register::R10), dst),
-                ]
-            }
-            // truncation instruction can generate this kind of move. This check isn't strictly
-            // needed but still may prevent some very hard-to-find errors otherwise
-            Instruction::Mov(AssemblyType::Longword, Operand::Imm(mut value), dst)
-                if !value.can_fit_in_longword() =>
-            {
-                value.truncate();
-                vec![Instruction::Mov(
-                    AssemblyType::Longword,
-                    Operand::Imm(value),
-                    dst,
-                )]
-            }
-
-            _ => vec![self],
-        }
-    }
-
-    fn rewrite_mov_zero_extend(self, _context: &mut ValidateContext) -> Vec<Instruction> {
-        match self {
-            Instruction::MovZeroExtend(src, dst) if match_in_memory(&dst) => {
-                vec![
-                    Instruction::Mov(AssemblyType::Longword, src, Operand::Reg(Register::R11)),
+                    Instruction::Lea(src, Operand::Reg(Register::R11)),
                     Instruction::Mov(AssemblyType::Quadword, Operand::Reg(Register::R11), dst),
                 ]
             }
-            Instruction::MovZeroExtend(src, dst) => {
-                vec![Instruction::Mov(AssemblyType::Longword, src, dst)]
-            }
             _ => vec![self],
+        }
+    }
+
+    fn fix_instructions_with_two_memory_accesses(
+        self,
+        _context: &mut ValidateContext,
+    ) -> Vec<Instruction> {
+        let (src, dst) = match self {
+            Instruction::Mov(_, ref src, ref dst) => (src, dst),
+            Instruction::Binary(_, _, ref src, ref dst) => (src, dst),
+            Instruction::Cmp(_, ref left, ref right) => (left, right),
+            // Instruction::Movsx(ref src, ref dst) => (src, dst),
+            _ => return vec![self],
+        };
+        if match_in_memory(src) && match_in_memory(dst) {
+            match self {
+                Instruction::Mov(AssemblyType::Double, src, dst) => vec![
+                    Instruction::Mov(AssemblyType::Double, src, Operand::Reg(Register::XMM14)),
+                    Instruction::Mov(AssemblyType::Double, Operand::Reg(Register::XMM14), dst),
+                ],
+                Instruction::Mov(t, src, dst) => vec![
+                    Instruction::Mov(t, src, Operand::Reg(Register::R10)),
+                    Instruction::Mov(t, Operand::Reg(Register::R10), dst),
+                ],
+                Instruction::Binary(op, t, src, dst) => vec![
+                    Instruction::Mov(t, src, Operand::Reg(Register::R10)),
+                    Instruction::Binary(op, t, Operand::Reg(Register::R10), dst),
+                ],
+                Instruction::Cmp(t, left, right) => vec![
+                    Instruction::Mov(t, left, Operand::Reg(Register::R10)),
+                    Instruction::Cmp(t, Operand::Reg(Register::R10), right),
+                ],
+                _ => unreachable!(),
+            }
+        } else {
+            vec![self]
         }
     }
 
@@ -591,7 +608,7 @@ impl Operand {
         if let Operand::MockReg(name) = self {
             let existing_location = context.current_stack_locations.get(name);
             if let Some(loc) = existing_location {
-                *self = Operand::Stack(*loc);
+                *self = Operand::Memory(Register::BP, *loc);
                 return;
             }
             match context.symbols.get(name) {
@@ -611,7 +628,7 @@ impl Operand {
                     context
                         .current_stack_locations
                         .insert(name.clone(), new_location);
-                    *self = Operand::Stack(new_location);
+                    *self = Operand::Memory(Register::BP, new_location);
                 }
                 None => panic!("Could not find matching declaration for {:?}", name),
                 Some(AssemblySymbolInfo::Object(_, false, true)) => unreachable!(),

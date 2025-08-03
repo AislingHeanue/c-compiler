@@ -49,9 +49,12 @@ pub enum BirdsInstructionNode {
     DoubleToUint(BirdsValueNode, BirdsValueNode),
     IntToDouble(BirdsValueNode, BirdsValueNode),
     UintToDouble(BirdsValueNode, BirdsValueNode),
+    GetAddress(BirdsValueNode, BirdsValueNode),
+    LoadFromPointer(BirdsValueNode, BirdsValueNode),
+    StoreInPointer(BirdsValueNode, BirdsValueNode),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BirdsValueNode {
     Constant(Constant),
     Var(String),
@@ -84,12 +87,29 @@ pub enum BirdsBinaryOperatorNode {
     ShiftRight,
 }
 
+#[derive(Debug, Clone)]
+pub enum Destination {
+    Direct(BirdsValueNode),
+    Dereference(BirdsValueNode),
+}
+
 trait Convert
 where
     Self: Sized,
 {
     type Output;
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>>;
+}
+
+trait ConvertEvaluate
+where
+    Self: Sized,
+{
+    type Output;
+    fn convert_and_evaluate(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Self::Output, Box<dyn Error>>;
 }
 
 pub struct ConvertContext {

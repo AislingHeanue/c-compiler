@@ -109,7 +109,11 @@ pub enum ForInitialiserNode {
 pub enum ExpressionWithoutType {
     Constant(Constant),
     Unary(UnaryOperatorNode, Box<ExpressionNode>),
+    // eg a + 5
     Binary(BinaryOperatorNode, Box<ExpressionNode>, Box<ExpressionNode>),
+    // eg a += 5
+    // op, left, right
+    Compound(BinaryOperatorNode, Box<ExpressionNode>, Box<ExpressionNode>),
     Var(String),
     Assignment(Box<ExpressionNode>, Box<ExpressionNode>),
     // condition ? then : otherwise

@@ -47,6 +47,13 @@ impl Type {
             Type::Function(_, _) => false,
         }
     }
+
+    pub fn is_integer(&self) -> bool {
+        match self {
+            Type::Double => false,
+            _ => self.is_arithmetic(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

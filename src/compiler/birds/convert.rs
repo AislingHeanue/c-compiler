@@ -13,16 +13,16 @@ use crate::compiler::{
 
 use super::{
     BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsProgramNode, BirdsTopLevel,
-    BirdsUnaryOperatorNode, BirdsValueNode, Convert, ConvertContext,
+    BirdsUnaryOperatorNode, BirdsValueNode, Convert, ConvertContext, ConvertEvaluate, Destination,
 };
 
-fn new_temp_variable(type_to_store: Type, context: &mut ConvertContext) -> BirdsValueNode {
+fn new_temp_variable(type_to_store: &Type, context: &mut ConvertContext) -> BirdsValueNode {
     context.last_stack_number += 1;
     let new_name = format!("stack.{}", context.last_stack_number);
     context.symbols.insert(
         new_name.clone(),
         SymbolInfo {
-            symbol_type: type_to_store,
+            symbol_type: type_to_store.clone(),
             storage: StorageInfo::Automatic,
         },
     );
@@ -31,8 +31,8 @@ fn new_temp_variable(type_to_store: Type, context: &mut ConvertContext) -> Birds
 }
 
 // purely-for-utility function for getting constants (almost always 0 or 1) in the appropriate type
-fn get_typed_constant(value: u32, target: &ExpressionNode) -> BirdsValueNode {
-    match target.1.as_ref().unwrap() {
+fn get_typed_constant(value: u32, target: &Type) -> BirdsValueNode {
+    match target {
         Type::Integer => BirdsValueNode::Constant(Constant::Integer(value.try_into().unwrap())),
         Type::Long => BirdsValueNode::Constant(Constant::Long(value.into())),
         Type::UnsignedInteger => BirdsValueNode::Constant(Constant::UnsignedInteger(value)),
@@ -40,6 +40,31 @@ fn get_typed_constant(value: u32, target: &ExpressionNode) -> BirdsValueNode {
         Type::Double => BirdsValueNode::Constant(Constant::Double(value.into())),
         Type::Pointer(_) => unreachable!(),
         Type::Function(_, _) => unreachable!(),
+    }
+}
+
+impl Destination {
+    fn evaluate(
+        self,
+        target_type: &Type,
+        context: &mut ConvertContext,
+    ) -> (Vec<BirdsInstructionNode>, BirdsValueNode) {
+        match self {
+            Destination::Direct(val) => (Vec::new(), val),
+            Destination::Dereference(val) => {
+                let new_dst = new_temp_variable(target_type, context);
+                (
+                    vec![BirdsInstructionNode::LoadFromPointer(val, new_dst.clone())],
+                    new_dst,
+                )
+            }
+        }
+    }
+}
+
+impl From<BirdsValueNode> for Destination {
+    fn from(value: BirdsValueNode) -> Self {
+        Destination::Direct(value)
     }
 }
 
@@ -152,7 +177,7 @@ impl Convert for StatementNode {
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         match self {
             StatementNode::Return(expression) => {
-                let (mut instructions, new_src) = expression.convert(context)?;
+                let (mut instructions, new_src) = expression.convert_and_evaluate(context)?;
                 let return_instruction = BirdsInstructionNode::Return(new_src);
                 instructions.push(return_instruction);
                 Ok(instructions)
@@ -171,7 +196,7 @@ impl Convert for StatementNode {
                     context.last_else_label_number += 1;
                     let new_else_label_name = format!("else_{}", context.last_else_label_number);
 
-                    let (mut instructions, new_cond) = condition.convert(context)?;
+                    let (mut instructions, new_cond) = condition.convert_and_evaluate(context)?;
                     instructions.push(BirdsInstructionNode::JumpZero(
                         new_cond,
                         new_else_label_name.clone(),
@@ -186,7 +211,7 @@ impl Convert for StatementNode {
                 } else {
                     context.last_end_label_number += 1;
                     let new_end_label_name = format!("end_{}", context.last_end_label_number);
-                    let (mut instructions, new_cond) = condition.convert(context)?;
+                    let (mut instructions, new_cond) = condition.convert_and_evaluate(context)?;
                     instructions.push(BirdsInstructionNode::JumpZero(
                         new_cond,
                         new_end_label_name.clone(),
@@ -220,7 +245,8 @@ impl Convert for StatementNode {
                     "continue_{}",
                     this_loop_label
                 ))];
-                let (mut instructions_from_condition, new_src) = expression.convert(context)?;
+                let (mut instructions_from_condition, new_src) =
+                    expression.convert_and_evaluate(context)?;
                 instructions.append(&mut instructions_from_condition);
                 instructions.push(BirdsInstructionNode::JumpZero(
                     new_src,
@@ -254,7 +280,8 @@ impl Convert for StatementNode {
                     "continue_{}",
                     this_loop_label
                 )));
-                let (mut instructions_from_condition, new_src) = expression.convert(context)?;
+                let (mut instructions_from_condition, new_src) =
+                    expression.convert_and_evaluate(context)?;
                 instructions.append(&mut instructions_from_condition);
 
                 instructions.push(BirdsInstructionNode::JumpZero(
@@ -283,7 +310,7 @@ impl Convert for StatementNode {
                     "start_{}",
                     this_loop_label
                 )));
-                let new_condition_option = cond.convert(context)?;
+                let new_condition_option = cond.convert_and_evaluate(context)?;
                 //only check the condition... if the condition was specified
                 if let Some(mut new_condition) = new_condition_option {
                     instructions.append(&mut new_condition.0);
@@ -327,13 +354,11 @@ impl Convert for StatementNode {
                 };
 
                 let new_dst_type = expression.1.clone().unwrap();
-                let (mut instructions, new_src) = expression.convert(context)?;
-                let new_tmp_results = new_temp_variable(new_dst_type, context);
+                let (mut instructions, new_src) = expression.convert_and_evaluate(context)?;
+                let new_tmp_results = new_temp_variable(&new_dst_type, context);
 
                 for (k, v) in label_map {
                     if let SwitchMapKey::Constant(c) = k {
-                        // let (mut instructions_from_expression, result) = c.convert(context)?;
-                        // instructions.append(&mut instructions_from_expression);
                         instructions.append(&mut vec![
                             BirdsInstructionNode::Binary(
                                 BirdsBinaryOperatorNode::Equal,
@@ -452,11 +477,31 @@ where
         }
     }
 }
+
+impl<T, U, V> ConvertEvaluate for Option<T>
+where
+    T: ConvertEvaluate<Output = (U, V)>,
+{
+    type Output = Option<(U, V)>;
+
+    fn convert_and_evaluate(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Self::Output, Box<dyn Error>> {
+        match self {
+            Some(e) => {
+                let (instructions, value) = e.convert_and_evaluate(context)?;
+                Ok(Some((instructions, value)))
+            }
+            None => Ok(None),
+        }
+    }
+}
 impl Convert for Vec<ExpressionNode> {
-    type Output = (Vec<BirdsInstructionNode>, Vec<BirdsValueNode>);
+    type Output = (Vec<BirdsInstructionNode>, Vec<Destination>);
 
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
-        let results: Vec<(Vec<BirdsInstructionNode>, BirdsValueNode)> =
+        let results: Vec<(Vec<BirdsInstructionNode>, Destination)> =
             process_results(self.into_iter().map(|a| a.convert(context)), |iter| {
                 iter.collect()
             })?;
@@ -468,89 +513,118 @@ impl Convert for Vec<ExpressionNode> {
     }
 }
 
-impl Convert for ExpressionNode {
-    // outputs a list of instructions, and the location of the output of the instructions.
-    type Output = (Vec<BirdsInstructionNode>, BirdsValueNode);
-
-    fn convert(
+impl ConvertEvaluate for Vec<ExpressionNode> {
+    type Output = (Vec<BirdsInstructionNode>, Vec<BirdsValueNode>);
+    fn convert_and_evaluate(
         self,
         context: &mut ConvertContext,
-    ) -> Result<(Vec<BirdsInstructionNode>, BirdsValueNode), Box<dyn Error>> {
+    ) -> Result<Self::Output, Box<dyn Error>> {
+        let results: Vec<(Vec<BirdsInstructionNode>, BirdsValueNode)> = process_results(
+            self.into_iter().map(|a| a.convert_and_evaluate(context)),
+            |iter| iter.collect(),
+        )?;
+
+        let values = results.iter().map(|a| a.1.clone()).collect();
+        let instructions = results.into_iter().flat_map(|a| a.0).collect();
+
+        Ok((instructions, values))
+    }
+}
+
+impl Convert for ExpressionNode {
+    // outputs a list of instructions, and the location of the output of the instructions.
+    type Output = (Vec<BirdsInstructionNode>, Destination);
+
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         match self.0 {
-            ExpressionWithoutType::Constant(c) => Ok((Vec::new(), BirdsValueNode::Constant(c))),
-            ExpressionWithoutType::Var(name) => Ok((Vec::new(), BirdsValueNode::Var(name))),
+            ExpressionWithoutType::Constant(c) => {
+                Ok((Vec::new(), Destination::Direct(BirdsValueNode::Constant(c))))
+            }
+            ExpressionWithoutType::Var(name) => {
+                Ok((Vec::new(), Destination::Direct(BirdsValueNode::Var(name))))
+            }
             ExpressionWithoutType::Assignment(left, right) => {
-                // The LHS of this expression should *always* be of type ExpressionNode::Var(name), but
-                // it's better to account for other cases here so that that assumption doesn't
-                // cause errors in the future. At the moment, this guarantee is given to us by the
-                // parser package.
                 let (mut instructions, new_dst) = left.convert(context)?;
-                let (mut instructions_from_src, new_src) = right.convert(context)?;
+                let (mut instructions_from_src, new_src) = right.convert_and_evaluate(context)?;
                 instructions.append(&mut instructions_from_src);
-
-                instructions.push(BirdsInstructionNode::Copy(new_src.clone(), new_dst.clone()));
-
-                Ok((instructions, new_dst))
+                let (mut instructions_from_assign, returns) =
+                    ExpressionWithoutType::assign(new_src, new_dst)?;
+                instructions.append(&mut instructions_from_assign);
+                Ok((instructions, returns))
             }
-            ExpressionWithoutType::Unary(UnaryOperatorNode::PrefixIncrement, src) => {
+            ExpressionWithoutType::Unary(op, src)
+                if matches!(
+                    op,
+                    UnaryOperatorNode::PrefixIncrement | UnaryOperatorNode::PrefixDecrement
+                ) =>
+            {
+                let bird_op = if op == UnaryOperatorNode::PrefixIncrement {
+                    BirdsBinaryOperatorNode::Add
+                } else {
+                    BirdsBinaryOperatorNode::Subtract
+                };
                 let new_dst_type = src.1.clone().unwrap();
-                let (mut instructions, new_src) = src.clone().convert(context)?;
-                let new_dst = new_temp_variable(new_dst_type, context);
+
+                // How to convert and evaluate an expression which may contain a dereference
+                let (mut instructions, new_src) = src.convert(context)?;
+                let (mut instructions_from_evaluate, evaluated_src) =
+                    new_src.clone().evaluate(&new_dst_type, context);
+                instructions.append(&mut instructions_from_evaluate);
+
+                let new_dst = new_temp_variable(&new_dst_type, context);
 
                 instructions.push(BirdsInstructionNode::Binary(
-                    BirdsBinaryOperatorNode::Add,
-                    new_src.clone(),
-                    get_typed_constant(1, &src),
+                    bird_op,
+                    evaluated_src.clone(),
+                    get_typed_constant(1, &new_dst_type),
                     new_dst.clone(),
                 ));
-                instructions.push(BirdsInstructionNode::Copy(new_dst.clone(), new_src.clone()));
-                Ok((instructions, new_dst))
+
+                let (mut instructions_from_assign, _returns) =
+                    ExpressionWithoutType::assign(new_dst.clone(), new_src)?;
+                instructions.append(&mut instructions_from_assign);
+
+                Ok((instructions, new_dst.into()))
             }
-            ExpressionWithoutType::Unary(UnaryOperatorNode::PrefixDecrement, src) => {
+            ExpressionWithoutType::Unary(op, src)
+                if matches!(
+                    op,
+                    UnaryOperatorNode::SuffixIncrement | UnaryOperatorNode::SuffixDecrement
+                ) =>
+            {
+                let bird_op = if op == UnaryOperatorNode::SuffixIncrement {
+                    BirdsBinaryOperatorNode::Add
+                } else {
+                    BirdsBinaryOperatorNode::Subtract
+                };
                 let new_dst_type = src.1.clone().unwrap();
-                let (mut instructions, new_src) = src.clone().convert(context)?;
-                let new_dst = new_temp_variable(new_dst_type, context);
+
+                let (mut instructions, new_src) = src.convert(context)?;
+                let (mut instructions_from_evaluate, evaluated_src) =
+                    new_src.clone().evaluate(&new_dst_type, context);
+                instructions.append(&mut instructions_from_evaluate);
+
+                let new_dst = new_temp_variable(&new_dst_type, context);
+                instructions.push(BirdsInstructionNode::Copy(
+                    evaluated_src.clone(),
+                    new_dst.clone(),
+                ));
 
                 instructions.push(BirdsInstructionNode::Binary(
-                    BirdsBinaryOperatorNode::Subtract,
-                    new_src.clone(),
-                    get_typed_constant(1, &src),
+                    bird_op,
                     new_dst.clone(),
+                    get_typed_constant(1, &new_dst_type),
+                    evaluated_src.clone(),
                 ));
-                instructions.push(BirdsInstructionNode::Copy(new_dst.clone(), new_src.clone()));
-                Ok((instructions, new_dst))
-            }
-            ExpressionWithoutType::Unary(UnaryOperatorNode::SuffixIncrement, src) => {
-                let new_dst_type = src.1.clone().unwrap();
-                let (mut instructions, new_src) = src.clone().convert(context)?;
-                let new_dst = new_temp_variable(new_dst_type, context);
+                let (mut instructions_from_assign, _returns) =
+                    ExpressionWithoutType::assign(evaluated_src.clone(), new_src)?;
+                instructions.append(&mut instructions_from_assign);
 
-                instructions.push(BirdsInstructionNode::Copy(new_src.clone(), new_dst.clone()));
-                instructions.push(BirdsInstructionNode::Binary(
-                    BirdsBinaryOperatorNode::Add,
-                    new_dst.clone(),
-                    get_typed_constant(1, &src),
-                    new_src.clone(),
-                ));
-                Ok((instructions, new_dst))
-            }
-            ExpressionWithoutType::Unary(UnaryOperatorNode::SuffixDecrement, src) => {
-                let new_dst_type = src.1.clone().unwrap();
-                let (mut instructions, new_src) = src.clone().convert(context)?;
-                let new_dst = new_temp_variable(new_dst_type, context);
-
-                instructions.push(BirdsInstructionNode::Copy(new_src.clone(), new_dst.clone()));
-                instructions.push(BirdsInstructionNode::Binary(
-                    BirdsBinaryOperatorNode::Subtract,
-                    new_dst.clone(),
-                    get_typed_constant(1, &src),
-                    new_src.clone(),
-                ));
-                Ok((instructions, new_dst))
+                Ok((instructions, new_dst.into()))
             }
             ExpressionWithoutType::Unary(op, src) => {
                 let src_type = src.1.clone().unwrap();
-                let (mut instructions, new_src) = src.clone().convert(context)?;
+                let (mut instructions, new_src) = src.convert_and_evaluate(context)?;
 
                 let bird_op = match op {
                     UnaryOperatorNode::Complement => BirdsUnaryOperatorNode::Complement,
@@ -568,124 +642,141 @@ impl Convert for ExpressionNode {
                     src_type
                 };
 
-                let new_dst = new_temp_variable(new_dst_type, context);
+                let new_dst = new_temp_variable(&new_dst_type, context);
 
                 instructions.push(BirdsInstructionNode::Unary(
                     bird_op,
                     new_src,
                     new_dst.clone(),
                 ));
-                Ok((instructions, new_dst))
+                Ok((instructions, new_dst.into()))
             }
-            ExpressionWithoutType::Binary(op, left, right) => {
-                let left_type = left.1.clone().unwrap();
+            ExpressionWithoutType::Compound(op, left, right)
+                if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) =>
+            {
+                let (instructions_from_left, new_left) = left.convert_and_evaluate(context)?;
+                let instructions = ExpressionNode::convert_and_or(
+                    op,
+                    (instructions_from_left, new_left.clone()),
+                    right.convert_and_evaluate(context)?,
+                    new_left.clone(),
+                    context,
+                )?;
+
+                Ok((instructions, new_left.into()))
+            }
+            ExpressionWithoutType::Compound(op, left, right) => {
+                // since this is an assignment, we've already carried out type checking for the
+                // return of this expression in the validation step.
+                //
+                // Compound(Add, left, right) => {
+                //      addq left, right
+                //      movq right, left
+                //      dst = left
+                // }
+                // a += 5l => a = int(long(a) + 5l)
+                let final_type = left.1.clone().unwrap();
+                let common_type = self.1.clone().unwrap();
+
                 let (mut instructions, new_left) = left.convert(context)?;
 
-                let (mut instructions_from_right, new_right) = right.convert(context)?;
+                let (mut instructions_from_dereference, evaluated_left) =
+                    new_left.clone().evaluate(&final_type, context);
+                instructions.append(&mut instructions_from_dereference);
 
-                let bird_op = match op {
-                    BinaryOperatorNode::Add => Some(BirdsBinaryOperatorNode::Add),
-                    BinaryOperatorNode::Subtract => Some(BirdsBinaryOperatorNode::Subtract),
-                    BinaryOperatorNode::Multiply => Some(BirdsBinaryOperatorNode::Multiply),
-                    BinaryOperatorNode::Divide => Some(BirdsBinaryOperatorNode::Divide),
-                    BinaryOperatorNode::Mod => Some(BirdsBinaryOperatorNode::Mod),
-                    BinaryOperatorNode::BitwiseAnd => Some(BirdsBinaryOperatorNode::BitwiseAnd),
-                    BinaryOperatorNode::BitwiseXor => Some(BirdsBinaryOperatorNode::BitwiseXor),
-                    BinaryOperatorNode::BitwiseOr => Some(BirdsBinaryOperatorNode::BitwiseOr),
-                    BinaryOperatorNode::ShiftLeft => Some(BirdsBinaryOperatorNode::ShiftLeft),
-                    BinaryOperatorNode::ShiftRight => Some(BirdsBinaryOperatorNode::ShiftRight),
-                    BinaryOperatorNode::Equal => Some(BirdsBinaryOperatorNode::Equal),
-                    BinaryOperatorNode::NotEqual => Some(BirdsBinaryOperatorNode::NotEqual),
-                    BinaryOperatorNode::Less => Some(BirdsBinaryOperatorNode::Less),
-                    BinaryOperatorNode::Greater => Some(BirdsBinaryOperatorNode::Greater),
-                    BinaryOperatorNode::LessEqual => Some(BirdsBinaryOperatorNode::LessEqual),
-                    BinaryOperatorNode::GreaterEqual => Some(BirdsBinaryOperatorNode::GreaterEqual),
-                    // process these in the 'else' block below instead
-                    BinaryOperatorNode::And | BinaryOperatorNode::Or => None,
-                };
-                let new_dst = if let Some(bird_op_found) = bird_op {
-                    let new_dst_type = if bird_op_found.is_relational() {
-                        Type::Integer
-                    } else {
-                        left_type
-                    };
-                    let new_dst = new_temp_variable(new_dst_type, context);
-                    instructions.append(&mut instructions_from_right);
+                let (mut instructions_from_right, new_right) =
+                    right.convert_and_evaluate(context)?;
+                instructions.append(&mut instructions_from_right);
+
+                let bird_op = op.convert(context)?;
+                if common_type == final_type
+                    // in bit shift operations, the common type is always the LEFT type
+                    || matches!(
+                        bird_op,
+                        BirdsBinaryOperatorNode::ShiftLeft | BirdsBinaryOperatorNode::ShiftRight
+                    )
+                {
+                    let new_dst = new_temp_variable(&final_type, context);
                     instructions.push(BirdsInstructionNode::Binary(
-                        bird_op_found,
-                        new_left,
+                        bird_op,
+                        evaluated_left,
                         new_right,
                         new_dst.clone(),
                     ));
-                    new_dst
+                    let (mut instructions_from_assign, returns) =
+                        ExpressionWithoutType::assign(new_dst, new_left)?;
+                    instructions.append(&mut instructions_from_assign);
+                    Ok((instructions, returns))
                 } else {
-                    // 'And' and 'Or' always return ints
-                    let new_dst_type = Type::Integer;
-                    let new_dst = new_temp_variable(new_dst_type, context);
+                    let casted_left = new_temp_variable(&common_type, context);
+                    let mut instructions_from_first_cast = ExpressionWithoutType::cast(
+                        evaluated_left.clone(),
+                        casted_left.clone(),
+                        &final_type,
+                        &common_type,
+                    )?;
+                    instructions.append(&mut instructions_from_first_cast);
 
-                    context.last_end_label_number += 1;
-                    let end_label_name = format!("end_{}", context.last_end_label_number);
+                    let new_dst = new_temp_variable(&common_type, context);
+                    instructions.push(BirdsInstructionNode::Binary(
+                        bird_op,
+                        casted_left.clone(),
+                        new_right,
+                        new_dst.clone(),
+                    ));
+                    let casted_result = new_temp_variable(&final_type, context);
+                    let mut instructions_from_second_cast = ExpressionWithoutType::cast(
+                        new_dst.clone(),
+                        casted_result.clone(),
+                        &common_type,
+                        &final_type,
+                    )?;
+                    println!("{:?}", instructions_from_second_cast);
+                    instructions.append(&mut instructions_from_second_cast);
+                    let (mut instructions_from_assign, returns) =
+                        ExpressionWithoutType::assign(casted_result, new_left)?;
+                    instructions.append(&mut instructions_from_assign);
 
-                    context.last_false_label_number += 1;
-                    let false_label_name = format!("false_{}", context.last_false_label_number);
+                    Ok((instructions, returns))
+                }
+            }
 
-                    context.last_true_label_number += 1;
-                    let true_label_name = format!("true_{}", context.last_true_label_number);
-                    match op {
-                        BinaryOperatorNode::Or => {
-                            instructions.push(BirdsInstructionNode::JumpNotZero(
-                                new_left,
-                                true_label_name.clone(),
-                            ));
+            ExpressionWithoutType::Binary(op, left, right)
+                if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) =>
+            {
+                let new_dst = new_temp_variable(&Type::Integer, context);
+                let instructions = ExpressionNode::convert_and_or(
+                    op,
+                    left.convert_and_evaluate(context)?,
+                    right.convert_and_evaluate(context)?,
+                    new_dst.clone(),
+                    context,
+                )?;
 
-                            instructions.append(&mut instructions_from_right);
+                Ok((instructions, new_dst.into()))
+            }
+            ExpressionWithoutType::Binary(op, left, right) => {
+                let left_type = left.1.clone().unwrap();
+                let (mut instructions, new_left) = left.convert_and_evaluate(context)?;
+                let (mut instructions_from_right, new_right) =
+                    right.convert_and_evaluate(context)?;
+                instructions.append(&mut instructions_from_right);
 
-                            instructions.append(&mut vec![
-                                BirdsInstructionNode::JumpNotZero(
-                                    new_right,
-                                    true_label_name.clone(),
-                                ),
-                                BirdsInstructionNode::Copy(
-                                    BirdsValueNode::Constant(Constant::Integer(0)),
-                                    new_dst.clone(),
-                                ),
-                                BirdsInstructionNode::Jump(end_label_name.clone()),
-                                BirdsInstructionNode::Label(true_label_name),
-                                BirdsInstructionNode::Copy(
-                                    BirdsValueNode::Constant(Constant::Integer(1)),
-                                    new_dst.clone(),
-                                ),
-                                BirdsInstructionNode::Label(end_label_name),
-                            ]);
-                        }
-                        BinaryOperatorNode::And => {
-                            instructions.push(BirdsInstructionNode::JumpZero(
-                                new_left,
-                                false_label_name.clone(),
-                            ));
-
-                            instructions.append(&mut instructions_from_right);
-
-                            instructions.append(&mut vec![
-                                BirdsInstructionNode::JumpZero(new_right, false_label_name.clone()),
-                                BirdsInstructionNode::Copy(
-                                    BirdsValueNode::Constant(Constant::Integer(1)),
-                                    new_dst.clone(),
-                                ),
-                                BirdsInstructionNode::Jump(end_label_name.clone()),
-                                BirdsInstructionNode::Label(false_label_name),
-                                BirdsInstructionNode::Copy(
-                                    BirdsValueNode::Constant(Constant::Integer(0)),
-                                    new_dst.clone(),
-                                ),
-                                BirdsInstructionNode::Label(end_label_name),
-                            ]);
-                        }
-                        _ => panic!("Unexpected binary operator found: {:?}", op),
-                    };
-                    new_dst
+                let bird_op = op.convert(context)?;
+                let new_dst_type = if bird_op.is_relational() {
+                    Type::Integer
+                } else {
+                    left_type
                 };
-                Ok((instructions, new_dst))
+                let new_dst = new_temp_variable(&new_dst_type, context);
+                instructions.push(BirdsInstructionNode::Binary(
+                    bird_op,
+                    new_left,
+                    new_right,
+                    new_dst.clone(),
+                ));
+
+                Ok((instructions, new_dst.into()))
             }
             ExpressionWithoutType::Ternary(condition, then, otherwise) => {
                 context.last_end_label_number += 1;
@@ -693,15 +784,15 @@ impl Convert for ExpressionNode {
                 context.last_else_label_number += 1;
                 let new_else_label_name = format!("else_{}", context.last_else_label_number);
 
-                let (mut instructions, new_cond) = condition.convert(context)?;
+                let (mut instructions, new_cond) = condition.convert_and_evaluate(context)?;
                 instructions.push(BirdsInstructionNode::JumpZero(
                     new_cond,
                     new_else_label_name.clone(),
                 ));
 
                 let new_dst_type = then.1.clone().unwrap();
-                let (mut instructions_from_then, new_then) = then.clone().convert(context)?;
-                let new_dst = new_temp_variable(new_dst_type, context);
+                let (mut instructions_from_then, new_then) = then.convert_and_evaluate(context)?;
+                let new_dst = new_temp_variable(&new_dst_type, context);
 
                 instructions.append(&mut instructions_from_then);
                 instructions.append(&mut vec![
@@ -709,15 +800,16 @@ impl Convert for ExpressionNode {
                     BirdsInstructionNode::Jump(new_end_label_name.clone()),
                     BirdsInstructionNode::Label(new_else_label_name),
                 ]);
-                let (mut instructions_from_other, new_other) = otherwise.convert(context)?;
+                let (mut instructions_from_other, new_other) =
+                    otherwise.convert_and_evaluate(context)?;
                 instructions.append(&mut instructions_from_other);
                 instructions.push(BirdsInstructionNode::Copy(new_other, new_dst.clone()));
                 instructions.push(BirdsInstructionNode::Label(new_end_label_name));
 
-                Ok((instructions, new_dst))
+                Ok((instructions, new_dst.into()))
             }
             ExpressionWithoutType::FunctionCall(name, args) => {
-                let (mut instructions, values) = args.convert(context)?;
+                let (mut instructions, values) = args.convert_and_evaluate(context)?;
 
                 let new_dst_type = if let Type::Function(ref ret, _) =
                     context.symbols.get(&name).unwrap().symbol_type
@@ -728,69 +820,207 @@ impl Convert for ExpressionNode {
                         "Function stored in symbol table does not have function type".into(),
                     );
                 };
-                let new_dst = new_temp_variable(new_dst_type, context);
+                let new_dst = new_temp_variable(&new_dst_type, context);
                 instructions.push(BirdsInstructionNode::FunctionCall(
                     name,
                     values,
                     new_dst.clone(),
                 ));
 
-                Ok((instructions, new_dst))
+                Ok((instructions, new_dst.into()))
             }
             ExpressionWithoutType::Cast(target_type, e) => {
                 let this_type = e.1.clone().unwrap();
 
-                let (mut instructions, new_src) = e.convert(context)?;
+                let (mut instructions, new_src) = e.convert_and_evaluate(context)?;
                 if target_type == this_type {
-                    return Ok((instructions, new_src));
+                    return Ok((instructions, new_src.into()));
                 }
-                let new_dst = new_temp_variable(target_type.clone(), context);
-                if target_type == Type::Double {
-                    match this_type {
-                        Type::Integer | Type::Long => {
-                            instructions
-                                .push(BirdsInstructionNode::IntToDouble(new_src, new_dst.clone()));
-                        }
-                        Type::UnsignedInteger | Type::UnsignedLong => {
-                            instructions
-                                .push(BirdsInstructionNode::UintToDouble(new_src, new_dst.clone()));
-                        }
-                        Type::Pointer(_) => todo!(),
-                        Type::Double => unreachable!(),
-                        Type::Function(_, _) => unreachable!(),
-                    }
-                } else if this_type == Type::Double {
-                    match target_type {
-                        Type::Integer | Type::Long => {
-                            instructions
-                                .push(BirdsInstructionNode::DoubleToInt(new_src, new_dst.clone()));
-                        }
-                        Type::UnsignedInteger | Type::UnsignedLong => {
-                            instructions
-                                .push(BirdsInstructionNode::DoubleToUint(new_src, new_dst.clone()));
-                        }
-                        Type::Pointer(_) => todo!(),
-                        Type::Double => unreachable!(),
-                        Type::Function(_, _) => unreachable!(),
-                    }
-                } else if target_type.get_size() == this_type.get_size() {
-                    // mov the old type into the new type directly
-                    // C casting behaviour basically ends up saying "never alter the
-                    // underlying binary unless to extend or truncate it", indirectly
-                    instructions.push(BirdsInstructionNode::Copy(new_src, new_dst.clone()));
-                } else if target_type.get_size() < this_type.get_size() {
-                    instructions.push(BirdsInstructionNode::Truncate(new_src, new_dst.clone()));
-                } else if this_type.is_signed() {
-                    instructions.push(BirdsInstructionNode::SignedExtend(new_src, new_dst.clone()));
-                } else {
-                    instructions.push(BirdsInstructionNode::ZeroExtend(new_src, new_dst.clone()));
-                }
+                let new_dst = new_temp_variable(&target_type, context);
+                let mut instructions_from_cast = ExpressionWithoutType::cast(
+                    new_src,
+                    new_dst.clone(),
+                    &this_type,
+                    &target_type,
+                )?;
+                instructions.append(&mut instructions_from_cast);
 
-                Ok((instructions, new_dst))
+                Ok((instructions, new_dst.into()))
             }
-            ExpressionWithoutType::Dereference(_) => todo!(),
-            ExpressionWithoutType::AddressOf(_) => todo!(),
+            ExpressionWithoutType::Dereference(src) => {
+                let (instructions, new_src) = src.convert_and_evaluate(context)?;
+                Ok((instructions, Destination::Dereference(new_src)))
+            }
+            ExpressionWithoutType::AddressOf(src) => {
+                let (mut instructions, new_src) = src.convert(context)?;
+                match new_src {
+                    Destination::Direct(val) => {
+                        let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
+                        instructions.push(BirdsInstructionNode::GetAddress(val, new_dst.clone()));
+                        Ok((instructions, new_dst.into()))
+                    }
+                    Destination::Dereference(val) => Ok((instructions, val.into())),
+                }
+            }
         }
+    }
+}
+
+impl ExpressionWithoutType {
+    fn cast(
+        src: BirdsValueNode,
+        dst: BirdsValueNode,
+        this_type: &Type,
+        target_type: &Type,
+    ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
+        let mut instructions = Vec::new();
+        if target_type == &Type::Double {
+            match this_type {
+                Type::Integer | Type::Long => {
+                    instructions.push(BirdsInstructionNode::IntToDouble(src, dst.clone()));
+                }
+                Type::UnsignedInteger | Type::UnsignedLong => {
+                    instructions.push(BirdsInstructionNode::UintToDouble(src, dst.clone()));
+                }
+                Type::Pointer(_) => unreachable!(),
+                Type::Double => unreachable!(),
+                Type::Function(_, _) => unreachable!(),
+            }
+        } else if this_type == &Type::Double {
+            match target_type {
+                Type::Integer | Type::Long => {
+                    instructions.push(BirdsInstructionNode::DoubleToInt(src, dst.clone()));
+                }
+                Type::UnsignedInteger | Type::UnsignedLong => {
+                    instructions.push(BirdsInstructionNode::DoubleToUint(src, dst.clone()));
+                }
+                Type::Pointer(_) => unreachable!(),
+                Type::Double => unreachable!(),
+                Type::Function(_, _) => unreachable!(),
+            }
+        } else if target_type.get_size() == this_type.get_size() {
+            // mov the old type into the new type directly
+            // C casting behaviour basically ends up saying "never alter the
+            // underlying binary unless to extend or truncate it", indirectly
+            instructions.push(BirdsInstructionNode::Copy(src, dst.clone()));
+        } else if target_type.get_size() < this_type.get_size() {
+            instructions.push(BirdsInstructionNode::Truncate(src, dst.clone()));
+        } else if this_type.is_signed() {
+            instructions.push(BirdsInstructionNode::SignedExtend(src, dst.clone()));
+        } else {
+            instructions.push(BirdsInstructionNode::ZeroExtend(src, dst.clone()));
+        }
+        Ok(instructions)
+    }
+
+    fn assign(
+        src: BirdsValueNode,
+        dst: Destination,
+    ) -> Result<(Vec<BirdsInstructionNode>, Destination), Box<dyn Error>> {
+        let mut instructions = Vec::new();
+        match dst {
+            Destination::Direct(ref val) => {
+                instructions.push(BirdsInstructionNode::Copy(src.clone(), val.clone()));
+                Ok((instructions, dst.clone()))
+            }
+            Destination::Dereference(ref val) => {
+                instructions.push(BirdsInstructionNode::StoreInPointer(
+                    src.clone(),
+                    val.clone(),
+                ));
+                // since we can't easily read the contained value of dst which is normally
+                // returned by the expression, we return the value of src here instead,
+                // since it (by definition) is what *dst equals to at this instant.
+                Ok((instructions, src.into()))
+            }
+        }
+    }
+}
+
+impl ExpressionNode {
+    fn convert_and_or(
+        op: BinaryOperatorNode,
+        left: (Vec<BirdsInstructionNode>, BirdsValueNode),
+        right: (Vec<BirdsInstructionNode>, BirdsValueNode),
+        dst: BirdsValueNode,
+        context: &mut ConvertContext,
+    ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
+        let (mut instructions, new_left) = left;
+        let (mut instructions_from_right, new_right) = right;
+        context.last_end_label_number += 1;
+        let end_label_name = format!("end_{}", context.last_end_label_number);
+
+        context.last_false_label_number += 1;
+        let false_label_name = format!("false_{}", context.last_false_label_number);
+
+        context.last_true_label_number += 1;
+        let true_label_name = format!("true_{}", context.last_true_label_number);
+        match op {
+            BinaryOperatorNode::Or => {
+                instructions.push(BirdsInstructionNode::JumpNotZero(
+                    new_left,
+                    true_label_name.clone(),
+                ));
+
+                instructions.append(&mut instructions_from_right);
+
+                instructions.append(&mut vec![
+                    BirdsInstructionNode::JumpNotZero(new_right, true_label_name.clone()),
+                    BirdsInstructionNode::Copy(
+                        BirdsValueNode::Constant(Constant::Integer(0)),
+                        dst.clone(),
+                    ),
+                    BirdsInstructionNode::Jump(end_label_name.clone()),
+                    BirdsInstructionNode::Label(true_label_name),
+                    BirdsInstructionNode::Copy(
+                        BirdsValueNode::Constant(Constant::Integer(1)),
+                        dst.clone(),
+                    ),
+                    BirdsInstructionNode::Label(end_label_name),
+                ]);
+            }
+            BinaryOperatorNode::And => {
+                instructions.push(BirdsInstructionNode::JumpZero(
+                    new_left,
+                    false_label_name.clone(),
+                ));
+
+                instructions.append(&mut instructions_from_right);
+
+                instructions.append(&mut vec![
+                    BirdsInstructionNode::JumpZero(new_right, false_label_name.clone()),
+                    BirdsInstructionNode::Copy(
+                        BirdsValueNode::Constant(Constant::Integer(1)),
+                        dst.clone(),
+                    ),
+                    BirdsInstructionNode::Jump(end_label_name.clone()),
+                    BirdsInstructionNode::Label(false_label_name),
+                    BirdsInstructionNode::Copy(
+                        BirdsValueNode::Constant(Constant::Integer(0)),
+                        dst.clone(),
+                    ),
+                    BirdsInstructionNode::Label(end_label_name),
+                ]);
+            }
+            _ => panic!("Unexpected binary operator found: {:?}", op),
+        }
+        Ok(instructions)
+    }
+}
+
+impl ConvertEvaluate for ExpressionNode {
+    type Output = (Vec<BirdsInstructionNode>, BirdsValueNode);
+
+    fn convert_and_evaluate(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Self::Output, Box<dyn Error>> {
+        let target_type = self.1.clone().unwrap();
+        let (mut instructions, new_src) = self.convert(context)?;
+        let (mut deref_instructions, new_src) = new_src.evaluate(&target_type, context);
+        instructions.append(&mut deref_instructions);
+
+        Ok((instructions, new_src))
     }
 }
 
@@ -805,5 +1035,33 @@ impl BirdsBinaryOperatorNode {
                 | BirdsBinaryOperatorNode::Less
                 | BirdsBinaryOperatorNode::LessEqual
         )
+    }
+}
+
+impl Convert for BinaryOperatorNode {
+    type Output = BirdsBinaryOperatorNode;
+
+    fn convert(self, _context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+        let bird_op = match self {
+            BinaryOperatorNode::Add => BirdsBinaryOperatorNode::Add,
+            BinaryOperatorNode::Subtract => BirdsBinaryOperatorNode::Subtract,
+            BinaryOperatorNode::Multiply => BirdsBinaryOperatorNode::Multiply,
+            BinaryOperatorNode::Divide => BirdsBinaryOperatorNode::Divide,
+            BinaryOperatorNode::Mod => BirdsBinaryOperatorNode::Mod,
+            BinaryOperatorNode::BitwiseAnd => BirdsBinaryOperatorNode::BitwiseAnd,
+            BinaryOperatorNode::BitwiseXor => BirdsBinaryOperatorNode::BitwiseXor,
+            BinaryOperatorNode::BitwiseOr => BirdsBinaryOperatorNode::BitwiseOr,
+            BinaryOperatorNode::ShiftLeft => BirdsBinaryOperatorNode::ShiftLeft,
+            BinaryOperatorNode::ShiftRight => BirdsBinaryOperatorNode::ShiftRight,
+            BinaryOperatorNode::Equal => BirdsBinaryOperatorNode::Equal,
+            BinaryOperatorNode::NotEqual => BirdsBinaryOperatorNode::NotEqual,
+            BinaryOperatorNode::Less => BirdsBinaryOperatorNode::Less,
+            BinaryOperatorNode::Greater => BirdsBinaryOperatorNode::Greater,
+            BinaryOperatorNode::LessEqual => BirdsBinaryOperatorNode::LessEqual,
+            BinaryOperatorNode::GreaterEqual => BirdsBinaryOperatorNode::GreaterEqual,
+            // process these in the 'else' block below instead
+            BinaryOperatorNode::And | BinaryOperatorNode::Or => unreachable!(),
+        };
+        Ok(bird_op)
     }
 }
