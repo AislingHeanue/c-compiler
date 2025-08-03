@@ -317,8 +317,8 @@ impl CodeDisplay for ExpressionWithoutType {
             ExpressionWithoutType::Cast(target_type, e) => {
                 format!("{}({})", target_type.show(context), e.show(context))
             }
-            ExpressionWithoutType::Dereference(_) => todo!(),
-            ExpressionWithoutType::AddressOf(_) => todo!(),
+            ExpressionWithoutType::Dereference(e) => format!("*{}", e.show(context)),
+            ExpressionWithoutType::AddressOf(e) => format!("&{}", e.show(context)),
         }
     }
 }

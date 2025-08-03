@@ -1,7 +1,9 @@
+use itertools::{process_results, Itertools};
+
 use super::{
-    BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode,
-    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, Parse, ProgramNode,
-    StatementNode, StorageClass, Type, UnaryOperatorNode, VariableDeclaration,
+    AbstractDeclarator, BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, Declarator,
+    ExpressionNode, ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, Parse,
+    ProgramNode, StatementNode, StorageClass, Type, UnaryOperatorNode, VariableDeclaration,
 };
 use crate::compiler::{lexer::Token, parser::ParseContext, types::Constant};
 use std::{
@@ -28,13 +30,7 @@ fn match_type(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
 fn match_unary_operator(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
     Ok(matches!(
         peek(tokens)?,
-        Token::Hyphen
-            | Token::Tilde
-            | Token::Not
-            | Token::Increment
-            | Token::Decrement
-            | Token::And
-            | Token::Star
+        Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement
     ))
 }
 
@@ -99,21 +95,11 @@ fn peek(tokens: &VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
 }
 
 fn new_identifier(
-    token: Token,
+    name: String,
     is_file_scope: bool,
     context: &mut ParseContext,
     storage_class: Option<StorageClass>,
 ) -> Result<String, Box<dyn Error>> {
-    let name = if let Token::Identifier(string) = token {
-        Ok::<String, Box<dyn Error>>(string)
-    } else {
-        Err(format!(
-            "Wrong token received, expected: {:?} got: {:?}",
-            Token::Identifier(String::new()),
-            token
-        )
-        .into())
-    }?;
     let is_linked = is_file_scope || matches!(storage_class, Some(StorageClass::Extern));
 
     let new_name = if is_linked || context.do_not_validate {
@@ -176,40 +162,6 @@ impl Parse for ProgramNode {
         }
 
         Ok(ProgramNode { declarations })
-    }
-}
-
-impl FunctionDeclaration {
-    fn parse_params(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<(Vec<Type>, Vec<String>), Box<dyn Error>> {
-        if matches!(peek(tokens)?, Token::KeywordVoid) {
-            expect(tokens, Token::KeywordVoid)?;
-            return Ok((Vec::new(), Vec::new()));
-        }
-
-        let type_and_param = FunctionDeclaration::parse_param(tokens, context)?;
-        let (mut types, mut params) = (vec![type_and_param.0], vec![type_and_param.1]);
-
-        while matches!(peek(tokens)?, Token::Comma) {
-            expect(tokens, Token::Comma)?;
-            let type_and_param = FunctionDeclaration::parse_param(tokens, context)?;
-            types.push(type_and_param.0);
-            params.push(type_and_param.1);
-        }
-
-        Ok((types, params))
-    }
-
-    fn parse_param(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<(Type, String), Box<dyn Error>> {
-        let out_type = Type::parse(tokens, context)?;
-        let name = new_identifier(read(tokens)?, false, context, None)?;
-
-        Ok((out_type, name))
     }
 }
 
@@ -356,106 +308,257 @@ impl Parse for DeclarationNode {
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        let (out_type, storage_class) = <(Type, Option<StorageClass>)>::parse(tokens, context)?;
+        let (base_type, storage_class) = <(Type, Option<StorageClass>)>::parse(tokens, context)?;
 
-        //read first 2 tokens to determine if it's a function()
-        if tokens.len() < 2 {
-            return Err(format!(
-                "Declaration found with fewer than 2 tokens after specifier: {:?}",
-                tokens
-            )
-            .into());
-        }
+        let declarator = Declarator::parse(tokens, context)?;
+        let declarator_output = declarator.apply_to_type(base_type)?;
 
-        if !matches!(peek(tokens)?, Token::Identifier(_)) {
-            return Err(format!(
-                "First token in a declaration is not an identifier: {:?}",
-                tokens.get(1).unwrap()
-            )
-            .into());
-        }
+        let out_type = declarator_output.out_type;
+        let param_names = declarator_output.param_names.unwrap_or(Vec::new());
 
-        // let name = ;
-        let name_token = read(tokens)?;
+        match out_type {
+            Type::Function(_, ref param_types) => {
+                let name =
+                    new_identifier(declarator_output.name, true, context, storage_class.clone())?;
+                if param_names.len() != param_types.len() {
+                    return Err("Mismatched length of parameter types and parameter names".into());
+                }
+                if !context.do_not_validate
+                    && param_names.iter().unique().collect_vec().len() != param_names.len()
+                {
+                    return Err("Duplicate param name in function declaration".into());
+                }
 
-        match read(tokens)? {
-            Token::OpenParen => {
-                let name = new_identifier(name_token, true, context, storage_class.clone())?;
-                let original_outer_scope_variables = enter_scope(context);
-                let (types, params) = FunctionDeclaration::parse_params(tokens, context)?;
-                expect(tokens, Token::CloseParen)?;
-                let function_type = Type::Function(Box::new(out_type), types);
+                if peek(tokens)? == Token::OpenBrace {
+                    let original_outer_scope_variables = enter_scope(context);
 
-                let output_function = match peek(tokens)? {
-                    Token::SemiColon => {
+                    // resolve param names into new identifiers tied to the current scope
+                    let new_params_names = if !param_names.is_empty() {
+                        let mut new_param_names = Vec::new();
+                        for param_name in param_names {
+                            new_param_names.push(new_identifier(param_name, false, context, None)?);
+                        }
+                        new_param_names
+                    } else {
+                        Vec::new()
+                    };
+
+                    // parse block in *not* a new scope
+                    context.current_block_is_function_body = true;
+                    let body = Block::parse(tokens, context)?;
+                    leave_scope(original_outer_scope_variables, context);
+
+                    Ok(DeclarationNode::Function(FunctionDeclaration {
+                        function_type: out_type,
+                        name,
+                        params: new_params_names,
+                        body: Some(body),
+                        storage_class,
+                    }))
+                } else {
+                    expect(tokens, Token::SemiColon)?;
+                    Ok(DeclarationNode::Function(FunctionDeclaration {
+                        function_type: out_type,
+                        name,
+                        params: param_names,
+                        body: None,
+                        storage_class,
+                    }))
+                }
+            }
+            _ => {
+                let name = new_identifier(
+                    declarator_output.name,
+                    context.current_scope_is_file,
+                    context,
+                    storage_class.clone(),
+                )?;
+                // variable assignment
+                match read(tokens)? {
+                    Token::Assignment => {
+                        // file scope variable = linkage
+                        let expression = ExpressionNode::parse(tokens, context)?;
                         expect(tokens, Token::SemiColon)?;
-                        FunctionDeclaration {
-                            function_type,
+                        Ok(DeclarationNode::Variable(VariableDeclaration {
+                            variable_type: out_type,
                             name,
-                            params,
-                            body: None,
+                            init: Some(expression),
                             storage_class,
-                        }
+                        }))
                     }
-                    Token::OpenBrace => {
-                        context.current_block_is_function_body = true;
-                        // parse block in *not* a new scope
-                        let body = Block::parse(tokens, context)?;
+                    Token::SemiColon => Ok(DeclarationNode::Variable(VariableDeclaration {
+                        variable_type: out_type,
+                        name,
+                        init: None,
+                        storage_class,
+                    })),
+                    _ => Err("Invalid token in variable declaration".into()),
+                }
+            }
+        }
+    }
+}
 
-                        FunctionDeclaration {
-                            function_type,
-                            name,
-                            params,
-                            body: Some(body),
-                            storage_class,
-                        }
+impl Parse for Declarator {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        match peek(tokens)? {
+            Token::Star => {
+                expect(tokens, Token::Star)?;
+                Ok(Declarator::Pointer(Box::new(Declarator::parse(
+                    tokens, context,
+                )?)))
+            }
+            _ => {
+                let simple_declarator = Declarator::parse_simple_declarator(tokens, context)?;
+                match peek(tokens)? {
+                    // function declaration type!
+                    Token::OpenParen => {
+                        let param_list = Declarator::parse_param_list(tokens, context)?;
+                        Ok(Declarator::Function(
+                            Box::new(simple_declarator),
+                            param_list,
+                        ))
                     }
-                    t => {
-                        return Err(
-                            format!("Unexpected token parsing expression, got {:?}", t).into()
-                        )
-                    }
+                    _ => Ok(simple_declarator),
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DeclaratorApplicationOutput {
+    name: String,
+    out_type: Type,
+    param_names: Option<Vec<String>>,
+}
+
+impl Declarator {
+    fn parse_simple_declarator(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Declarator, Box<dyn Error>> {
+        match read(tokens)? {
+            Token::Identifier(name) => {
+                // do not process the scope of 'name' here, because it complicates parameters
+                Ok(Declarator::Name(name))
+            }
+            Token::OpenParen => {
+                let declarator = Declarator::parse(tokens, context)?;
+                expect(tokens, Token::CloseParen)?;
+                Ok(declarator)
+            }
+            _ => Err("Invalid declarator".into()),
+        }
+    }
+
+    fn parse_param_list(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Vec<(Type, Declarator)>, Box<dyn Error>> {
+        expect(tokens, Token::OpenParen)?;
+        let mut param_list = Vec::new();
+
+        if peek(tokens)? == Token::KeywordVoid {
+            expect(tokens, Token::KeywordVoid)?;
+            expect(tokens, Token::CloseParen)?;
+            return Ok(param_list);
+        }
+
+        param_list.push(Declarator::parse_param(tokens, context)?);
+        while peek(tokens)? != Token::CloseParen {
+            expect(tokens, Token::Comma)?;
+            param_list.push(Declarator::parse_param(tokens, context)?);
+        }
+        expect(tokens, Token::CloseParen)?;
+        Ok(param_list)
+    }
+
+    fn parse_param(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<(Type, Declarator), Box<dyn Error>> {
+        let out_type = Type::parse(tokens, context)?;
+        // function params never have static or extern storage
+        let declarator = Declarator::parse(tokens, context)?;
+        Ok((out_type, declarator))
+    }
+
+    fn apply_to_type(
+        self,
+        base_type: Type,
+        // returns the type, name and list of parameter names associated with the type
+    ) -> Result<DeclaratorApplicationOutput, Box<dyn Error>> {
+        match self {
+            Declarator::Name(name) => Ok(DeclaratorApplicationOutput {
+                out_type: base_type,
+                name,
+                param_names: None,
+            }),
+            Declarator::Pointer(declarator) => {
+                // discard param names, function pointers aren't real
+                declarator.apply_to_type(Type::Pointer(Box::new(base_type)))
+            }
+            Declarator::Function(declarator, params) => {
+                let name = if let Declarator::Name(name) = *declarator {
+                    name
+                } else {
+                    return Err("Cannot apply additional declarators to a function type (function pointers aren't real)".into());
                 };
-                leave_scope(original_outer_scope_variables, context);
-                Ok(DeclarationNode::Function(output_function))
-            }
-            Token::SemiColon => {
-                // file scope variable = linkage
-                let name = new_identifier(
-                    name_token,
-                    context.current_scope_is_file,
-                    context,
-                    storage_class.clone(),
+                let (param_types, param_names): (Vec<Type>, Vec<String>) = process_results(
+                    params
+                        .into_iter()
+                        .map(|(t, declarator)| declarator.apply_to_type(t)),
+                    |iter| iter.map(|o| (o.out_type, o.name)).unzip(),
                 )?;
-                Ok(DeclarationNode::Variable(VariableDeclaration {
-                    variable_type: out_type,
+
+                Ok(DeclaratorApplicationOutput {
+                    out_type: Type::Function(Box::new(base_type), param_types),
                     name,
-                    init: None,
-                    storage_class,
-                }))
+                    param_names: Some(param_names),
+                })
             }
-            Token::Assignment => {
-                // file scope variable = linkage
-                let name = new_identifier(
-                    name_token,
-                    context.current_scope_is_file,
-                    context,
-                    storage_class.clone(),
-                )?;
-                let expression = ExpressionNode::parse(tokens, context)?;
-                expect(tokens, Token::SemiColon)?;
-                Ok(DeclarationNode::Variable(VariableDeclaration {
-                    variable_type: out_type,
-                    name,
-                    init: Some(expression),
-                    storage_class,
-                }))
+        }
+    }
+}
+
+impl Parse for AbstractDeclarator {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        _context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        match peek(tokens)? {
+            Token::Star => {
+                expect(tokens, Token::Star)?;
+                Ok(AbstractDeclarator::Pointer(Box::new(
+                    AbstractDeclarator::parse(tokens, _context)?,
+                )))
             }
-            t => Err(format!(
-                "Unexpected token in declaration of {:?}: {:?}",
-                name_token, t
-            )
-            .into()),
+            Token::OpenParen => {
+                expect(tokens, Token::OpenParen)?;
+                let a = AbstractDeclarator::parse(tokens, _context)?;
+                expect(tokens, Token::CloseParen)?;
+                Ok(a)
+            }
+            _ => Ok(AbstractDeclarator::Base),
+        }
+    }
+}
+
+impl AbstractDeclarator {
+    fn apply_to_type(
+        self,
+        base_type: Type,
+        // returns the type, name and list of parameter names associated with the type
+    ) -> Result<Type, Box<dyn Error>> {
+        match self {
+            AbstractDeclarator::Pointer(a) => Ok(Type::Pointer(Box::new(
+                AbstractDeclarator::apply_to_type(*a, base_type)?,
+            ))),
+            AbstractDeclarator::Base => Ok(base_type),
         }
     }
 }
@@ -765,16 +868,38 @@ impl ExpressionWithoutType {
             )?))
         } else {
             match peek(tokens)? {
+                Token::Star => {
+                    expect(tokens, Token::Star)?;
+                    let precedence = UnaryOperatorNode::precedence();
+                    let inner_expression = ExpressionWithoutType::parse_with_level(
+                        tokens, context, precedence, false,
+                    )?;
+                    Some(ExpressionWithoutType::Dereference(Box::new(
+                        inner_expression.unwrap().into(),
+                    )))
+                }
+                Token::BitwiseAnd => {
+                    expect(tokens, Token::BitwiseAnd)?;
+                    let precedence = UnaryOperatorNode::precedence();
+                    let inner_expression = ExpressionWithoutType::parse_with_level(
+                        tokens, context, precedence, false,
+                    )?;
+                    Some(ExpressionWithoutType::AddressOf(Box::new(
+                        inner_expression.unwrap().into(),
+                    )))
+                }
                 // casting
                 Token::OpenParen => {
                     expect(tokens, Token::OpenParen)?;
                     if match_type(tokens)? {
                         let cast_type = Type::parse(tokens, context)?;
+                        let abstract_declarator = AbstractDeclarator::parse(tokens, context)?;
+                        let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
                         expect(tokens, Token::CloseParen)?;
                         let factor =
                             ExpressionWithoutType::parse_factor(tokens, context, false)?.unwrap();
                         Some(ExpressionWithoutType::Cast(
-                            cast_type,
+                            real_cast_type,
                             Box::new(factor.into()),
                         ))
                     } else {
@@ -836,7 +961,10 @@ impl ExpressionWithoutType {
     }
 
     pub fn is_lvalue(&self) -> bool {
-        matches!(self, ExpressionWithoutType::Var(_))
+        matches!(
+            self,
+            ExpressionWithoutType::Var(_) | ExpressionWithoutType::Dereference(_)
+        )
     }
 
     fn resolve_identifier(

@@ -150,18 +150,27 @@ impl Validate for VariableDeclaration {
 impl VariableDeclaration {
     fn validate_file_scope(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         // println!("{:?}", self);
-        let mut initial_value =
-            if let Some(ExpressionWithoutType::Constant(c)) = self.init.as_ref().map(|i| &i.0) {
-                InitialValue::Initial(c.convert_to(&self.variable_type))
-            } else if self.init.is_none() {
-                if matches!(self.storage_class, Some(StorageClass::Extern)) {
-                    InitialValue::None
-                } else {
-                    InitialValue::Tentative
-                }
+        let mut initial_value = if let Some(expression) = self.init.as_ref() {
+            if matches!(self.variable_type, Type::Pointer(_)) && !expression.equals_null_pointer() {
+                return Err("Cannot initialise a static pointer with a non-pointer type".into());
+            }
+            let c = if let ExpressionWithoutType::Constant(c) = &expression.0 {
+                c
             } else {
-                return Err("Initialiser for file-scope variable must be constant".into());
+                return Err(
+                    "Static variables must be initialised with a constant expression".into(),
+                );
             };
+            InitialValue::Initial(c.convert_to(&self.variable_type))
+        } else if self.init.is_none() {
+            if matches!(self.storage_class, Some(StorageClass::Extern)) {
+                InitialValue::None
+            } else {
+                InitialValue::Tentative
+            }
+        } else {
+            return Err("Initialiser for file-scope variable must be constant".into());
+        };
 
         let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
         if let Some(old_symbol_info) = context.symbols.get(&self.name) {
@@ -251,7 +260,9 @@ impl VariableDeclaration {
                             InitialValue::Initial(StaticInitial::unsigned_long(0))
                         }
                         Type::Double => InitialValue::Initial(StaticInitial::Double(0.)),
-                        Type::Pointer(_) => todo!(),
+                        // Null pointers are initialised to 0_u64, which has the same binary
+                        // representation as a null pointer.
+                        Type::Pointer(_) => InitialValue::Initial(StaticInitial::unsigned_long(0)),
                         Type::Function(_, _) => unreachable!(),
                     },
                     _ => {
@@ -280,9 +291,23 @@ impl VariableDeclaration {
                 // cast the expression to the appropriate type at runtime
                 // ensure that this section runs after the variable exists in the symbol table, so
                 // that the definition is allowed to refer to its own value
+                //
+                // mangle this expression a little so that the type check reads it as an
+                // assignment, and then once validated, convert it back to the original 'init'
+                // expression
                 if let Some(ref mut init) = self.init {
-                    init.check_types(context)?;
-                    ExpressionNode::convert_type(init, &self.variable_type);
+                    let new_init = init.clone();
+                    let mut init_assignment: ExpressionNode = ExpressionWithoutType::Assignment(
+                        Box::new(ExpressionWithoutType::Var(self.name.clone()).into()),
+                        Box::new(new_init),
+                    )
+                    .into();
+                    init_assignment.check_types(context)?;
+                    if let ExpressionWithoutType::Assignment(_, new_init) = init_assignment.0 {
+                        *init = *new_init;
+                    } else {
+                        unreachable!()
+                    }
                 }
             }
         }
@@ -290,14 +315,17 @@ impl VariableDeclaration {
     }
 }
 
-// trait Castable: NumCast + ::Sized {}
 // this block will likely move to a type-conversion module of some kind in part 3 for compile-time
 // constant-folding
 impl Constant {
     pub fn convert_to(&self, target: &Type) -> StaticInitial {
-        match self {
-            Constant::Double(_) => Self::convert_double_to(self, target),
-            _ => Self::convert_ordinal_to(self, target),
+        if matches!(target, Type::Pointer(_)) {
+            self.convert_to_pointer()
+        } else {
+            match self {
+                Constant::Double(_) => Self::convert_double_to(self, target),
+                _ => Self::convert_ordinal_to(self, target),
+            }
         }
     }
     pub fn convert_ordinal_to(&self, target: &Type) -> StaticInitial {
@@ -318,6 +346,15 @@ impl Constant {
             Constant::UnsignedInteger(i) => StaticInitial::from_number(*i, target),
             Constant::UnsignedLong(i) => StaticInitial::from_number(*i, target),
             Constant::Double(i) => StaticInitial::from_double(*i, target),
+        }
+    }
+    pub fn convert_to_pointer(&self) -> StaticInitial {
+        match self {
+            Constant::Integer(0)
+            | Constant::Long(0)
+            | Constant::UnsignedInteger(0)
+            | Constant::UnsignedLong(0) => StaticInitial::unsigned_long(0),
+            _ => unreachable!(),
         }
     }
 }
@@ -344,7 +381,7 @@ impl StaticInitial {
             Type::UnsignedLong => StaticInitial::unsigned_long_from_double(i),
             Type::Double => StaticInitial::Double(i),
             Type::Function(_, _) => unreachable!(),
-            Type::Pointer(_) => todo!(),
+            Type::Pointer(_) => unreachable!(),
         }
     }
 
@@ -356,7 +393,7 @@ impl StaticInitial {
             Type::UnsignedLong => StaticInitial::unsigned_long(i),
             Type::Double => StaticInitial::double(i),
             Type::Function(_, _) => unreachable!(),
-            Type::Pointer(_) => todo!(),
+            Type::Pointer(_) => unreachable!(),
         }
     }
 
@@ -634,7 +671,7 @@ impl StatementNode {
                     .unwrap()
                     .symbol_type
                 {
-                    ExpressionNode::convert_type(e, out);
+                    e.convert_type_by_assignment(out)?;
                 } else {
                     unreachable!();
                 };
@@ -802,8 +839,12 @@ impl Validate for ExpressionNode {
             ExpressionWithoutType::Cast(_, ref mut expression) => {
                 expression.validate(context)?;
             }
-            ExpressionWithoutType::Dereference(_) => todo!(),
-            ExpressionWithoutType::AddressOf(_) => todo!(),
+            ExpressionWithoutType::Dereference(ref mut ptr) => {
+                ptr.validate(context)?;
+            }
+            ExpressionWithoutType::AddressOf(ref mut object) => {
+                object.validate(context)?;
+            }
         };
         Ok(())
     }
@@ -844,7 +885,9 @@ impl ExpressionNode {
 
     // See System V ABI list of rules for how to reconcile types of various sizes
     // C Spec 6.3.1.8, Paragraph 1
-    fn get_common_type(t1: &Type, t2: &Type) -> Type {
+    fn get_common_type(e1: &ExpressionNode, e2: &ExpressionNode) -> Type {
+        let t1 = e1.1.as_ref().unwrap();
+        let t2 = e2.1.as_ref().unwrap();
         if t1 == t2 {
             t1.clone()
         } else if t1 == &Type::Double || t2 == &Type::Double {
@@ -862,13 +905,60 @@ impl ExpressionNode {
         }
     }
 
-    fn convert_type(src: &mut ExpressionNode, target: &Type) {
-        if src.1.clone().unwrap() != *target {
-            *src = ExpressionNode(
-                ExpressionWithoutType::Cast(target.clone(), Box::new(src.clone())),
+    fn get_common_pointer_type(
+        e1: &ExpressionNode,
+        e2: &ExpressionNode,
+    ) -> Result<Type, Box<dyn Error>> {
+        let t1 = e1.1.as_ref().unwrap();
+        let t2 = e2.1.as_ref().unwrap();
+        if t1 == t2 {
+            Ok(t1.clone())
+        } else if e1.equals_null_pointer() {
+            Ok(t2.clone())
+        } else if e2.equals_null_pointer() {
+            Ok(t1.clone())
+        } else {
+            Err(format!(
+                "Incompatible types for implicit pointer cast: {:?} and {:?}",
+                e1, e2
+            )
+            .into())
+        }
+    }
+
+    pub fn equals_null_pointer(&self) -> bool {
+        matches!(
+            self.0,
+            ExpressionWithoutType::Constant(Constant::Integer(0))
+                | ExpressionWithoutType::Constant(Constant::Long(0))
+                | ExpressionWithoutType::Constant(Constant::UnsignedInteger(0))
+                | ExpressionWithoutType::Constant(Constant::UnsignedLong(0))
+        )
+    }
+
+    fn convert_type(&mut self, target: &Type) {
+        if self.1.as_ref().unwrap() != target {
+            *self = ExpressionNode(
+                ExpressionWithoutType::Cast(target.clone(), Box::new(self.clone())),
                 Some(target.clone()),
             )
         }
+    }
+
+    fn convert_type_by_assignment(&mut self, target: &Type) -> Result<(), Box<dyn Error>> {
+        let t1 = self.1.as_ref().unwrap();
+        if t1 != target {
+            if (t1.is_arithmetic() && target.is_arithmetic())
+                || (self.equals_null_pointer() && matches!(target, Type::Pointer(_)))
+            {
+                self.convert_type(target);
+            } else {
+                return Err(
+                    format!("Can't convert {:?} to {:?} by assignment", self, target).into(),
+                );
+            }
+        }
+        Ok(())
     }
 
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
@@ -889,7 +979,7 @@ impl ExpressionNode {
                     }
                     for (arg, param) in args.iter_mut().zip(params.iter()) {
                         arg.check_types(context)?;
-                        ExpressionNode::convert_type(arg, param)
+                        arg.convert_type_by_assignment(param)?;
                     }
 
                     *out.clone()
@@ -918,9 +1008,14 @@ impl ExpressionNode {
                 Constant::Double(_) => Type::Double,
             },
             ExpressionWithoutType::Unary(ref op, ref mut src) => {
-                // replace src in-place in the expression (oh wait i can probably do this
-                // everywhere) (yeah)
                 src.check_types(context)?;
+                if matches!(
+                    op,
+                    UnaryOperatorNode::Negate | UnaryOperatorNode::Complement
+                ) && matches!(src.1.as_ref().unwrap(), Type::Pointer(_))
+                {
+                    return Err("Can't apply - or ~ to a pointer".into());
+                }
                 match op {
                     UnaryOperatorNode::Not => Type::Integer, // returns 0 or 1 (eg boolean-like)
                     UnaryOperatorNode::Complement => {
@@ -932,22 +1027,68 @@ impl ExpressionNode {
                     _ => src.1.clone().unwrap(),
                 }
             }
+            ExpressionWithoutType::Binary(ref op, ref mut left, ref mut right)
+                if matches!(op, BinaryOperatorNode::Equal | BinaryOperatorNode::NotEqual) =>
+            {
+                left.check_types(context)?;
+                right.check_types(context)?;
+                let common_type = if matches!(left.1.as_ref().unwrap(), Type::Pointer(_))
+                    || matches!(right.1.as_ref().unwrap(), Type::Pointer(_))
+                {
+                    ExpressionNode::get_common_pointer_type(left, right)?
+                } else {
+                    ExpressionNode::get_common_type(left, right)
+                };
+                left.convert_type(&common_type);
+                right.convert_type(&common_type);
+
+                Type::Integer
+            }
             ExpressionWithoutType::Binary(ref op, ref mut left, ref mut right) => {
                 left.check_types(context)?;
                 right.check_types(context)?;
                 if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) {
                     Type::Integer // returns 0 or 1 (eg boolean-like)
                 } else {
-                    let common_type = ExpressionNode::get_common_type(
-                        left.1.as_ref().unwrap(),
-                        right.1.as_ref().unwrap(),
-                    );
+                    let common_type = ExpressionNode::get_common_type(left, right);
                     if !matches!(
                         op,
                         BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight
                     ) {
-                        ExpressionNode::convert_type(left, &common_type);
-                        ExpressionNode::convert_type(right, &common_type);
+                        left.convert_type(&common_type);
+                        right.convert_type(&common_type);
+                    }
+                    if (matches!(left.1.as_ref().unwrap(), Type::Double)
+                        && matches!(
+                            op,
+                            BinaryOperatorNode::BitwiseAnd
+                                | BinaryOperatorNode::BitwiseXor
+                                | BinaryOperatorNode::BitwiseOr
+                                | BinaryOperatorNode::ShiftLeft
+                                | BinaryOperatorNode::ShiftRight
+                                | BinaryOperatorNode::Mod
+                        ))
+                        || (matches!(right.1.as_ref().unwrap(), Type::Double)
+                            && matches!(
+                                op,
+                                BinaryOperatorNode::Mod
+                                    | BinaryOperatorNode::ShiftLeft
+                                    | BinaryOperatorNode::ShiftRight
+                            ))
+                        || (matches!(common_type, Type::Pointer(_))
+                            && matches!(
+                                op,
+                                BinaryOperatorNode::Multiply
+                                    | BinaryOperatorNode::Divide
+                                    | BinaryOperatorNode::Mod
+                                    | BinaryOperatorNode::BitwiseAnd
+                                    | BinaryOperatorNode::BitwiseXor
+                                    | BinaryOperatorNode::BitwiseOr
+                                    | BinaryOperatorNode::ShiftLeft
+                                    | BinaryOperatorNode::ShiftRight
+                            ))
+                    {
+                        return Err("Incompatible types for this binary operation".into());
                     }
 
                     match op {
@@ -955,27 +1096,12 @@ impl ExpressionNode {
                         | BinaryOperatorNode::Subtract
                         | BinaryOperatorNode::Multiply
                         | BinaryOperatorNode::Divide => common_type,
-                        BinaryOperatorNode::BitwiseOr
-                        | BinaryOperatorNode::BitwiseAnd
-                        | BinaryOperatorNode::BitwiseXor => {
-                            if left.1.as_ref().unwrap() == &Type::Double {
-                                return Err("Bitwise operations cannot operate on a double".into());
-                            }
-                            common_type
-                        }
+                        BinaryOperatorNode::BitwiseAnd
+                        | BinaryOperatorNode::BitwiseXor
+                        | BinaryOperatorNode::BitwiseOr => common_type,
                         BinaryOperatorNode::ShiftLeft
                         | BinaryOperatorNode::ShiftRight
-                        | BinaryOperatorNode::Mod => {
-                            if left.1.as_ref().unwrap() == &Type::Double {
-                                return Err("Bitwise operations cannot operate on a double".into());
-                            }
-                            if right.1.as_ref().unwrap() == &Type::Double
-                                && op != &BinaryOperatorNode::Mod
-                            {
-                                return Err("Bitwise operations cannot operate on a double".into());
-                            }
-                            left.1.clone().unwrap()
-                        }
+                        | BinaryOperatorNode::Mod => left.1.clone().unwrap(),
                         BinaryOperatorNode::And
                         | BinaryOperatorNode::Or
                         | BinaryOperatorNode::Equal
@@ -990,28 +1116,50 @@ impl ExpressionNode {
             ExpressionWithoutType::Assignment(ref mut dst, ref mut src) => {
                 dst.check_types(context)?;
                 src.check_types(context)?;
-                ExpressionNode::convert_type(src, dst.1.as_ref().unwrap());
+                src.convert_type_by_assignment(dst.1.as_ref().unwrap())?;
                 dst.1.clone().unwrap()
             }
             ExpressionWithoutType::Ternary(ref mut cond, ref mut then, ref mut other) => {
                 cond.check_types(context)?;
                 then.check_types(context)?;
                 other.check_types(context)?;
-                let common_type = ExpressionNode::get_common_type(
-                    then.1.as_ref().unwrap(),
-                    other.1.as_ref().unwrap(),
-                );
-                ExpressionNode::convert_type(then, &common_type);
-                ExpressionNode::convert_type(other, &common_type);
+                let common_type = if matches!(then.1.as_ref().unwrap(), Type::Pointer(_))
+                    || matches!(other.1.as_ref().unwrap(), Type::Pointer(_))
+                {
+                    ExpressionNode::get_common_pointer_type(then, other)?
+                } else {
+                    ExpressionNode::get_common_type(then, other)
+                };
+                then.convert_type(&common_type);
+                other.convert_type(&common_type);
 
                 common_type
             }
             ExpressionWithoutType::Cast(ref target, ref mut e) => {
                 e.check_types(context)?;
+                let src_type = e.1.as_ref().unwrap();
+                if matches!((src_type, target), (Type::Double, Type::Pointer(_)))
+                    || matches!((target, src_type), (Type::Double, Type::Pointer(_)))
+                {
+                    return Err("Cannot cast between Double and Pointer types".into());
+                }
                 target.clone()
             }
-            ExpressionWithoutType::Dereference(_) => todo!(),
-            ExpressionWithoutType::AddressOf(_) => todo!(),
+            ExpressionWithoutType::Dereference(ref mut e) => {
+                e.check_types(context)?;
+                if let Type::Pointer(t) = e.1.as_ref().unwrap() {
+                    *t.clone()
+                } else {
+                    return Err("Dereference can only operate on pointer types".into());
+                }
+            }
+            ExpressionWithoutType::AddressOf(ref mut e) => {
+                e.check_types(context)?;
+                if !e.0.is_lvalue() {
+                    return Err("Can only take address of an object".into());
+                }
+                Type::Pointer(Box::new(e.1.clone().unwrap()))
+            }
         });
         Ok(())
     }

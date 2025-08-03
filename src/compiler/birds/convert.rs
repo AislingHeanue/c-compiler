@@ -259,7 +259,7 @@ impl Convert for StatementNode {
 
                 instructions.push(BirdsInstructionNode::JumpZero(
                     new_src,
-                    format!("start_{}", this_loop_label),
+                    format!("break_{}", this_loop_label),
                 ));
                 instructions.push(BirdsInstructionNode::Jump(format!(
                     "start_{}",

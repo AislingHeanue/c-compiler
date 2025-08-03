@@ -555,7 +555,6 @@ impl Instruction {
                         | ConditionCode::Le
                         | ConditionCode::B
                         | ConditionCode::Be
-                        // Should always resolve to True when NaN is found
                         | ConditionCode::Ne
                 ) =>
             {

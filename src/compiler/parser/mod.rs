@@ -159,6 +159,19 @@ pub enum BinaryOperatorNode {
     ShiftRight,
 }
 
+#[derive(Debug)]
+pub enum Declarator {
+    Name(String),
+    Pointer(Box<Declarator>),
+    // params info and any further declarator to apply to the parent type
+    Function(Box<Declarator>, Vec<(Type, Declarator)>),
+}
+
+pub enum AbstractDeclarator {
+    Pointer(Box<AbstractDeclarator>),
+    Base,
+}
+
 trait Parse
 where
     Self: Sized,

@@ -31,8 +31,20 @@ impl Type {
             Type::UnsignedInteger => false,
             Type::UnsignedLong => false,
             Type::Double => true,
-            Type::Pointer(_) => todo!(),
+            Type::Pointer(_) => false,
             Type::Function(_, _) => unreachable!(),
+        }
+    }
+
+    pub fn is_arithmetic(&self) -> bool {
+        match self {
+            Type::Integer => true,
+            Type::Long => true,
+            Type::UnsignedInteger => true,
+            Type::UnsignedLong => true,
+            Type::Double => true,
+            Type::Pointer(_) => false,
+            Type::Function(_, _) => false,
         }
     }
 }
