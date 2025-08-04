@@ -651,20 +651,6 @@ impl Convert for ExpressionNode {
                 ));
                 Ok((instructions, new_dst.into()))
             }
-            ExpressionWithoutType::Compound(op, left, right)
-                if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) =>
-            {
-                let (instructions_from_left, new_left) = left.convert_and_evaluate(context)?;
-                let instructions = ExpressionNode::convert_and_or(
-                    op,
-                    (instructions_from_left, new_left.clone()),
-                    right.convert_and_evaluate(context)?,
-                    new_left.clone(),
-                    context,
-                )?;
-
-                Ok((instructions, new_left.into()))
-            }
             ExpressionWithoutType::Compound(op, left, right) => {
                 // since this is an assignment, we've already carried out type checking for the
                 // return of this expression in the validation step.

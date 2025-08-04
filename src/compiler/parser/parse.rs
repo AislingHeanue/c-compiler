@@ -58,9 +58,9 @@ fn match_assignment(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
             | Token::MultiplyAssign
             | Token::DivideAssign
             | Token::ModAssign
-            | Token::AndAssign
-            | Token::XorAssign
-            | Token::OrAssign
+            | Token::BitwiseAndAssign
+            | Token::BitwiseXorAssign
+            | Token::BitwiseOrAssign
             | Token::ShiftLeftAssign
             | Token::ShiftRightAssign
     ))
@@ -787,9 +787,9 @@ impl ExpressionWithoutType {
                         Token::MultiplyAssign => BinaryOperatorNode::Multiply,
                         Token::DivideAssign => BinaryOperatorNode::Divide,
                         Token::ModAssign => BinaryOperatorNode::Mod,
-                        Token::AndAssign => BinaryOperatorNode::BitwiseAnd,
-                        Token::XorAssign => BinaryOperatorNode::BitwiseXor,
-                        Token::OrAssign => BinaryOperatorNode::BitwiseOr,
+                        Token::BitwiseAndAssign => BinaryOperatorNode::BitwiseAnd,
+                        Token::BitwiseXorAssign => BinaryOperatorNode::BitwiseXor,
+                        Token::BitwiseOrAssign => BinaryOperatorNode::BitwiseOr,
                         Token::ShiftLeftAssign => BinaryOperatorNode::ShiftLeft,
                         Token::ShiftRightAssign => BinaryOperatorNode::ShiftRight,
                         _ => {
@@ -1122,9 +1122,9 @@ impl BinaryOperatorNode {
             Token::MultiplyAssign => 1,
             Token::DivideAssign => 1,
             Token::ModAssign => 1,
-            Token::AndAssign => 1,
-            Token::XorAssign => 1,
-            Token::OrAssign => 1,
+            Token::BitwiseAndAssign => 1,
+            Token::BitwiseXorAssign => 1,
+            Token::BitwiseOrAssign => 1,
             Token::ShiftLeftAssign => 1,
             Token::ShiftRightAssign => 1,
 
