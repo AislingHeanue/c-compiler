@@ -1,14 +1,16 @@
 use std::{collections::HashMap, error::Error};
 
 use conv::{ApproxInto, ConvUtil, RoundToZero, Wrapping};
+use itertools::process_results;
 
 use crate::compiler::types::{InitialValue, StaticInitial};
 
 use super::{
     BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
-    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, OrdinalStatic, ProgramNode,
-    StatementNode, StorageClass, StorageInfo, SwitchMapKey, SymbolInfo, Type, UnaryOperatorNode,
-    Validate, ValidateContext, ValidationPass, VariableDeclaration,
+    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
+    InitialiserWithoutType, OrdinalStatic, ProgramNode, StatementNode, StorageClass, StorageInfo,
+    SwitchMapKey, SymbolInfo, Type, UnaryOperatorNode, Validate, ValidateContext, ValidationPass,
+    VariableDeclaration,
 };
 
 impl<T> Validate for Option<T>
@@ -147,21 +149,59 @@ impl Validate for VariableDeclaration {
     }
 }
 
+impl Validate for InitialiserNode {
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        match self.0 {
+            InitialiserWithoutType::Single(ref mut e) => {
+                e.validate(context)?;
+            }
+            InitialiserWithoutType::Compound(ref mut initialisers) => {
+                for i in initialisers {
+                    i.validate(context)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl InitialiserNode {
+    fn create_static_init_list(
+        &mut self,
+        target_type: &Type,
+        _context: &mut ValidateContext,
+    ) -> Result<Vec<StaticInitial>, Box<dyn Error>> {
+        let init_list: Vec<StaticInitial> = match self.0 {
+            InitialiserWithoutType::Single(ref i) => {
+                if matches!(target_type, Type::Pointer(_)) && !i.equals_null_pointer() {
+                    return Err("Cannot initialise a static pointer with a non-pointer type".into());
+                }
+                let c = if let ExpressionWithoutType::Constant(c) = &i.0 {
+                    c
+                } else {
+                    return Err(
+                        "Static variables must be initialised with a constant expression".into(),
+                    );
+                };
+
+                vec![c.convert_to(target_type)]
+            }
+            InitialiserWithoutType::Compound(ref mut initialisers) => process_results(
+                initialisers
+                    .iter_mut()
+                    .map(|init| init.create_static_init_list(target_type, _context)),
+                |iter| iter.flatten().collect(),
+            )?,
+        };
+        Ok(init_list)
+    }
+}
+
 impl VariableDeclaration {
     fn validate_file_scope(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         // println!("{:?}", self);
-        let mut initial_value = if let Some(expression) = self.init.as_ref() {
-            if matches!(self.variable_type, Type::Pointer(_)) && !expression.equals_null_pointer() {
-                return Err("Cannot initialise a static pointer with a non-pointer type".into());
-            }
-            let c = if let ExpressionWithoutType::Constant(c) = &expression.0 {
-                c
-            } else {
-                return Err(
-                    "Static variables must be initialised with a constant expression".into(),
-                );
-            };
-            InitialValue::Initial(c.convert_to(&self.variable_type))
+        let mut initial_value = if let Some(init) = self.init.as_mut() {
+            InitialValue::Initial(init.create_static_init_list(&self.variable_type, context)?)
         } else if self.init.is_none() {
             if matches!(self.storage_class, Some(StorageClass::Extern)) {
                 InitialValue::None
@@ -246,30 +286,26 @@ impl VariableDeclaration {
             Some(StorageClass::Static) => {
                 // don't call check_types here, since we don't want to pollute constant expressions
                 // with more complex expressions, which we may end up doing with other expressions
-                let initial_value = match self.init.as_ref().map(|i| &i.0) {
-                    Some(ExpressionWithoutType::Constant(ref c)) => {
-                        InitialValue::Initial(c.convert_to(&self.variable_type))
-                    }
+                let initial_value = match &mut self.init {
+                    Some(ref mut initialiser) => InitialValue::Initial(
+                        initialiser.create_static_init_list(&self.variable_type, context)?,
+                    ),
                     None => match self.variable_type {
-                        Type::Integer => InitialValue::Initial(StaticInitial::integer(0)),
-                        Type::Long => InitialValue::Initial(StaticInitial::long(0)),
+                        Type::Integer => InitialValue::initial(StaticInitial::integer(0)),
+                        Type::Long => InitialValue::initial(StaticInitial::long(0)),
                         Type::UnsignedInteger => {
-                            InitialValue::Initial(StaticInitial::unsigned_integer(0))
+                            InitialValue::initial(StaticInitial::unsigned_integer(0))
                         }
                         Type::UnsignedLong => {
-                            InitialValue::Initial(StaticInitial::unsigned_long(0))
+                            InitialValue::initial(StaticInitial::unsigned_long(0))
                         }
-                        Type::Double => InitialValue::Initial(StaticInitial::Double(0.)),
+                        Type::Double => InitialValue::initial(StaticInitial::Double(0.)),
                         // Null pointers are initialised to 0_u64, which has the same binary
                         // representation as a null pointer.
-                        Type::Pointer(_) => InitialValue::Initial(StaticInitial::unsigned_long(0)),
+                        Type::Pointer(_) => InitialValue::initial(StaticInitial::unsigned_long(0)),
+                        Type::Array(..) => todo!(), //InitialValue::initial(StaticInitial::unsigned_long(0)),
                         Type::Function(_, _) => unreachable!(),
                     },
-                    _ => {
-                        return Err(
-                            "Non-constant initialiser on block-scope static variable".into()
-                        );
-                    }
                 };
                 context.symbols.insert(
                     self.name.clone(),
@@ -295,19 +331,26 @@ impl VariableDeclaration {
                 // mangle this expression a little so that the type check reads it as an
                 // assignment, and then once validated, convert it back to the original 'init'
                 // expression
-                if let Some(ref mut init) = self.init {
-                    let new_init = init.clone();
-                    let mut init_assignment: ExpressionNode = ExpressionWithoutType::Assignment(
-                        Box::new(ExpressionWithoutType::Var(self.name.clone()).into()),
-                        Box::new(new_init),
-                    )
-                    .into();
-                    init_assignment.check_types(context)?;
-                    if let ExpressionWithoutType::Assignment(_, new_init) = init_assignment.0 {
-                        *init = *new_init;
-                    } else {
-                        unreachable!()
+                match self.init.as_mut().map(|i| &mut i.0) {
+                    Some(InitialiserWithoutType::Single(ref mut s)) => {
+                        let mut init_assignment: ExpressionNode =
+                            ExpressionWithoutType::Assignment(
+                                Box::new(ExpressionWithoutType::Var(self.name.clone()).into()),
+                                Box::new(s.clone()),
+                            )
+                            .into();
+                        init_assignment.check_types(context)?;
+                        // if let ExpressionWithoutType::Assignment(_, new_init) = init_assignment.0 {
+                        //     *init = *new_init;
+                        // } else {
+                        //     unreachable!()
+                        // }
                     }
+                    Some(InitialiserWithoutType::Compound(_)) => {
+                        return Err("Cannot cast a compound initialiser".into());
+                    }
+
+                    None => (),
                 }
             }
         }
@@ -382,6 +425,7 @@ impl StaticInitial {
             Type::Double => StaticInitial::Double(i),
             Type::Function(_, _) => unreachable!(),
             Type::Pointer(_) => unreachable!(),
+            Type::Array(..) => unreachable!(),
         }
     }
 
@@ -392,7 +436,7 @@ impl StaticInitial {
             Type::UnsignedInteger => StaticInitial::unsigned_integer(i),
             Type::UnsignedLong => StaticInitial::unsigned_long(i),
             Type::Double => StaticInitial::double(i),
-            Type::Pointer(_) => {
+            Type::Pointer(_) | Type::Array(..) => {
                 let value = StaticInitial::unsigned_long(i);
                 if !matches!(
                     value,
@@ -840,6 +884,10 @@ impl Validate for ExpressionNode {
                 right.validate(context)?;
             }
             ExpressionWithoutType::Var(_) => {}
+            ExpressionWithoutType::Subscript(ref mut src, ref mut inner) => {
+                src.validate(context)?;
+                inner.validate(context)?;
+            }
             ExpressionWithoutType::Assignment(ref mut dst, ref mut src) => {
                 dst.validate(context)?;
                 src.validate(context)?;
@@ -1128,6 +1176,7 @@ impl ExpressionNode {
                 }
                 Type::Pointer(Box::new(e.1.clone().unwrap()))
             }
+            ExpressionWithoutType::Subscript(ref mut _src, ref mut _inner) => todo!(),
         });
         Ok(())
     }

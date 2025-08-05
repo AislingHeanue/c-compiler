@@ -7,6 +7,8 @@ pub enum Type {
     Double,
     // return type, param types
     Function(Box<Type>, Vec<Type>),
+    // type and length
+    Array(Box<Type>, i32),
     Pointer(Box<Type>),
 }
 
@@ -19,7 +21,8 @@ impl Type {
             Type::Double => 8,
             Type::UnsignedInteger => 4,
             Type::UnsignedLong => 8,
-            Type::Pointer(_) => 8, // pointer is store like u64
+            Type::Pointer(_) => 8, // pointer is stored like u64
+            Type::Array(..) => 8,  // arrays are like pointers except that they aren't
             Type::Function(_, _) => unreachable!(),
         }
     }
@@ -32,6 +35,7 @@ impl Type {
             Type::UnsignedLong => false,
             Type::Double => true,
             Type::Pointer(_) => false,
+            Type::Array(..) => false,
             Type::Function(_, _) => unreachable!(),
         }
     }
@@ -45,6 +49,7 @@ impl Type {
             Type::Double => true,
             Type::Pointer(_) => false,
             Type::Function(_, _) => false,
+            Type::Array(..) => false,
         }
     }
 
@@ -54,6 +59,13 @@ impl Type {
             _ => self.is_arithmetic(),
         }
     }
+
+    // pub fn is_scalar(&self) -> bool {
+    //     match self {
+    //         Type::Array(..) => false,
+    //         _ => true,
+    //     }
+    // }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -111,8 +123,14 @@ pub enum OrdinalStatic {
 #[derive(Debug, Clone)]
 pub enum InitialValue {
     Tentative,
-    Initial(StaticInitial),
+    Initial(Vec<StaticInitial>),
     None,
+}
+
+impl InitialValue {
+    pub fn initial(initial: StaticInitial) -> InitialValue {
+        InitialValue::Initial(vec![initial])
+    }
 }
 
 #[derive(Debug, Clone)]

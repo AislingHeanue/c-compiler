@@ -30,8 +30,17 @@ pub struct ExpressionNode(pub ExpressionWithoutType, pub Option<Type>);
 pub struct VariableDeclaration {
     pub variable_type: Type,
     pub name: String,
-    pub init: Option<ExpressionNode>,
+    pub init: Option<InitialiserNode>,
     pub storage_class: Option<StorageClass>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InitialiserNode(pub InitialiserWithoutType, pub Option<Type>);
+
+#[derive(Debug, Clone)]
+pub enum InitialiserWithoutType {
+    Single(ExpressionNode),
+    Compound(Vec<InitialiserNode>),
 }
 
 pub type Block = Vec<BlockItemNode>;
@@ -114,6 +123,8 @@ pub enum ExpressionWithoutType {
     // eg a += 5
     // op, left, right
     Compound(BinaryOperatorNode, Box<ExpressionNode>, Box<ExpressionNode>),
+    // eg a[b]
+    Subscript(Box<ExpressionNode>, Box<ExpressionNode>),
     Var(String),
     Assignment(Box<ExpressionNode>, Box<ExpressionNode>),
     // condition ? then : otherwise
@@ -169,10 +180,13 @@ pub enum Declarator {
     Pointer(Box<Declarator>),
     // params info and any further declarator to apply to the parent type
     Function(Box<Declarator>, Vec<(Type, Declarator)>),
+    // containing type and size
+    Array(Box<Declarator>, i32),
 }
 
 pub enum AbstractDeclarator {
     Pointer(Box<AbstractDeclarator>),
+    Array(Box<AbstractDeclarator>, i32),
     Base,
 }
 

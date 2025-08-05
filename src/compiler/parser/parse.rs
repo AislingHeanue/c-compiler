@@ -2,8 +2,9 @@ use itertools::{process_results, Itertools};
 
 use super::{
     AbstractDeclarator, BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, Declarator,
-    ExpressionNode, ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, Parse,
-    ProgramNode, StatementNode, StorageClass, Type, UnaryOperatorNode, VariableDeclaration,
+    ExpressionNode, ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration,
+    InitialiserNode, InitialiserWithoutType, Parse, ProgramNode, StatementNode, StorageClass, Type,
+    UnaryOperatorNode, VariableDeclaration,
 };
 use crate::compiler::{lexer::Token, parser::ParseContext, types::Constant};
 use std::{
@@ -35,7 +36,10 @@ fn match_unary_operator(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>
 }
 
 fn match_suffix_operator(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
-    Ok(matches!(peek(tokens)?, Token::Increment | Token::Decrement))
+    Ok(matches!(
+        peek(tokens)?,
+        Token::Increment | Token::Decrement | Token::OpenSquareBracket
+    ))
 }
 
 fn match_constant(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
@@ -71,7 +75,7 @@ fn expect(tokens: &mut VecDeque<Token>, expected: Token) -> Result<(), Box<dyn E
     let token = read(tokens)?;
     if discriminant(&expected) != discriminant(&token) {
         return Err(format!(
-            "Unexpected token, got: {:?}, expecting {:?}",
+            "Unexpected token, got {:?}, expecting {:?}",
             token, expected
         )
         .into());
@@ -377,12 +381,12 @@ impl Parse for DeclarationNode {
                 match read(tokens)? {
                     Token::Assignment => {
                         // file scope variable = linkage
-                        let expression = ExpressionNode::parse(tokens, context)?;
+                        let initialiser = InitialiserNode::parse(tokens, context)?;
                         expect(tokens, Token::SemiColon)?;
                         Ok(DeclarationNode::Variable(VariableDeclaration {
                             variable_type: out_type,
                             name,
-                            init: Some(expression),
+                            init: Some(initialiser),
                             storage_class,
                         }))
                     }
@@ -399,6 +403,39 @@ impl Parse for DeclarationNode {
     }
 }
 
+impl Parse for InitialiserNode {
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        let init = match peek(tokens)? {
+            Token::OpenBrace => {
+                expect(tokens, Token::OpenBrace)?;
+                let mut initialisers = Vec::new();
+                initialisers.push(InitialiserNode::parse(tokens, context)?);
+                while matches!(peek(tokens)?, Token::Comma) {
+                    expect(tokens, Token::Comma)?;
+                    if matches!(peek(tokens)?, Token::CloseParen) {
+                        //baited, no new init here
+                        break;
+                    }
+                    initialisers.push(InitialiserNode::parse(tokens, context)?);
+                }
+                expect(tokens, Token::CloseBrace)?;
+                InitialiserWithoutType::Compound(initialisers)
+            }
+            _ => InitialiserWithoutType::Single(ExpressionNode::parse(tokens, context)?),
+        };
+        Ok(init.into())
+    }
+}
+
+impl From<InitialiserWithoutType> for InitialiserNode {
+    fn from(val: InitialiserWithoutType) -> Self {
+        InitialiserNode(val, None)
+    }
+}
+
 impl Parse for Declarator {
     fn parse(
         tokens: &mut VecDeque<Token>,
@@ -412,7 +449,7 @@ impl Parse for Declarator {
                 )?)))
             }
             _ => {
-                let simple_declarator = Declarator::parse_simple_declarator(tokens, context)?;
+                let mut simple_declarator = Declarator::parse_simple_declarator(tokens, context)?;
                 match peek(tokens)? {
                     // function declaration type!
                     Token::OpenParen => {
@@ -421,6 +458,13 @@ impl Parse for Declarator {
                             Box::new(simple_declarator),
                             param_list,
                         ))
+                    }
+                    Token::OpenSquareBracket => {
+                        while matches!(peek(tokens)?, Token::OpenSquareBracket) {
+                            simple_declarator =
+                                Declarator::parse_array(tokens, simple_declarator, context)?;
+                        }
+                        Ok(simple_declarator)
                     }
                     _ => Ok(simple_declarator),
                 }
@@ -487,6 +531,32 @@ impl Declarator {
         Ok((out_type, declarator))
     }
 
+    fn parse_array(
+        tokens: &mut VecDeque<Token>,
+        mut declarator: Declarator,
+        context: &mut ParseContext,
+    ) -> Result<Declarator, Box<dyn Error>> {
+        expect(tokens, Token::OpenSquareBracket)?;
+        let c = Constant::parse(tokens, context)?;
+        let maybe_i: Option<i32> = match c {
+            Constant::Integer(i) => Some(i),
+            Constant::Long(i) => i.try_into().ok(),
+            Constant::UnsignedInteger(i) => i.try_into().ok(),
+            Constant::UnsignedLong(i) => i.try_into().ok(),
+            _ => None,
+        };
+        if let Some(i) = maybe_i {
+            if i < 1 {
+                return Err("Array dimension must be at least 1".into());
+            }
+            declarator = Declarator::Array(Box::new(declarator), i);
+        } else {
+            return Err("Constant value in array type must be an integer".into());
+        }
+        expect(tokens, Token::CloseSquareBracket)?;
+        Ok(declarator)
+    }
+
     fn apply_to_type(
         self,
         base_type: Type,
@@ -521,6 +591,9 @@ impl Declarator {
                     param_names: Some(param_names),
                 })
             }
+            Declarator::Array(declarator, size) => {
+                declarator.apply_to_type(Type::Array(Box::new(base_type), size))
+            }
         }
     }
 }
@@ -537,18 +610,56 @@ impl Parse for AbstractDeclarator {
                     AbstractDeclarator::parse(tokens, _context)?,
                 )))
             }
-            Token::OpenParen => {
-                expect(tokens, Token::OpenParen)?;
-                let a = AbstractDeclarator::parse(tokens, _context)?;
-                expect(tokens, Token::CloseParen)?;
-                Ok(a)
-            }
-            _ => Ok(AbstractDeclarator::Base),
+            _ => Ok(AbstractDeclarator::parse_direct(tokens, _context)?),
         }
     }
 }
 
 impl AbstractDeclarator {
+    fn parse_direct(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>> {
+        match peek(tokens)? {
+            Token::OpenParen => {
+                expect(tokens, Token::OpenParen)?;
+                let mut a = AbstractDeclarator::parse(tokens, context)?;
+                expect(tokens, Token::CloseParen)?;
+                while matches!(peek(tokens)?, Token::OpenSquareBracket) {
+                    a = AbstractDeclarator::parse_array(tokens, a, context)?;
+                }
+                Ok(a)
+            }
+            _ => Ok(AbstractDeclarator::Base),
+        }
+    }
+
+    fn parse_array(
+        tokens: &mut VecDeque<Token>,
+        mut a_declarator: AbstractDeclarator,
+        context: &mut ParseContext,
+    ) -> Result<AbstractDeclarator, Box<dyn Error>> {
+        expect(tokens, Token::OpenSquareBracket)?;
+        let c = Constant::parse(tokens, context)?;
+        let maybe_i: Option<i32> = match c {
+            Constant::Integer(i) => Some(i),
+            Constant::Long(i) => i.try_into().ok(),
+            Constant::UnsignedInteger(i) => i.try_into().ok(),
+            Constant::UnsignedLong(i) => i.try_into().ok(),
+            _ => None,
+        };
+        if let Some(i) = maybe_i {
+            if i < 1 {
+                return Err("Array dimension must be at least 1".into());
+            }
+            a_declarator = AbstractDeclarator::Array(Box::new(a_declarator), i);
+        } else {
+            return Err("Constant value in array type must be an integer".into());
+        }
+        expect(tokens, Token::CloseSquareBracket)?;
+        Ok(a_declarator)
+    }
+
     fn apply_to_type(
         self,
         base_type: Type,
@@ -558,6 +669,10 @@ impl AbstractDeclarator {
             AbstractDeclarator::Pointer(a) => Ok(Type::Pointer(Box::new(
                 AbstractDeclarator::apply_to_type(*a, base_type)?,
             ))),
+            AbstractDeclarator::Array(a, size) => Ok(Type::Array(
+                Box::new(AbstractDeclarator::apply_to_type(*a, base_type)?),
+                size,
+            )),
             AbstractDeclarator::Base => Ok(base_type),
         }
     }
@@ -761,9 +876,9 @@ impl ExpressionWithoutType {
         level: usize,
         allow_empty: bool,
     ) -> Result<Option<Self>, Box<dyn Error>> {
-        let maybe_left = ExpressionWithoutType::parse_factor(tokens, context, allow_empty)?;
+        let maybe_left = ExpressionWithoutType::parse_unary(tokens, context, allow_empty)?;
         if maybe_left.is_none() {
-            // if allow_empty is false, parse_factor will throw the relevant error for here
+            // if allow_empty is false, parse_unary will throw the relevant error for here
             return Ok(None);
         }
         let mut left = maybe_left.unwrap();
@@ -841,37 +956,37 @@ impl ExpressionWithoutType {
         Ok(Some(left))
     }
 
-    fn parse_factor(
+    fn parse_unary(
         tokens: &mut VecDeque<Token>,
         context: &mut ParseContext,
         allow_empty: bool,
     ) -> Result<Option<Self>, Box<dyn Error>> {
-        let mut expression = if match_unary_operator(tokens)? {
-            let operator = UnaryOperatorNode::parse(tokens, context)?;
-            let precedence = UnaryOperatorNode::precedence(); // all unary operators have the
-                                                              // same precedence
-            let expression =
-                ExpressionWithoutType::parse_with_level(tokens, context, precedence, false)?;
-            Some(ExpressionWithoutType::Unary(
-                operator,
-                Box::new(expression.unwrap().into()),
-            ))
-        } else if match_constant(tokens)? {
-            Some(ExpressionWithoutType::Constant(Constant::parse(
-                tokens, context,
-            )?))
-        } else {
+        let expression = {
             match peek(tokens)? {
-                Token::Star => {
-                    expect(tokens, Token::Star)?;
-                    let precedence = UnaryOperatorNode::precedence();
-                    let inner_expression = ExpressionWithoutType::parse_with_level(
-                        tokens, context, precedence, false,
-                    )?;
-                    Some(ExpressionWithoutType::Dereference(Box::new(
-                        inner_expression.unwrap().into(),
-                    )))
+                Token::OpenParen => {
+                    // casting
+                    expect(tokens, Token::OpenParen)?;
+                    if match_type(tokens)? {
+                        let cast_type = Type::parse(tokens, context)?;
+                        let abstract_declarator = AbstractDeclarator::parse(tokens, context)?;
+                        let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
+                        expect(tokens, Token::CloseParen)?;
+                        let factor =
+                            ExpressionWithoutType::parse_unary(tokens, context, false)?.unwrap();
+                        Some(ExpressionWithoutType::Cast(
+                            real_cast_type,
+                            Box::new(factor.into()),
+                        ))
+                    } else {
+                        // baited, not actually a cast, go further down the chain...
+                        tokens.push_front(Token::OpenParen);
+                        let expression =
+                            ExpressionWithoutType::parse_postfix(tokens, context, allow_empty)?
+                                .unwrap();
+                        Some(expression)
+                    }
                 }
+                // address-of
                 Token::BitwiseAnd => {
                     expect(tokens, Token::BitwiseAnd)?;
                     let precedence = UnaryOperatorNode::precedence();
@@ -882,74 +997,123 @@ impl ExpressionWithoutType {
                         inner_expression.unwrap().into(),
                     )))
                 }
-                // casting
-                Token::OpenParen => {
-                    expect(tokens, Token::OpenParen)?;
-                    if match_type(tokens)? {
-                        let cast_type = Type::parse(tokens, context)?;
-                        let abstract_declarator = AbstractDeclarator::parse(tokens, context)?;
-                        let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
+                // deref
+                Token::Star => {
+                    expect(tokens, Token::Star)?;
+                    let precedence = UnaryOperatorNode::precedence();
+                    let inner_expression = ExpressionWithoutType::parse_with_level(
+                        tokens, context, precedence, false,
+                    )?;
+                    Some(ExpressionWithoutType::Dereference(Box::new(
+                        inner_expression.unwrap().into(),
+                    )))
+                }
+                _ if match_unary_operator(tokens)? => {
+                    let operator = UnaryOperatorNode::parse(tokens, context)?;
+                    let precedence = UnaryOperatorNode::precedence(); // all unary operators have the
+                                                                      // same precedence
+                    let expression = ExpressionWithoutType::parse_with_level(
+                        tokens, context, precedence, false,
+                    )?;
+                    Some(ExpressionWithoutType::Unary(
+                        operator,
+                        Box::new(expression.unwrap().into()),
+                    ))
+                }
+                _ => ExpressionWithoutType::parse_postfix(tokens, context, allow_empty)?,
+            }
+        };
+        Ok(expression)
+    }
+
+    fn parse_postfix(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+        allow_empty: bool,
+    ) -> Result<Option<Self>, Box<dyn Error>> {
+        let mut left = ExpressionWithoutType::parse_primary(tokens, context, allow_empty)?;
+        if left.is_none() {
+            return Ok(left);
+        }
+        while match_suffix_operator(tokens)? {
+            match peek(tokens)? {
+                Token::Increment | Token::Decrement => {
+                    left = Some(ExpressionWithoutType::Unary(
+                        UnaryOperatorNode::parse_as_suffix(tokens, context)?,
+                        Box::new(left.unwrap().into()),
+                    ));
+                }
+                Token::OpenSquareBracket => {
+                    expect(tokens, Token::OpenSquareBracket)?;
+                    let inner = ExpressionWithoutType::parse(tokens, context)?;
+                    expect(tokens, Token::CloseSquareBracket)?;
+                    left = Some(ExpressionWithoutType::Subscript(
+                        Box::new(left.unwrap().into()),
+                        Box::new(inner.into()),
+                    ))
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_primary(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+        allow_empty: bool,
+    ) -> Result<Option<Self>, Box<dyn Error>> {
+        let expression = match peek(tokens)? {
+            Token::Identifier(name) => {
+                expect(tokens, Token::Identifier("".to_string()))?;
+                match peek(tokens)? {
+                    // this is a function call !!
+                    Token::OpenParen => {
+                        let (new_name, _external_link) =
+                            ExpressionWithoutType::resolve_identifier(&name, context)?;
+
+                        expect(tokens, Token::OpenParen)?;
+                        let mut arguments: Vec<ExpressionWithoutType> = Vec::new();
+                        if !matches!(peek(tokens)?, Token::CloseParen) {
+                            arguments.push(ExpressionWithoutType::parse(tokens, context)?);
+                        }
+                        while matches!(peek(tokens)?, Token::Comma) {
+                            expect(tokens, Token::Comma)?;
+                            arguments.push(ExpressionWithoutType::parse(tokens, context)?);
+                        }
                         expect(tokens, Token::CloseParen)?;
-                        let factor =
-                            ExpressionWithoutType::parse_factor(tokens, context, false)?.unwrap();
-                        Some(ExpressionWithoutType::Cast(
-                            real_cast_type,
-                            Box::new(factor.into()),
+
+                        Some(ExpressionWithoutType::FunctionCall(
+                            new_name,
+                            arguments.into_iter().map(|a| a.into()).collect(),
                         ))
-                    } else {
-                        let expression = ExpressionWithoutType::parse(tokens, context)?;
-                        expect(tokens, Token::CloseParen)?;
-                        Some(expression)
                     }
-                }
-                Token::Identifier(name) => {
-                    expect(tokens, Token::Identifier("".to_string()))?;
-                    match peek(tokens)? {
-                        // this is a function call !!
-                        Token::OpenParen => {
-                            let (new_name, _external_link) =
-                                ExpressionWithoutType::resolve_identifier(&name, context)?;
+                    _ => {
+                        // VALIDATION STEP: Check the variable has been declared
+                        let (new_name, _external_link) =
+                            ExpressionWithoutType::resolve_identifier(&name, context)?;
 
-                            expect(tokens, Token::OpenParen)?;
-                            let mut arguments: Vec<ExpressionWithoutType> = Vec::new();
-                            if !matches!(peek(tokens)?, Token::CloseParen) {
-                                arguments.push(ExpressionWithoutType::parse(tokens, context)?);
-                            }
-                            while matches!(peek(tokens)?, Token::Comma) {
-                                expect(tokens, Token::Comma)?;
-                                arguments.push(ExpressionWithoutType::parse(tokens, context)?);
-                            }
-                            expect(tokens, Token::CloseParen)?;
-
-                            Some(ExpressionWithoutType::FunctionCall(
-                                new_name,
-                                arguments.into_iter().map(|a| a.into()).collect(),
-                            ))
-                        }
-                        _ => {
-                            // VALIDATION STEP: Check the variable has been declared
-                            let (new_name, _external_link) =
-                                ExpressionWithoutType::resolve_identifier(&name, context)?;
-
-                            Some(ExpressionWithoutType::Var(new_name))
-                        }
-                    }
-                }
-                t => {
-                    if allow_empty {
-                        None
-                    } else {
-                        return Err(format!("Invalid token at start of expression: {:?}", t).into());
+                        Some(ExpressionWithoutType::Var(new_name))
                     }
                 }
             }
+            Token::OpenParen => {
+                expect(tokens, Token::OpenParen)?;
+                let expression = ExpressionWithoutType::parse(tokens, context)?;
+                expect(tokens, Token::CloseParen)?;
+                Some(expression)
+            }
+            _ if match_constant(tokens)? => Some(ExpressionWithoutType::Constant(Constant::parse(
+                tokens, context,
+            )?)),
+            t => {
+                if allow_empty {
+                    None
+                } else {
+                    return Err(format!("Invalid token at start of expression: {:?}", t).into());
+                }
+            }
         };
-        while match_suffix_operator(tokens)? {
-            expression = Some(ExpressionWithoutType::Unary(
-                UnaryOperatorNode::parse_as_suffix(tokens, context)?,
-                Box::new(expression.unwrap().into()),
-            ));
-        }
 
         Ok(expression)
     }

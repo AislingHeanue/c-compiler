@@ -107,6 +107,7 @@ impl Convert for AssemblyType {
             Type::UnsignedLong => Ok(AssemblyType::Quadword),
             Type::Double => Ok(AssemblyType::Double),
             Type::Pointer(_) => Ok(AssemblyType::Quadword),
+            Type::Array(..) => todo!(),
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
         }
     }

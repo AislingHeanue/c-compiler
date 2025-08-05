@@ -3,7 +3,8 @@ use itertools::Itertools;
 use super::{
     BinaryOperatorNode, Block, BlockItemNode, CodeDisplay, Constant, DeclarationNode,
     DisplayContext, ExpressionNode, ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration,
-    ProgramNode, StatementNode, Type, UnaryOperatorNode, VariableDeclaration,
+    InitialiserNode, InitialiserWithoutType, ProgramNode, StatementNode, Type, UnaryOperatorNode,
+    VariableDeclaration,
 };
 use std::{borrow::Borrow, fmt::Display};
 
@@ -176,7 +177,32 @@ impl CodeDisplay for VariableDeclaration {
                 init.show(&mut context.indent()),
             )
         } else {
-            format!("{} {}", self.variable_type.show(context), self.name,)
+            format!("var {} {}", self.name, self.variable_type.show(context))
+        }
+    }
+}
+
+impl CodeDisplay for InitialiserNode {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        if let Some(t) = &self.1 {
+            format!("{} /* {} */", self.0.show(context), t.show(context))
+        } else {
+            self.0.show(context)
+        }
+    }
+}
+
+impl CodeDisplay for InitialiserWithoutType {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        match &self {
+            InitialiserWithoutType::Single(e) => e.show(context),
+            InitialiserWithoutType::Compound(initialisers) => format!(
+                "{{{}}}",
+                initialisers
+                    .iter()
+                    .map(|init| init.show(context))
+                    .join(", "),
+            ),
         }
     }
 }
@@ -242,6 +268,7 @@ impl CodeDisplay for Type {
             }
             Type::Double => "float64".to_string(),
             Type::Pointer(t) => format!("*{}", t.show(context)),
+            Type::Array(t, s) => format!("[{}]{}", s, t.show(context)),
         }
     }
 }
@@ -327,6 +354,9 @@ impl CodeDisplay for ExpressionWithoutType {
             }
             ExpressionWithoutType::Dereference(e) => format!("*{}", e.show(context)),
             ExpressionWithoutType::AddressOf(e) => format!("&{}", e.show(context)),
+            ExpressionWithoutType::Subscript(src, inner) => {
+                format!("{}[{}]", src.show(context), inner.show(context))
+            }
         }
     }
 }

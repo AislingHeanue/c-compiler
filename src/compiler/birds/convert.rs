@@ -38,6 +38,7 @@ fn get_typed_constant(value: u32, target: &Type) -> BirdsValueNode {
         Type::UnsignedInteger => BirdsValueNode::Constant(Constant::UnsignedInteger(value)),
         Type::UnsignedLong => BirdsValueNode::Constant(Constant::UnsignedLong(value.into())),
         Type::Double => BirdsValueNode::Constant(Constant::Double(value.into())),
+        Type::Array(..) => unreachable!(),
         Type::Pointer(_) => unreachable!(),
         Type::Function(_, _) => unreachable!(),
     }
@@ -92,7 +93,7 @@ impl Convert for ProgramNode {
                                 &Constant::Integer(0),
                                 &info.symbol_type,
                             ),
-                            InitialValue::Initial(i) => i.clone(),
+                            InitialValue::Initial(_i) => todo!(), //i.clone(),
                             InitialValue::None => return None,
                         };
                         Some(BirdsTopLevel::StaticVariable(
@@ -436,7 +437,7 @@ impl Convert for ForInitialiserNode {
 impl Convert for VariableDeclaration {
     type Output = Vec<BirdsInstructionNode>;
 
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+    fn convert(self, _context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         // do not emit any instructions for static and extern variable definitions. These are
         // handled after the rest of the ProgramNode has been converted.
         if self.storage_class.is_some() {
@@ -444,17 +445,18 @@ impl Convert for VariableDeclaration {
         }
 
         match self.init {
-            Some(e) => {
-                let output_type = e.1.clone();
-                let assignment_expression = ExpressionNode(
-                    ExpressionWithoutType::Assignment(
-                        Box::new(ExpressionWithoutType::Var(self.name).into()),
-                        Box::new(e),
-                    ),
-                    output_type,
-                );
-                let (instructions, _new_src) = assignment_expression.convert(context)?;
-                Ok(instructions)
+            Some(_e) => {
+                todo!()
+                // let output_type = e.1.clone();
+                // let assignment_expression = ExpressionNode(
+                //     ExpressionWithoutType::Assignment(
+                //         Box::new(ExpressionWithoutType::Var(self.name).into()),
+                //         Box::new(e),
+                //     ),
+                //     output_type,
+                // );
+                // let (instructions, _new_src) = assignment_expression.convert(_context)?;
+                // Ok(instructions)
             }
             None => Ok(Vec::new()),
         }
@@ -848,6 +850,7 @@ impl Convert for ExpressionNode {
                     Destination::Dereference(val) => Ok((instructions, val.into())),
                 }
             }
+            ExpressionWithoutType::Subscript(_src, _inner) => todo!(),
         }
     }
 }
@@ -868,6 +871,7 @@ impl ExpressionWithoutType {
                 Type::UnsignedInteger | Type::UnsignedLong => {
                     instructions.push(BirdsInstructionNode::UintToDouble(src, dst.clone()));
                 }
+                Type::Array(..) => unreachable!(),
                 Type::Pointer(_) => unreachable!(),
                 Type::Double => unreachable!(),
                 Type::Function(_, _) => unreachable!(),
@@ -881,6 +885,7 @@ impl ExpressionWithoutType {
                     instructions.push(BirdsInstructionNode::DoubleToUint(src, dst.clone()));
                 }
                 Type::Pointer(_) => unreachable!(),
+                Type::Array(..) => unreachable!(),
                 Type::Double => unreachable!(),
                 Type::Function(_, _) => unreachable!(),
             }
