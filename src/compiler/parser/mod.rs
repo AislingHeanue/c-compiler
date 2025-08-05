@@ -181,12 +181,12 @@ pub enum Declarator {
     // params info and any further declarator to apply to the parent type
     Function(Box<Declarator>, Vec<(Type, Declarator)>),
     // containing type and size
-    Array(Box<Declarator>, i32),
+    Array(Box<Declarator>, u64),
 }
 
 pub enum AbstractDeclarator {
     Pointer(Box<AbstractDeclarator>),
-    Array(Box<AbstractDeclarator>, i32),
+    Array(Box<AbstractDeclarator>, u64),
     Base,
 }
 

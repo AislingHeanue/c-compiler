@@ -8,7 +8,7 @@ pub enum Type {
     // return type, param types
     Function(Box<Type>, Vec<Type>),
     // type and length
-    Array(Box<Type>, i32),
+    Array(Box<Type>, u64),
     Pointer(Box<Type>),
 }
 

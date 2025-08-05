@@ -415,7 +415,7 @@ impl Parse for InitialiserNode {
                 initialisers.push(InitialiserNode::parse(tokens, context)?);
                 while matches!(peek(tokens)?, Token::Comma) {
                     expect(tokens, Token::Comma)?;
-                    if matches!(peek(tokens)?, Token::CloseParen) {
+                    if matches!(peek(tokens)?, Token::CloseBrace) {
                         //baited, no new init here
                         break;
                     }
@@ -538,17 +538,18 @@ impl Declarator {
     ) -> Result<Declarator, Box<dyn Error>> {
         expect(tokens, Token::OpenSquareBracket)?;
         let c = Constant::parse(tokens, context)?;
-        let maybe_i: Option<i32> = match c {
-            Constant::Integer(i) => Some(i),
+        let maybe_i: Option<u64> = match c {
+            Constant::Integer(i) => i.try_into().ok(),
             Constant::Long(i) => i.try_into().ok(),
-            Constant::UnsignedInteger(i) => i.try_into().ok(),
-            Constant::UnsignedLong(i) => i.try_into().ok(),
+            Constant::UnsignedInteger(i) => Some(i.into()),
+            Constant::UnsignedLong(i) => Some(i),
             _ => None,
         };
         if let Some(i) = maybe_i {
             if i < 1 {
                 return Err("Array dimension must be at least 1".into());
             }
+
             declarator = Declarator::Array(Box::new(declarator), i);
         } else {
             return Err("Constant value in array type must be an integer".into());
@@ -601,16 +602,16 @@ impl Declarator {
 impl Parse for AbstractDeclarator {
     fn parse(
         tokens: &mut VecDeque<Token>,
-        _context: &mut ParseContext,
+        context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
         match peek(tokens)? {
             Token::Star => {
                 expect(tokens, Token::Star)?;
                 Ok(AbstractDeclarator::Pointer(Box::new(
-                    AbstractDeclarator::parse(tokens, _context)?,
+                    AbstractDeclarator::parse(tokens, context)?,
                 )))
             }
-            _ => Ok(AbstractDeclarator::parse_direct(tokens, _context)?),
+            _ => Ok(AbstractDeclarator::parse_direct(tokens, context)?),
         }
     }
 }
@@ -630,6 +631,13 @@ impl AbstractDeclarator {
                 }
                 Ok(a)
             }
+            Token::OpenSquareBracket => {
+                let mut a = AbstractDeclarator::Base;
+                while matches!(peek(tokens)?, Token::OpenSquareBracket) {
+                    a = AbstractDeclarator::parse_array(tokens, a, context)?;
+                }
+                Ok(a)
+            }
             _ => Ok(AbstractDeclarator::Base),
         }
     }
@@ -641,17 +649,18 @@ impl AbstractDeclarator {
     ) -> Result<AbstractDeclarator, Box<dyn Error>> {
         expect(tokens, Token::OpenSquareBracket)?;
         let c = Constant::parse(tokens, context)?;
-        let maybe_i: Option<i32> = match c {
-            Constant::Integer(i) => Some(i),
+        let maybe_i: Option<u64> = match c {
+            Constant::Integer(i) => i.try_into().ok(),
             Constant::Long(i) => i.try_into().ok(),
-            Constant::UnsignedInteger(i) => i.try_into().ok(),
-            Constant::UnsignedLong(i) => i.try_into().ok(),
+            Constant::UnsignedInteger(i) => Some(i.into()),
+            Constant::UnsignedLong(i) => Some(i),
             _ => None,
         };
         if let Some(i) = maybe_i {
             if i < 1 {
                 return Err("Array dimension must be at least 1".into());
             }
+
             a_declarator = AbstractDeclarator::Array(Box::new(a_declarator), i);
         } else {
             return Err("Constant value in array type must be an integer".into());
@@ -968,6 +977,8 @@ impl ExpressionWithoutType {
                     expect(tokens, Token::OpenParen)?;
                     if match_type(tokens)? {
                         let cast_type = Type::parse(tokens, context)?;
+                        println!("{:?}", cast_type);
+                        println!("{:?}", cast_type);
                         let abstract_declarator = AbstractDeclarator::parse(tokens, context)?;
                         let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
                         expect(tokens, Token::CloseParen)?;
