@@ -18,7 +18,7 @@ enum TopLevel {
     // header instructions, name, body, global
     Function(String, Vec<Instruction>, bool),
     // name global alignment init
-    StaticVariable(String, bool, u32, StaticInitial),
+    StaticVariable(String, bool, u32, Vec<StaticInitial>),
     // used for all floating point constants. Needed anytime we need eg.
     // 'float(1)' or 'float(0)' or 'float(i64::MAX+1)'
     // will be extended to other types later.
@@ -31,6 +31,8 @@ pub enum AssemblyType {
     Longword, // i32, int
     Quadword, // i64, long
     Double,   // oh boy
+    // size, alignment
+    ByteArray(u32, u32), // 'opaque chunk of memory' eg arrays
 }
 
 #[derive(Debug)]
@@ -87,11 +89,15 @@ enum Instruction {
 
 #[derive(Clone, Debug)]
 enum Operand {
-    Imm(ImmediateValue),   //constant numeric value
-    Reg(Register),         // register in assembly
-    MockReg(String),       // mocked register for temporary use.
-    Memory(Register, i32), // entry whose value is the offset from the specified register.
-    Data(String),          // used for static and global variables
+    Imm(ImmediateValue),     //constant numeric value
+    Reg(Register),           // register in assembly
+    MockReg(String),         // mocked register for temporary use.
+    Memory(Register, i32),   // entry whose value is the offset from the specified register.
+    MockMemory(String, i32), // for memory objects which may fit into a register instead.
+    Data(String),            // used for static and global variables
+    // used to index into compound objects during initialisation (base, index, scale)
+    // computes base + index * scale in 1 cycle :)
+    Indexed(Register, Register, i32),
 }
 
 #[derive(Clone, Debug)]
@@ -351,9 +357,9 @@ pub enum ValidationPass {
 struct ValidateContext {
     symbols: HashMap<String, AssemblySymbolInfo>,
     pass: Option<ValidationPass>,
-    current_stack_size: i32,
+    current_stack_size: u32,
     current_stack_locations: HashMap<String, i32>,
-    stack_sizes: HashMap<String, i32>,
+    stack_sizes: HashMap<String, u32>,
     current_function_name: Option<String>,
     num_labels: u32,
 }

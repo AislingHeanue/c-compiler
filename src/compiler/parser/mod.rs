@@ -6,6 +6,7 @@ use std::{
     error::Error,
 };
 
+mod constant;
 mod display;
 mod parse;
 mod validate;
@@ -184,6 +185,7 @@ pub enum Declarator {
     Array(Box<Declarator>, u64),
 }
 
+#[derive(Debug)]
 pub enum AbstractDeclarator {
     Pointer(Box<AbstractDeclarator>),
     Array(Box<AbstractDeclarator>, u64),
@@ -238,11 +240,14 @@ where
 #[derive(Clone, Debug)]
 enum ValidationPass {
     // variable resolution is covered by parse.rs
-    CheckLvalues,
     ReadLabels,
     ValidateLabels,
     LabelLoops,
     TypeChecking,
+    // type checking needs to occur before this step, to make sure all array vars decay to
+    // an array pointer, which is a variable type  that we can't assign to as 'AddressOf'
+    // is not an lvalue.
+    CheckLvalues,
 }
 
 #[derive(Debug)]
@@ -267,11 +272,11 @@ struct ValidateContext {
 
 pub fn validate(parsed: &mut ProgramNode) -> Result<HashMap<String, SymbolInfo>, Box<dyn Error>> {
     let passes: Vec<ValidationPass> = vec![
-        ValidationPass::CheckLvalues,
         ValidationPass::ReadLabels,
         ValidationPass::ValidateLabels,
         ValidationPass::LabelLoops,
         ValidationPass::TypeChecking,
+        ValidationPass::CheckLvalues,
     ];
     let mut validate_context = ValidateContext {
         pass: passes.first().unwrap().clone(),

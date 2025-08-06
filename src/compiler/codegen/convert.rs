@@ -107,7 +107,16 @@ impl Convert for AssemblyType {
             Type::UnsignedLong => Ok(AssemblyType::Quadword),
             Type::Double => Ok(AssemblyType::Double),
             Type::Pointer(_) => Ok(AssemblyType::Quadword),
-            Type::Array(..) => todo!(),
+            Type::Array(t, size) => {
+                let assembly_t = AssemblyType::convert(*t, _context)?;
+                let size = assembly_t.get_size() * size as u32;
+                let alignment = if size < 16 {
+                    assembly_t.get_alignment()
+                } else {
+                    16
+                };
+                Ok(AssemblyType::ByteArray(size, alignment))
+            }
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
         }
     }
@@ -140,6 +149,16 @@ impl AssemblyType {
             AssemblyType::Longword => 4,
             AssemblyType::Quadword => 8,
             AssemblyType::Double => 8,
+            AssemblyType::ByteArray(_size, alignment) => *alignment,
+        }
+    }
+
+    pub fn get_size(&self) -> u32 {
+        match self {
+            AssemblyType::Longword => 4,
+            AssemblyType::Quadword => 8,
+            AssemblyType::Double => 8,
+            AssemblyType::ByteArray(size, _alignment) => *size,
         }
     }
 }
@@ -486,6 +505,14 @@ impl Convert for Instruction {
                     Operand::convert(dst, context)?,
                 )]
             }
+            BirdsInstructionNode::CopyToOffset(src, dst, offset) => {
+                let t = AssemblyType::infer(&src, context)?.0;
+                vec![Instruction::Mov(
+                    t,
+                    Operand::convert(src, context)?,
+                    Operand::MockMemory(dst, offset),
+                )]
+            }
             BirdsInstructionNode::Jump(s) => vec![Instruction::Jmp(s)],
             BirdsInstructionNode::JumpZero(src, s) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
@@ -726,6 +753,7 @@ impl Convert for Instruction {
                         ]
                     }
                     AssemblyType::Double => unreachable!(),
+                    AssemblyType::ByteArray(_size, _align) => todo!(),
                 }
             }
             BirdsInstructionNode::IntToDouble(src, dst) => {
@@ -814,7 +842,7 @@ impl Convert for Instruction {
                             Instruction::Label(format!("end_{}", &instruction_label)),
                         ]
                     }
-                    AssemblyType::Double => unreachable!(),
+                    AssemblyType::Double | AssemblyType::ByteArray(_, _) => unreachable!(),
                 }
             }
             BirdsInstructionNode::GetAddress(src, dst) => {
@@ -853,6 +881,66 @@ impl Convert for Instruction {
                     ),
                 ]
             }
+            BirdsInstructionNode::AddPointer(ptr, index, scale, dst) => {
+                match (scale, index.get_constant_value()) {
+                    (_, Some(index_value)) => {
+                        vec![
+                            Instruction::Mov(
+                                AssemblyType::Quadword,
+                                Operand::convert(ptr, context)?,
+                                Operand::Reg(Register::AX),
+                            ),
+                            Instruction::Lea(
+                                Operand::Memory(Register::AX, index_value * scale),
+                                Operand::convert(dst, context)?,
+                            ),
+                        ]
+                    }
+                    (1 | 2 | 4 | 8, _) => {
+                        vec![
+                            Instruction::Mov(
+                                AssemblyType::Quadword,
+                                Operand::convert(ptr, context)?,
+                                Operand::Reg(Register::AX),
+                            ),
+                            Instruction::Mov(
+                                AssemblyType::Quadword,
+                                Operand::convert(index, context)?,
+                                Operand::Reg(Register::DX),
+                            ),
+                            Instruction::Lea(
+                                Operand::Indexed(Register::AX, Register::DX, scale),
+                                Operand::convert(dst, context)?,
+                            ),
+                        ]
+                    }
+
+                    _ => {
+                        vec![
+                            Instruction::Mov(
+                                AssemblyType::Quadword,
+                                Operand::convert(ptr, context)?,
+                                Operand::Reg(Register::AX),
+                            ),
+                            Instruction::Mov(
+                                AssemblyType::Quadword,
+                                Operand::convert(index, context)?,
+                                Operand::Reg(Register::DX),
+                            ),
+                            Instruction::Binary(
+                                BinaryOperator::Mult,
+                                AssemblyType::Quadword,
+                                Operand::Imm(ImmediateValue::Signed(scale.into())),
+                                Operand::Reg(Register::DX),
+                            ),
+                            Instruction::Lea(
+                                Operand::Indexed(Register::AX, Register::DX, 1),
+                                Operand::convert(dst, context)?,
+                            ),
+                        ]
+                    }
+                }
+            }
         })
     }
 }
@@ -881,7 +969,28 @@ impl Convert for Operand {
             BirdsValueNode::Constant(Constant::Double(c)) => {
                 Ok(create_static_constant(8, StaticInitial::Double(c), context))
             }
-            BirdsValueNode::Var(s) => Ok(Operand::MockReg(s)),
+            BirdsValueNode::Var(s) => {
+                let var_type = &context.symbols.get(&s).unwrap().symbol_type;
+                if var_type.is_scalar() {
+                    Ok(Operand::MockReg(s))
+                } else {
+                    Ok(Operand::MockMemory(s, 0))
+                }
+            }
+        }
+    }
+}
+
+impl BirdsValueNode {
+    fn get_constant_value(&self) -> Option<i32> {
+        match self {
+            BirdsValueNode::Constant(Constant::Integer(c)) => Some(*c),
+            BirdsValueNode::Constant(Constant::Long(c)) => Some((*c).try_into().unwrap()),
+            BirdsValueNode::Constant(Constant::UnsignedInteger(c)) => {
+                Some((*c).try_into().unwrap())
+            }
+            BirdsValueNode::Constant(Constant::UnsignedLong(c)) => Some((*c).try_into().unwrap()),
+            _ => None,
         }
     }
 }

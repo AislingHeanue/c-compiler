@@ -1,6 +1,5 @@
 use std::{collections::HashMap, error::Error};
 
-use conv::{ApproxInto, ConvUtil, RoundToZero, Wrapping};
 use itertools::process_results;
 
 use crate::compiler::types::{InitialValue, StaticInitial};
@@ -69,7 +68,30 @@ impl Validate for FunctionDeclaration {
 
 impl FunctionDeclaration {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        let (return_type, arg_types) =
+            if let Type::Function(ref return_type, ref mut arg_types) = &mut self.function_type {
+                (return_type, arg_types)
+            } else {
+                return Err("Function is not a function type".into());
+            };
+        if matches!(**return_type, Type::Array(_, _)) {
+            return Err("Function cannot return an array".into());
+        }
+
+        // replace all array arg types in the function type with pointer types
+        for arg in arg_types.iter_mut() {
+            if let Type::Array(t, _size) = arg {
+                *arg = Type::Pointer(t.clone())
+            };
+        }
+
+        // now that the type has been updated, drop the mutable reference to function_type
         let this_type = &self.function_type;
+        let arg_types = if let Type::Function(_, ref arg_types) = this_type {
+            arg_types
+        } else {
+            unreachable!()
+        };
 
         let mut is_defined = self.body.is_some();
         let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
@@ -110,10 +132,6 @@ impl FunctionDeclaration {
                 storage: StorageInfo::Function(is_defined, is_global),
             },
         );
-        let arg_types = match this_type {
-            Type::Function(_, v) => v,
-            _ => return Err("Incorrect Type for function".into()),
-        };
 
         // add the parameters to the types map if this function has a body. This is done
         // because it allows those parameters to be type checked in the scope that they are
@@ -122,10 +140,14 @@ impl FunctionDeclaration {
         // NOTE: PARAMS ARE ADDED TO THE SYMBOL MAP WITH TYPES HERE (this took ages to confirm)
         if self.body.is_some() {
             for (param, arg) in self.params.iter().zip(arg_types.iter()) {
+                let converted_arg = match arg {
+                    Type::Array(t, _size) => Type::Pointer(t.clone()),
+                    _ => arg.clone(),
+                };
                 context.symbols.insert(
                     param.clone(),
                     SymbolInfo {
-                        symbol_type: arg.clone(),
+                        symbol_type: converted_arg,
                         storage: StorageInfo::Automatic,
                     },
                 );
@@ -151,6 +173,9 @@ impl Validate for VariableDeclaration {
 
 impl Validate for InitialiserNode {
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        // if matches!(context.pass, ValidationPass::TypeChecking) {
+        //     self.check_types(context)?
+        // }
         match self.0 {
             InitialiserWithoutType::Single(ref mut e) => {
                 e.validate(context)?;
@@ -171,8 +196,11 @@ impl InitialiserNode {
         target_type: &Type,
         _context: &mut ValidateContext,
     ) -> Result<Vec<StaticInitial>, Box<dyn Error>> {
-        let init_list: Vec<StaticInitial> = match self.0 {
-            InitialiserWithoutType::Single(ref i) => {
+        let init_list: Vec<StaticInitial> = match (target_type, &mut self.0) {
+            (Type::Array(..), InitialiserWithoutType::Single(_)) => {
+                return Err("Cannot initialise a static array with a scalar type".into());
+            }
+            (_, InitialiserWithoutType::Single(ref i)) => {
                 if matches!(target_type, Type::Pointer(_)) && !i.equals_null_pointer() {
                     return Err("Cannot initialise a static pointer with a non-pointer type".into());
                 }
@@ -186,30 +214,124 @@ impl InitialiserNode {
 
                 vec![c.convert_to(target_type)]
             }
-            InitialiserWithoutType::Compound(ref mut initialisers) => process_results(
-                initialisers
-                    .iter_mut()
-                    .map(|init| init.create_static_init_list(target_type, _context)),
-                |iter| iter.flatten().collect(),
-            )?,
+            (Type::Array(t, size), InitialiserWithoutType::Compound(ref mut initialisers)) => {
+                if initialisers.len() > (*size).try_into().unwrap() {
+                    return Err("Too many initialisers in static declaration".into());
+                }
+                let mut statics: Vec<StaticInitial> = process_results(
+                    initialisers
+                        .iter_mut()
+                        .map(|init| init.create_static_init_list(t, _context)),
+                    |iter| iter.flatten().collect(),
+                )?;
+                if initialisers.len() < (*size).try_into().unwrap() {
+                    let offset = *size as i32 - initialisers.len() as i32;
+                    statics.push(StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(
+                        t.get_size() * offset,
+                    )));
+                }
+                statics
+            }
+            (_, InitialiserWithoutType::Compound(_)) => {
+                return Err("Only arrays can be initialised with a compound initialiser".into())
+            }
         };
         Ok(init_list)
+    }
+
+    fn check_types(
+        &mut self,
+        target_type: &Type,
+        context: &mut ValidateContext,
+    ) -> Result<(), Box<dyn Error>> {
+        self.1 = Some(target_type.clone());
+        match (target_type, &mut self.0) {
+            (_, InitialiserWithoutType::Single(ref mut init_e)) => {
+                init_e.check_types_and_convert(context)?;
+                init_e.convert_type_by_assignment(target_type)?;
+            }
+            (Type::Array(t, size), InitialiserWithoutType::Compound(ref mut c_init)) => {
+                if c_init.len() > (*size).try_into().unwrap() {
+                    return Err("Initialiser has the wrong number of elements".into());
+                }
+                for init in c_init.iter_mut() {
+                    init.check_types(t, context)?;
+                }
+                while c_init.len() < (*size).try_into().unwrap() {
+                    c_init.push(InitialiserNode::zero(t));
+                }
+            }
+            (_, InitialiserWithoutType::Compound(_)) => {
+                return Err("Compound initialiser can only be used for arrays".into());
+            }
+        }
+        Ok(())
+    }
+
+    fn zero(target_type: &Type) -> InitialiserNode {
+        match target_type {
+            Type::Integer => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::Integer(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
+            Type::Long => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::Long(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
+            Type::UnsignedInteger => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::UnsignedInteger(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
+            Type::UnsignedLong => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::UnsignedLong(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
+            Type::Double => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::Double(0.)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
+            Type::Array(t, size) => InitialiserNode(
+                InitialiserWithoutType::Compound(
+                    (0..*size).map(|_| InitialiserNode::zero(t)).collect(),
+                ),
+                Some(target_type.clone()),
+            ),
+            Type::Function(_, _) => unreachable!(),
+            Type::Pointer(_) => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::UnsignedLong(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
+        }
     }
 }
 
 impl VariableDeclaration {
     fn validate_file_scope(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
-        // println!("{:?}", self);
         let mut initial_value = if let Some(init) = self.init.as_mut() {
+            init.validate(context)?;
             InitialValue::Initial(init.create_static_init_list(&self.variable_type, context)?)
-        } else if self.init.is_none() {
-            if matches!(self.storage_class, Some(StorageClass::Extern)) {
-                InitialValue::None
-            } else {
-                InitialValue::Tentative
-            }
+        } else if matches!(self.storage_class, Some(StorageClass::Extern)) {
+            InitialValue::None
         } else {
-            return Err("Initialiser for file-scope variable must be constant".into());
+            InitialValue::Tentative
         };
 
         let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
@@ -287,25 +409,16 @@ impl VariableDeclaration {
                 // don't call check_types here, since we don't want to pollute constant expressions
                 // with more complex expressions, which we may end up doing with other expressions
                 let initial_value = match &mut self.init {
-                    Some(ref mut initialiser) => InitialValue::Initial(
-                        initialiser.create_static_init_list(&self.variable_type, context)?,
-                    ),
-                    None => match self.variable_type {
-                        Type::Integer => InitialValue::initial(StaticInitial::integer(0)),
-                        Type::Long => InitialValue::initial(StaticInitial::long(0)),
-                        Type::UnsignedInteger => {
-                            InitialValue::initial(StaticInitial::unsigned_integer(0))
-                        }
-                        Type::UnsignedLong => {
-                            InitialValue::initial(StaticInitial::unsigned_long(0))
-                        }
-                        Type::Double => InitialValue::initial(StaticInitial::Double(0.)),
-                        // Null pointers are initialised to 0_u64, which has the same binary
-                        // representation as a null pointer.
-                        Type::Pointer(_) => InitialValue::initial(StaticInitial::unsigned_long(0)),
-                        Type::Array(..) => todo!(), //InitialValue::initial(StaticInitial::unsigned_long(0)),
-                        Type::Function(_, _) => unreachable!(),
-                    },
+                    Some(ref mut initialiser) => {
+                        initialiser.validate(context)?;
+                        InitialValue::Initial(
+                            initialiser.create_static_init_list(&self.variable_type, context)?,
+                        )
+                    }
+                    None => {
+                        let len = self.variable_type.get_size();
+                        InitialValue::initial(StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(len)))
+                    }
                 };
                 context.symbols.insert(
                     self.name.clone(),
@@ -325,167 +438,12 @@ impl VariableDeclaration {
                 );
 
                 // cast the expression to the appropriate type at runtime
-                // ensure that this section runs after the variable exists in the symbol table, so
-                // that the definition is allowed to refer to its own value
-                //
-                // mangle this expression a little so that the type check reads it as an
-                // assignment, and then once validated, convert it back to the original 'init'
-                // expression
-                match self.init.as_mut().map(|i| &mut i.0) {
-                    Some(InitialiserWithoutType::Single(ref mut s)) => {
-                        let mut init_assignment: ExpressionNode =
-                            ExpressionWithoutType::Assignment(
-                                Box::new(ExpressionWithoutType::Var(self.name.clone()).into()),
-                                Box::new(s.clone()),
-                            )
-                            .into();
-                        init_assignment.check_types(context)?;
-                        // if let ExpressionWithoutType::Assignment(_, new_init) = init_assignment.0 {
-                        //     *init = *new_init;
-                        // } else {
-                        //     unreachable!()
-                        // }
-                    }
-                    Some(InitialiserWithoutType::Compound(_)) => {
-                        return Err("Cannot cast a compound initialiser".into());
-                    }
-
-                    None => (),
+                if let Some(init) = &mut self.init {
+                    init.check_types(&self.variable_type, context)?;
                 }
             }
         }
         Ok(())
-    }
-}
-
-// this block will likely move to a type-conversion module of some kind in part 3 for compile-time
-// constant-folding
-impl Constant {
-    pub fn convert_to(&self, target: &Type) -> StaticInitial {
-        if matches!(target, Type::Pointer(_)) {
-            self.convert_to_pointer()
-        } else {
-            match self {
-                Constant::Double(_) => Self::convert_double_to(self, target),
-                _ => Self::convert_ordinal_to(self, target),
-            }
-        }
-    }
-    pub fn convert_ordinal_to(&self, target: &Type) -> StaticInitial {
-        // match target {}
-        match self {
-            Constant::Integer(i) => StaticInitial::from_number(*i, target),
-            Constant::Long(i) => StaticInitial::from_number(*i, target),
-            Constant::UnsignedInteger(i) => StaticInitial::from_number(*i, target),
-            Constant::UnsignedLong(i) => StaticInitial::from_number(*i, target),
-            Constant::Double(_) => unreachable!(), // StaticInitial::from_number(*i, target),
-        }
-    }
-    pub fn convert_double_to(&self, target: &Type) -> StaticInitial {
-        // match target {}
-        match self {
-            Constant::Integer(i) => StaticInitial::from_number(*i, target),
-            Constant::Long(i) => StaticInitial::from_number(*i, target),
-            Constant::UnsignedInteger(i) => StaticInitial::from_number(*i, target),
-            Constant::UnsignedLong(i) => StaticInitial::from_number(*i, target),
-            Constant::Double(i) => StaticInitial::from_double(*i, target),
-        }
-    }
-    pub fn convert_to_pointer(&self) -> StaticInitial {
-        match self {
-            Constant::Integer(0)
-            | Constant::Long(0)
-            | Constant::UnsignedInteger(0)
-            | Constant::UnsignedLong(0) => StaticInitial::unsigned_long(0),
-            _ => unreachable!(),
-        }
-    }
-}
-
-trait ApproximableOrdinal:
-    ApproxInto<i32, Wrapping>
-    + ApproxInto<i64, Wrapping>
-    + ApproxInto<u32, Wrapping>
-    + ApproxInto<u64, Wrapping>
-    + ApproxInto<f64>
-{
-}
-impl ApproximableOrdinal for i32 {}
-impl ApproximableOrdinal for i64 {}
-impl ApproximableOrdinal for u32 {}
-impl ApproximableOrdinal for u64 {}
-
-impl StaticInitial {
-    fn from_double(i: f64, target: &Type) -> StaticInitial {
-        match target {
-            Type::Integer => StaticInitial::integer_from_double(i),
-            Type::Long => StaticInitial::long_from_double(i),
-            Type::UnsignedInteger => StaticInitial::unsigned_integer_from_double(i),
-            Type::UnsignedLong => StaticInitial::unsigned_long_from_double(i),
-            Type::Double => StaticInitial::Double(i),
-            Type::Function(_, _) => unreachable!(),
-            Type::Pointer(_) => unreachable!(),
-            Type::Array(..) => unreachable!(),
-        }
-    }
-
-    fn from_number<T: ApproximableOrdinal>(i: T, target: &Type) -> StaticInitial {
-        match target {
-            Type::Integer => StaticInitial::integer(i),
-            Type::Long => StaticInitial::long(i),
-            Type::UnsignedInteger => StaticInitial::unsigned_integer(i),
-            Type::UnsignedLong => StaticInitial::unsigned_long(i),
-            Type::Double => StaticInitial::double(i),
-            Type::Pointer(_) | Type::Array(..) => {
-                let value = StaticInitial::unsigned_long(i);
-                if !matches!(
-                    value,
-                    StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(0))
-                ) {
-                    panic!("Invalid numeric value for initialising pointer");
-                }
-                value
-            }
-            Type::Function(_, _) => unreachable!(),
-        }
-    }
-
-    fn integer<T: ApproxInto<i32, Wrapping>>(i: T) -> StaticInitial {
-        StaticInitial::Ordinal(OrdinalStatic::Integer(ConvUtil::approx_as_by(i).unwrap()))
-    }
-    fn long<T: ApproxInto<i64, Wrapping>>(i: T) -> StaticInitial {
-        StaticInitial::Ordinal(OrdinalStatic::Long(ConvUtil::approx_as_by(i).unwrap()))
-    }
-    fn unsigned_integer<T: ApproxInto<u32, Wrapping>>(i: T) -> StaticInitial {
-        StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(
-            ConvUtil::approx_as_by(i).unwrap(),
-        ))
-    }
-    fn unsigned_long<T: ApproxInto<u64, Wrapping>>(i: T) -> StaticInitial {
-        StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(
-            ConvUtil::approx_as_by(i).unwrap(),
-        ))
-    }
-
-    fn double<T: ApproxInto<f64>>(i: T) -> StaticInitial {
-        StaticInitial::Double(ConvUtil::approx_as(i).unwrap())
-    }
-
-    fn integer_from_double<T: ApproxInto<i32, RoundToZero>>(i: T) -> StaticInitial {
-        StaticInitial::Ordinal(OrdinalStatic::Integer(ConvUtil::approx_as_by(i).unwrap()))
-    }
-    fn long_from_double<T: ApproxInto<i64, RoundToZero>>(i: T) -> StaticInitial {
-        StaticInitial::Ordinal(OrdinalStatic::Long(ConvUtil::approx_as_by(i).unwrap()))
-    }
-    fn unsigned_integer_from_double<T: ApproxInto<u32, RoundToZero>>(i: T) -> StaticInitial {
-        StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(
-            ConvUtil::approx_as_by(i).unwrap(),
-        ))
-    }
-    fn unsigned_long_from_double<T: ApproxInto<u64, RoundToZero>>(i: T) -> StaticInitial {
-        StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(
-            ConvUtil::approx_as_by(i).unwrap(),
-        ))
     }
 }
 
@@ -613,7 +571,7 @@ impl Validate for StatementNode {
                         StatementNode::leave_switch(previous, context)
                     }
                     ValidationPass::TypeChecking => {
-                        expression.check_types(context)?;
+                        expression.check_types_and_convert(context)?;
                         let previous =
                             StatementNode::enter_switch_type_checking(expression, context);
 
@@ -720,7 +678,7 @@ impl StatementNode {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         match self {
             StatementNode::Return(e) => {
-                e.check_types(context)?;
+                e.check_types_and_convert(context)?;
                 if let Type::Function(out, _) = &context
                     .symbols
                     .get(context.current_function_name.as_ref().unwrap())
@@ -733,7 +691,7 @@ impl StatementNode {
                 };
             }
             StatementNode::Case(ref mut e, _, ref label) => {
-                e.check_types(context)?;
+                e.check_types_and_convert(context)?;
 
                 let target_type = context
                     .current_switch_type
@@ -748,9 +706,7 @@ impl StatementNode {
                 let ordinal = if let StaticInitial::Ordinal(ref o) = constant_value {
                     o
                 } else {
-                    return Err(
-                        "None ordinal (eg Double) expression found in case statement".into(),
-                    );
+                    return Err("Non ordinal (eg Double) expression found in case statement".into());
                 };
 
                 let already_present = context
@@ -864,7 +820,7 @@ impl Validate for ForInitialiserNode {
 impl Validate for ExpressionNode {
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         if matches!(context.pass, ValidationPass::CheckLvalues) {
-            self.validate_lvalues_are_variables(context)?;
+            self.validate_lvalues(context)?;
         }
         if matches!(context.pass, ValidationPass::TypeChecking) {
             self.check_types(context)?;
@@ -915,10 +871,7 @@ impl Validate for ExpressionNode {
 }
 
 impl ExpressionNode {
-    fn validate_lvalues_are_variables(
-        &mut self,
-        _context: &mut ValidateContext,
-    ) -> Result<(), Box<dyn Error>> {
+    fn validate_lvalues(&mut self, _context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         match &self.0 {
             ExpressionWithoutType::Unary(
                 UnaryOperatorNode::PrefixIncrement
@@ -929,7 +882,7 @@ impl ExpressionNode {
             ) => {
                 // VALIDATION: Make sure ++ and -- only operate on variables, not constants or
                 // other expressions
-                if !src.0.is_lvalue() {
+                if !src.0.match_lvalue() {
                     return Err(format!(
                         "Can't perform increment/decrement operation on non-variable: {:?}",
                         src,
@@ -938,12 +891,12 @@ impl ExpressionNode {
                 }
             }
             ExpressionWithoutType::Assignment(ref dst, _) => {
-                if !dst.0.is_lvalue() {
+                if !dst.0.match_lvalue() {
                     return Err(format!("Can't assign to non-variable: {:?}", dst).into());
                 }
             }
             ExpressionWithoutType::Compound(_, ref left, _) => {
-                if !left.0.is_lvalue() {
+                if !left.0.match_lvalue() {
                     return Err(format!("Can't assign to non-variable: {:?}", left).into());
                 }
             }
@@ -1015,6 +968,9 @@ impl ExpressionNode {
     }
 
     fn convert_type_by_assignment(&mut self, target: &Type) -> Result<(), Box<dyn Error>> {
+        if matches!(target, Type::Array(_, _)) {
+            return Err("Can't assign to an array type".into());
+        }
         let t1 = self.1.as_ref().unwrap();
         if t1 != target {
             if (t1.is_arithmetic() && target.is_arithmetic())
@@ -1023,7 +979,8 @@ impl ExpressionNode {
                 self.convert_type(target);
             } else {
                 return Err(
-                    format!("Can't convert {:?} to {:?} by assignment", self, target).into(),
+                    format!("Can't convert {:?} to {:?} by assignment", t1, target).into(),
+                    // format!("Can't convert {:?} to {:?} by assignment", self, target).into(),
                 );
             }
         }
@@ -1047,7 +1004,7 @@ impl ExpressionNode {
                         return Err("Function call has the wrong number of arguments".into());
                     }
                     for (arg, param) in args.iter_mut().zip(params.iter()) {
-                        arg.check_types(context)?;
+                        arg.check_types_and_convert(context)?;
                         arg.convert_type_by_assignment(param)?;
                     }
 
@@ -1077,7 +1034,7 @@ impl ExpressionNode {
                 Constant::Double(_) => Type::Double,
             },
             ExpressionWithoutType::Unary(ref op, ref mut src) => {
-                src.check_types(context)?;
+                src.check_types_and_convert(context)?;
                 if matches!(
                     op,
                     UnaryOperatorNode::Negate | UnaryOperatorNode::Complement
@@ -1096,26 +1053,9 @@ impl ExpressionNode {
                     _ => src.1.clone().unwrap(),
                 }
             }
-            ExpressionWithoutType::Binary(ref op, ref mut left, ref mut right)
-                if matches!(op, BinaryOperatorNode::Equal | BinaryOperatorNode::NotEqual) =>
-            {
-                left.check_types(context)?;
-                right.check_types(context)?;
-                let common_type = if matches!(left.1.as_ref().unwrap(), Type::Pointer(_))
-                    || matches!(right.1.as_ref().unwrap(), Type::Pointer(_))
-                {
-                    ExpressionNode::get_common_pointer_type(left, right)?
-                } else {
-                    ExpressionNode::get_common_type(left, right)
-                };
-                left.convert_type(&common_type);
-                right.convert_type(&common_type);
-
-                Type::Integer
-            }
             ExpressionWithoutType::Compound(ref op, ref mut left, ref mut right) => {
-                left.check_types(context)?;
-                right.check_types(context)?;
+                left.check_types_and_convert(context)?;
+                right.check_types_and_convert(context)?;
                 // undo type conversion on Left, it will be done manually in the birds generation
                 // stage
                 let common_type = ExpressionNode::check_types_binary(op, &mut left.clone(), right)?;
@@ -1125,20 +1065,20 @@ impl ExpressionNode {
                 common_type
             }
             ExpressionWithoutType::Binary(ref op, ref mut left, ref mut right) => {
-                left.check_types(context)?;
-                right.check_types(context)?;
+                left.check_types_and_convert(context)?;
+                right.check_types_and_convert(context)?;
                 ExpressionNode::check_types_binary(op, left, right)?
             }
             ExpressionWithoutType::Assignment(ref mut dst, ref mut src) => {
-                dst.check_types(context)?;
-                src.check_types(context)?;
+                dst.check_types_and_convert(context)?;
+                src.check_types_and_convert(context)?;
                 src.convert_type_by_assignment(dst.1.as_ref().unwrap())?;
                 dst.1.clone().unwrap()
             }
             ExpressionWithoutType::Ternary(ref mut cond, ref mut then, ref mut other) => {
-                cond.check_types(context)?;
-                then.check_types(context)?;
-                other.check_types(context)?;
+                cond.check_types_and_convert(context)?;
+                then.check_types_and_convert(context)?;
+                other.check_types_and_convert(context)?;
                 let common_type = if matches!(then.1.as_ref().unwrap(), Type::Pointer(_))
                     || matches!(other.1.as_ref().unwrap(), Type::Pointer(_))
                 {
@@ -1152,17 +1092,21 @@ impl ExpressionNode {
                 common_type
             }
             ExpressionWithoutType::Cast(ref target, ref mut e) => {
-                e.check_types(context)?;
+                e.check_types_and_convert(context)?;
                 let src_type = e.1.as_ref().unwrap();
                 if matches!((src_type, target), (Type::Double, Type::Pointer(_)))
                     || matches!((target, src_type), (Type::Double, Type::Pointer(_)))
                 {
                     return Err("Cannot cast between Double and Pointer types".into());
                 }
+
+                if matches!(target, Type::Array(_, _)) {
+                    return Err("Cannot cast to an Array type".into());
+                }
                 target.clone()
             }
             ExpressionWithoutType::Dereference(ref mut e) => {
-                e.check_types(context)?;
+                e.check_types_and_convert(context)?;
                 if let Type::Pointer(t) = e.1.as_ref().unwrap() {
                     *t.clone()
                 } else {
@@ -1170,14 +1114,61 @@ impl ExpressionNode {
                 }
             }
             ExpressionWithoutType::AddressOf(ref mut e) => {
+                // don't convert e to a pointer to the first element here, we want the full array
                 e.check_types(context)?;
-                if !e.0.is_lvalue() {
+                if !e.0.match_lvalue() {
                     return Err("Can only take address of an object".into());
                 }
                 Type::Pointer(Box::new(e.1.clone().unwrap()))
             }
-            ExpressionWithoutType::Subscript(ref mut _src, ref mut _inner) => todo!(),
+            ExpressionWithoutType::Subscript(ref mut src, ref mut inner) => {
+                src.check_types_and_convert(context)?;
+                inner.check_types_and_convert(context)?;
+                let src_type = src.1.as_ref().unwrap();
+                let inner_type = inner.1.as_ref().unwrap();
+
+                if let Type::Pointer(left) = src_type {
+                    if !inner_type.is_integer() {
+                        return Err("Invalid subscript expression".into());
+                    }
+                    inner.convert_type(&Type::Long);
+                    *left.clone()
+                } else if let Type::Pointer(right) = inner_type {
+                    if !src_type.is_integer() {
+                        return Err("Invalid subscript expression".into());
+                    }
+                    src.convert_type(&Type::Long);
+                    *right.clone()
+                } else {
+                    return Err("Invalid subscript expression".into());
+                }
+            }
         });
+
+        Ok(())
+    }
+
+    fn check_types_and_convert(
+        &mut self,
+        context: &mut ValidateContext,
+    ) -> Result<(), Box<dyn Error>> {
+        self.check_types(context)?;
+        self.post_type_check_convert(context)?;
+
+        Ok(())
+    }
+
+    fn post_type_check_convert(
+        &mut self,
+        _context: &mut ValidateContext,
+    ) -> Result<(), Box<dyn Error>> {
+        // Extra expression inserted here to convert arrays to pointers
+        if let Some(Type::Array(t, _)) = &self.1 {
+            *self = ExpressionNode(
+                ExpressionWithoutType::AddressOf(Box::new(self.clone())),
+                Some(Type::Pointer(t.clone())),
+            )
+        }
         Ok(())
     }
 
@@ -1186,71 +1177,113 @@ impl ExpressionNode {
         left: &mut ExpressionNode,
         right: &mut ExpressionNode,
     ) -> Result<Type, Box<dyn Error>> {
-        let t = if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) {
-            Type::Integer // returns 0 or 1 (eg boolean-like)
-        } else {
-            let common_type = ExpressionNode::get_common_type(left, right);
-            if !matches!(
+        let left_type = left.1.as_ref().unwrap();
+        let right_type = right.1.as_ref().unwrap();
+
+        // Get the common type of this expression
+        // also handle ALL pointer arithmetic type-checking cases in this block
+        let (common_type, is_pointer_arithmetic) =
+            if (matches!(left_type, Type::Pointer(_)) || matches!(right_type, Type::Pointer(_))) {
+                match op {
+                    BinaryOperatorNode::Add => {
+                        if matches!(left_type, Type::Pointer(_)) && right_type.is_integer() {
+                            right.convert_type(&Type::Long);
+                            (left_type.clone(), true)
+                        } else if matches!(right_type, Type::Pointer(_)) && left_type.is_integer() {
+                            left.convert_type(&Type::Long);
+                            (right_type.clone(), true)
+                        } else {
+                            return Err("Invalid pointer addition".into());
+                        }
+                    }
+                    BinaryOperatorNode::Subtract => {
+                        if matches!(left_type, Type::Pointer(_)) && right_type.is_integer() {
+                            right.convert_type(&Type::Long);
+                            (left_type.clone(), true)
+                        } else if left_type == right_type {
+                            // typedef stuff: for <stddef.h>, this type should be annotated as ptrdiff_t
+                            (Type::Long, true)
+                        } else {
+                            return Err("Invalid pointer subtraction".into());
+                        }
+                    }
+                    BinaryOperatorNode::Less
+                    | BinaryOperatorNode::Greater
+                    | BinaryOperatorNode::LessEqual
+                    | BinaryOperatorNode::GreaterEqual => {
+                        if left_type == right_type {
+                            (left_type.clone(), false)
+                        } else {
+                            return Err("Can't compare pointers with different types".into());
+                        }
+                    }
+                    BinaryOperatorNode::Equal | BinaryOperatorNode::NotEqual => {
+                        (ExpressionNode::get_common_pointer_type(left, right)?, false)
+                    }
+                    BinaryOperatorNode::And | BinaryOperatorNode::Or => (Type::Integer, false),
+                    o => return Err(format!("Invalid pointer operation: {:?}", o).into()),
+                }
+            } else {
+                (ExpressionNode::get_common_type(left, right), false)
+            };
+
+        // convert the left and right to the common type (with exceptions)
+        if !is_pointer_arithmetic
+            && !matches!(
                 op,
-                BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight
-            ) {
-                left.convert_type(&common_type);
-                right.convert_type(&common_type);
-            }
-            if (matches!(left.1.as_ref().unwrap(), Type::Double)
+                BinaryOperatorNode::ShiftLeft
+                    | BinaryOperatorNode::ShiftRight
+                    | BinaryOperatorNode::And
+                    | BinaryOperatorNode::Or
+            )
+        {
+            left.convert_type(&common_type);
+            right.convert_type(&common_type);
+        }
+
+        // Misc. Validation of types and operators
+        if (matches!(left.1.as_ref().unwrap(), Type::Double)
+            && matches!(
+                op,
+                BinaryOperatorNode::BitwiseAnd
+                    | BinaryOperatorNode::BitwiseXor
+                    | BinaryOperatorNode::BitwiseOr
+                    | BinaryOperatorNode::ShiftLeft
+                    | BinaryOperatorNode::ShiftRight
+                    | BinaryOperatorNode::Mod
+            ))
+            || (matches!(right.1.as_ref().unwrap(), Type::Double)
                 && matches!(
                     op,
-                    BinaryOperatorNode::BitwiseAnd
-                        | BinaryOperatorNode::BitwiseXor
-                        | BinaryOperatorNode::BitwiseOr
+                    BinaryOperatorNode::Mod
                         | BinaryOperatorNode::ShiftLeft
                         | BinaryOperatorNode::ShiftRight
-                        | BinaryOperatorNode::Mod
                 ))
-                || (matches!(right.1.as_ref().unwrap(), Type::Double)
-                    && matches!(
-                        op,
-                        BinaryOperatorNode::Mod
-                            | BinaryOperatorNode::ShiftLeft
-                            | BinaryOperatorNode::ShiftRight
-                    ))
-                || (matches!(common_type, Type::Pointer(_))
-                    && matches!(
-                        op,
-                        BinaryOperatorNode::Multiply
-                            | BinaryOperatorNode::Divide
-                            | BinaryOperatorNode::Mod
-                            | BinaryOperatorNode::BitwiseAnd
-                            | BinaryOperatorNode::BitwiseXor
-                            | BinaryOperatorNode::BitwiseOr
-                            | BinaryOperatorNode::ShiftLeft
-                            | BinaryOperatorNode::ShiftRight
-                    ))
-            {
-                return Err("Incompatible types for this binary operation".into());
-            }
+        {
+            return Err("Incompatible types for this binary operation".into());
+        }
 
-            match op {
-                BinaryOperatorNode::Add
-                | BinaryOperatorNode::Subtract
-                | BinaryOperatorNode::Multiply
-                | BinaryOperatorNode::Divide => common_type,
-                BinaryOperatorNode::BitwiseAnd
-                | BinaryOperatorNode::BitwiseXor
-                | BinaryOperatorNode::BitwiseOr => common_type,
-                BinaryOperatorNode::ShiftLeft
-                | BinaryOperatorNode::ShiftRight
-                | BinaryOperatorNode::Mod => left.1.clone().unwrap(),
-                BinaryOperatorNode::And
-                | BinaryOperatorNode::Or
-                | BinaryOperatorNode::Equal
-                | BinaryOperatorNode::NotEqual
-                | BinaryOperatorNode::Less
-                | BinaryOperatorNode::Greater
-                | BinaryOperatorNode::LessEqual
-                | BinaryOperatorNode::GreaterEqual => Type::Integer,
-            }
-        };
-        Ok(t)
+        Ok(match op {
+            BinaryOperatorNode::Add
+            | BinaryOperatorNode::Subtract
+            | BinaryOperatorNode::Multiply
+            | BinaryOperatorNode::Divide
+            | BinaryOperatorNode::BitwiseAnd
+            | BinaryOperatorNode::BitwiseXor
+            | BinaryOperatorNode::BitwiseOr => common_type,
+            // types which don't convert the right type (TODO: why is Mod here?)
+            BinaryOperatorNode::ShiftLeft
+            | BinaryOperatorNode::ShiftRight
+            | BinaryOperatorNode::Mod => left.1.clone().unwrap(),
+            // logical
+            BinaryOperatorNode::And
+            | BinaryOperatorNode::Or
+            | BinaryOperatorNode::Equal
+            | BinaryOperatorNode::NotEqual
+            | BinaryOperatorNode::Less
+            | BinaryOperatorNode::Greater
+            | BinaryOperatorNode::LessEqual
+            | BinaryOperatorNode::GreaterEqual => Type::Integer,
+        })
     }
 }

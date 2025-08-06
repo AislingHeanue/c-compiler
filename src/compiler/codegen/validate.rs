@@ -7,12 +7,15 @@ use super::{
     Operand, Program, Register, TopLevel, Validate, ValidateContext, ValidationPass,
 };
 
-fn align_stack_size(initial: i32, alignment: i32) -> i32 {
-    initial + (alignment - initial).rem_euclid(alignment)
+pub fn align_stack_size(initial: u32, alignment: u32) -> u32 {
+    initial + (alignment as i32 - initial as i32).rem_euclid(alignment as i32) as u32
 }
 
 fn match_in_memory(operand: &Operand) -> bool {
-    matches!(operand, &Operand::Memory(_, _) | &Operand::Data(_))
+    matches!(
+        operand,
+        &Operand::Memory(_, _) | &Operand::Data(_) | &Operand::Indexed(..)
+    )
 }
 
 fn match_double_register(operand: &Operand) -> bool {
@@ -110,7 +113,7 @@ impl Validate for Vec<Instruction> {
                     Instruction::Binary(
                         BinaryOperator::Sub,
                         AssemblyType::Quadword,
-                        Operand::Imm(ImmediateValue::Signed(
+                        Operand::Imm(ImmediateValue::Unsigned(
                             align_stack_size(*stack_size, 16).into(),
                         )),
                         Operand::Reg(Register::SP),
@@ -605,35 +608,41 @@ impl Instruction {
 
 impl Operand {
     fn replace_mock_register(&mut self, context: &mut ValidateContext) {
-        if let Operand::MockReg(name) = self {
-            let existing_location = context.current_stack_locations.get(name);
-            if let Some(loc) = existing_location {
-                *self = Operand::Memory(Register::BP, *loc);
-                return;
-            }
-            match context.symbols.get(name) {
-                Some(AssemblySymbolInfo::Object(_, true, _)) => {
-                    // static objects go to data
-                    *self = Operand::Data(name.clone());
+        let (name, index) = match self {
+            Operand::MockReg(name) => (name, &mut 0),
+            Operand::MockMemory(name, index) => (name, index),
+            _ => return,
+        };
+        let existing_location = context.current_stack_locations.get(name);
+        if let Some(loc) = existing_location {
+            // println!("{:?} {:?}", loc, index);
+            *self = Operand::Memory(Register::BP, *loc + *index);
+            return;
+        }
+        match context.symbols.get(name) {
+            Some(AssemblySymbolInfo::Object(_, true, _)) => {
+                // static objects go to data
+                match index {
+                    0 => *self = Operand::Data(name.clone()),
+                    _ => unreachable!(),
                 }
-                Some(AssemblySymbolInfo::Object(t, false, false)) => {
-                    let alignment = t.get_alignment();
-                    // align to 'alignment', eg if alignment = 8 make sure that stack_size is a
-                    // multiple of 8
-                    context.current_stack_size = align_stack_size(
-                        context.current_stack_size + alignment as i32,
-                        alignment as i32,
-                    );
-                    let new_location = -context.current_stack_size;
-                    context
-                        .current_stack_locations
-                        .insert(name.clone(), new_location);
-                    *self = Operand::Memory(Register::BP, new_location);
-                }
-                None => panic!("Could not find matching declaration for {:?}", name),
-                Some(AssemblySymbolInfo::Object(_, false, true)) => unreachable!(),
-                Some(AssemblySymbolInfo::Function(_)) => unreachable!(),
             }
+            Some(AssemblySymbolInfo::Object(t, false, false)) => {
+                let size = t.get_size();
+                // align to 'alignment', eg if alignment = 8 make sure that stack_size is a
+                // multiple of 8
+                let alignment = t.get_alignment();
+                context.current_stack_size =
+                    align_stack_size(context.current_stack_size + size, alignment);
+                let new_location = -(context.current_stack_size as i32);
+                context
+                    .current_stack_locations
+                    .insert(name.clone(), new_location);
+                *self = Operand::Memory(Register::BP, new_location + *index);
+            }
+            None => panic!("Could not find matching declaration for {:?}", name),
+            Some(AssemblySymbolInfo::Object(_, false, true)) => unreachable!(),
+            Some(AssemblySymbolInfo::Function(_)) => unreachable!(),
         }
     }
 }

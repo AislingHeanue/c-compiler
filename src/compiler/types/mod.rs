@@ -22,7 +22,7 @@ impl Type {
             Type::UnsignedInteger => 4,
             Type::UnsignedLong => 8,
             Type::Pointer(_) => 8, // pointer is stored like u64
-            Type::Array(..) => 8,  // arrays are like pointers except that they aren't
+            Type::Array(t, size) => t.get_size() * (*size) as i32, // arrays are like pointers except that they aren't
             Type::Function(_, _) => unreachable!(),
         }
     }
@@ -60,12 +60,9 @@ impl Type {
         }
     }
 
-    // pub fn is_scalar(&self) -> bool {
-    //     match self {
-    //         Type::Array(..) => false,
-    //         _ => true,
-    //     }
-    // }
+    pub fn is_scalar(&self) -> bool {
+        !matches!(self, Type::Array(..))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -96,20 +93,7 @@ pub enum StorageClass {
 pub enum StaticInitial {
     Ordinal(OrdinalStatic),
     Double(f64),
-}
-
-impl StaticInitial {
-    pub fn is_zero(&self) -> bool {
-        matches!(
-            self,
-            // doubles are never treated as zero initialisations to sidestep confusion over 0.0
-            // and -0.0
-            StaticInitial::Ordinal(OrdinalStatic::Integer(0))
-                | StaticInitial::Ordinal(OrdinalStatic::Long(0))
-                | StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(0))
-                | StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(0))
-        )
-    }
+    // initialiser representing n * 0x00 bytes
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -118,6 +102,7 @@ pub enum OrdinalStatic {
     Long(i64),
     UnsignedInteger(u32),
     UnsignedLong(u64),
+    ZeroBytes(i32),
 }
 
 #[derive(Debug, Clone)]

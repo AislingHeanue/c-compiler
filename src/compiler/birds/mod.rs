@@ -17,7 +17,7 @@ pub enum BirdsTopLevel {
     // name params instructions global
     Function(String, Vec<String>, Vec<BirdsInstructionNode>, bool),
     // name init global
-    StaticVariable(Type, String, StaticInitial, bool),
+    StaticVariable(Type, String, Vec<StaticInitial>, bool),
 }
 
 #[derive(Debug)]
@@ -52,6 +52,10 @@ pub enum BirdsInstructionNode {
     GetAddress(BirdsValueNode, BirdsValueNode),
     LoadFromPointer(BirdsValueNode, BirdsValueNode),
     StoreInPointer(BirdsValueNode, BirdsValueNode),
+    // src, index, scale (sizeof type in bytes), dst
+    AddPointer(BirdsValueNode, BirdsValueNode, i32, BirdsValueNode),
+    // src, name of some aggregate type variable, offset (bytes)
+    CopyToOffset(BirdsValueNode, String, i32),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -118,6 +122,7 @@ pub struct ConvertContext {
     last_false_label_number: i32,
     last_stack_number: i32,
     last_true_label_number: i32,
+    current_initialiser_offset: i32,
     symbols: HashMap<String, SymbolInfo>,
 }
 
@@ -131,6 +136,7 @@ pub fn birds(
         last_false_label_number: 0,
         last_stack_number: 0,
         last_true_label_number: 0,
+        current_initialiser_offset: 0,
         symbols,
     };
 

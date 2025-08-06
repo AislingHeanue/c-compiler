@@ -71,7 +71,6 @@ fn match_assignment(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
 }
 
 fn expect(tokens: &mut VecDeque<Token>, expected: Token) -> Result<(), Box<dyn Error>> {
-    // println!("{:?}", expected);
     let token = read(tokens)?;
     if discriminant(&expected) != discriminant(&token) {
         return Err(format!(
@@ -675,13 +674,12 @@ impl AbstractDeclarator {
         // returns the type, name and list of parameter names associated with the type
     ) -> Result<Type, Box<dyn Error>> {
         match self {
-            AbstractDeclarator::Pointer(a) => Ok(Type::Pointer(Box::new(
-                AbstractDeclarator::apply_to_type(*a, base_type)?,
-            ))),
-            AbstractDeclarator::Array(a, size) => Ok(Type::Array(
-                Box::new(AbstractDeclarator::apply_to_type(*a, base_type)?),
-                size,
-            )),
+            AbstractDeclarator::Pointer(a) => {
+                Ok(a.apply_to_type(Type::Pointer(Box::new(base_type)))?)
+            }
+            AbstractDeclarator::Array(a, size) => {
+                Ok(a.apply_to_type(Type::Array(Box::new(base_type), size))?)
+            }
             AbstractDeclarator::Base => Ok(base_type),
         }
     }
@@ -977,8 +975,6 @@ impl ExpressionWithoutType {
                     expect(tokens, Token::OpenParen)?;
                     if match_type(tokens)? {
                         let cast_type = Type::parse(tokens, context)?;
-                        println!("{:?}", cast_type);
-                        println!("{:?}", cast_type);
                         let abstract_declarator = AbstractDeclarator::parse(tokens, context)?;
                         let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
                         expect(tokens, Token::CloseParen)?;
@@ -1129,10 +1125,12 @@ impl ExpressionWithoutType {
         Ok(expression)
     }
 
-    pub fn is_lvalue(&self) -> bool {
+    pub fn match_lvalue(&self) -> bool {
         matches!(
             self,
-            ExpressionWithoutType::Var(_) | ExpressionWithoutType::Dereference(_)
+            ExpressionWithoutType::Var(_)
+                | ExpressionWithoutType::Dereference(_)
+                | ExpressionWithoutType::Subscript(_, _)
         )
     }
 

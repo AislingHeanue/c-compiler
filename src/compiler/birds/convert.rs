@@ -5,8 +5,9 @@ use itertools::process_results;
 use crate::compiler::{
     parser::{
         BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, ExpressionNode,
-        ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, ProgramNode, StatementNode,
-        SwitchMapKey, UnaryOperatorNode, VariableDeclaration,
+        ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
+        InitialiserWithoutType, ProgramNode, StatementNode, SwitchMapKey, UnaryOperatorNode,
+        VariableDeclaration,
     },
     types::{Constant, InitialValue, OrdinalStatic, StaticInitial, StorageInfo, SymbolInfo, Type},
 };
@@ -31,15 +32,20 @@ fn new_temp_variable(type_to_store: &Type, context: &mut ConvertContext) -> Bird
 }
 
 // purely-for-utility function for getting constants (almost always 0 or 1) in the appropriate type
-fn get_typed_constant(value: u32, target: &Type) -> BirdsValueNode {
+fn get_typed_constant(value: i32, target: &Type) -> BirdsValueNode {
     match target {
-        Type::Integer => BirdsValueNode::Constant(Constant::Integer(value.try_into().unwrap())),
+        Type::Integer => BirdsValueNode::Constant(Constant::Integer(value)),
         Type::Long => BirdsValueNode::Constant(Constant::Long(value.into())),
-        Type::UnsignedInteger => BirdsValueNode::Constant(Constant::UnsignedInteger(value)),
-        Type::UnsignedLong => BirdsValueNode::Constant(Constant::UnsignedLong(value.into())),
+        Type::UnsignedInteger => {
+            BirdsValueNode::Constant(Constant::UnsignedInteger(value.try_into().unwrap()))
+        }
+        Type::UnsignedLong => {
+            BirdsValueNode::Constant(Constant::UnsignedLong(value.try_into().unwrap()))
+        }
         Type::Double => BirdsValueNode::Constant(Constant::Double(value.into())),
+        // adding a constant to a pointer is only reasonable if the second operand is Long
+        Type::Pointer(_) => BirdsValueNode::Constant(Constant::Long(value.into())),
         Type::Array(..) => unreachable!(),
-        Type::Pointer(_) => unreachable!(),
         Type::Function(_, _) => unreachable!(),
     }
 }
@@ -89,11 +95,8 @@ impl Convert for ProgramNode {
                 .filter_map(|(name, info)| match &info.storage {
                     StorageInfo::Static(init, global) => {
                         let initial = match init {
-                            InitialValue::Tentative => Constant::convert_ordinal_to(
-                                &Constant::Integer(0),
-                                &info.symbol_type,
-                            ),
-                            InitialValue::Initial(_i) => todo!(), //i.clone(),
+                            InitialValue::Tentative => vec![Constant::zero(&info.symbol_type)],
+                            InitialValue::Initial(i) => i.clone(),
                             InitialValue::None => return None,
                         };
                         Some(BirdsTopLevel::StaticVariable(
@@ -417,6 +420,11 @@ impl Convert for StaticInitial {
             StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(l)) => {
                 Ok(BirdsValueNode::Constant(Constant::UnsignedLong(l)))
             }
+            StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(n)) => match n {
+                4 => Ok(BirdsValueNode::Constant(Constant::Integer(0))),
+                8 => Ok(BirdsValueNode::Constant(Constant::Long(0))),
+                _ => unreachable!(),
+            },
             StaticInitial::Double(d) => Ok(BirdsValueNode::Constant(Constant::Double(d))),
         }
     }
@@ -437,28 +445,55 @@ impl Convert for ForInitialiserNode {
 impl Convert for VariableDeclaration {
     type Output = Vec<BirdsInstructionNode>;
 
-    fn convert(self, _context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
         // do not emit any instructions for static and extern variable definitions. These are
         // handled after the rest of the ProgramNode has been converted.
         if self.storage_class.is_some() {
-            return Ok(Vec::new());
+            Ok(Vec::new())
+        } else if let Some(init) = self.init {
+            context.current_initialiser_offset = 0;
+            init.convert(self.name, context)
+        } else {
+            Ok(Vec::new())
         }
+    }
+}
 
-        match self.init {
-            Some(_e) => {
-                todo!()
-                // let output_type = e.1.clone();
-                // let assignment_expression = ExpressionNode(
-                //     ExpressionWithoutType::Assignment(
-                //         Box::new(ExpressionWithoutType::Var(self.name).into()),
-                //         Box::new(e),
-                //     ),
-                //     output_type,
-                // );
-                // let (instructions, _new_src) = assignment_expression.convert(_context)?;
-                // Ok(instructions)
+impl InitialiserNode {
+    fn convert(
+        self,
+        dst: String,
+        context: &mut ConvertContext,
+    ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
+        match self.0 {
+            InitialiserWithoutType::Single(e) => {
+                let offset = e.1.as_ref().unwrap().get_size();
+                let (mut instructions, new_src) = e.convert_and_evaluate(context)?;
+                if context.current_initialiser_offset == 0 {
+                    instructions.push(BirdsInstructionNode::Copy(
+                        new_src,
+                        BirdsValueNode::Var(dst),
+                    ));
+                } else {
+                    instructions.push(BirdsInstructionNode::CopyToOffset(
+                        new_src,
+                        dst,
+                        context.current_initialiser_offset,
+                    ));
+                }
+                context.current_initialiser_offset += offset;
+
+                Ok(instructions)
             }
-            None => Ok(Vec::new()),
+            InitialiserWithoutType::Compound(initialisers) => {
+                let instructions: Vec<BirdsInstructionNode> = process_results(
+                    initialisers
+                        .into_iter()
+                        .map(|init| init.convert(dst.clone(), context)),
+                    |iter| iter.flatten().collect(),
+                )?;
+                Ok(instructions)
+            }
         }
     }
 }
@@ -560,11 +595,6 @@ impl Convert for ExpressionNode {
                     UnaryOperatorNode::PrefixIncrement | UnaryOperatorNode::PrefixDecrement
                 ) =>
             {
-                let bird_op = if op == UnaryOperatorNode::PrefixIncrement {
-                    BirdsBinaryOperatorNode::Add
-                } else {
-                    BirdsBinaryOperatorNode::Subtract
-                };
                 let new_dst_type = src.1.clone().unwrap();
 
                 // How to convert and evaluate an expression which may contain a dereference
@@ -574,13 +604,31 @@ impl Convert for ExpressionNode {
                 instructions.append(&mut instructions_from_evaluate);
 
                 let new_dst = new_temp_variable(&new_dst_type, context);
-
-                instructions.push(BirdsInstructionNode::Binary(
-                    bird_op,
-                    evaluated_src.clone(),
-                    get_typed_constant(1, &new_dst_type),
-                    new_dst.clone(),
-                ));
+                if let Type::Pointer(ref t) = new_dst_type {
+                    let constant = if op == UnaryOperatorNode::PrefixIncrement {
+                        1
+                    } else {
+                        -1
+                    };
+                    instructions.push(BirdsInstructionNode::AddPointer(
+                        evaluated_src.clone(),
+                        get_typed_constant(constant, &new_dst_type),
+                        t.get_size(),
+                        new_dst.clone(),
+                    ));
+                } else {
+                    let bird_op = if op == UnaryOperatorNode::PrefixIncrement {
+                        BirdsBinaryOperatorNode::Add
+                    } else {
+                        BirdsBinaryOperatorNode::Subtract
+                    };
+                    instructions.push(BirdsInstructionNode::Binary(
+                        bird_op,
+                        evaluated_src.clone(),
+                        get_typed_constant(1, &new_dst_type),
+                        new_dst.clone(),
+                    ));
+                }
 
                 let (mut instructions_from_assign, _returns) =
                     ExpressionWithoutType::assign(new_dst.clone(), new_src)?;
@@ -594,11 +642,6 @@ impl Convert for ExpressionNode {
                     UnaryOperatorNode::SuffixIncrement | UnaryOperatorNode::SuffixDecrement
                 ) =>
             {
-                let bird_op = if op == UnaryOperatorNode::SuffixIncrement {
-                    BirdsBinaryOperatorNode::Add
-                } else {
-                    BirdsBinaryOperatorNode::Subtract
-                };
                 let new_dst_type = src.1.clone().unwrap();
 
                 let (mut instructions, new_src) = src.convert(context)?;
@@ -612,12 +655,31 @@ impl Convert for ExpressionNode {
                     new_dst.clone(),
                 ));
 
-                instructions.push(BirdsInstructionNode::Binary(
-                    bird_op,
-                    new_dst.clone(),
-                    get_typed_constant(1, &new_dst_type),
-                    evaluated_src.clone(),
-                ));
+                if let Type::Pointer(ref t) = new_dst_type {
+                    let constant = if op == UnaryOperatorNode::SuffixIncrement {
+                        1
+                    } else {
+                        -1
+                    };
+                    instructions.push(BirdsInstructionNode::AddPointer(
+                        new_dst.clone(),
+                        get_typed_constant(constant, &new_dst_type),
+                        t.get_size(),
+                        evaluated_src.clone(),
+                    ));
+                } else {
+                    let bird_op = if op == UnaryOperatorNode::SuffixIncrement {
+                        BirdsBinaryOperatorNode::Add
+                    } else {
+                        BirdsBinaryOperatorNode::Subtract
+                    };
+                    instructions.push(BirdsInstructionNode::Binary(
+                        bird_op,
+                        new_dst.clone(),
+                        get_typed_constant(1, &new_dst_type),
+                        evaluated_src.clone(),
+                    ));
+                }
                 let (mut instructions_from_assign, _returns) =
                     ExpressionWithoutType::assign(evaluated_src.clone(), new_src)?;
                 instructions.append(&mut instructions_from_assign);
@@ -663,13 +725,14 @@ impl Convert for ExpressionNode {
                 //      dst = left
                 // }
                 // a += 5l => a = int(long(a) + 5l)
-                let final_type = left.1.clone().unwrap();
+                let left_type = left.1.clone().unwrap();
+                let right_type = right.1.clone().unwrap();
                 let common_type = self.1.clone().unwrap();
 
                 let (mut instructions, new_left) = left.convert(context)?;
 
                 let (mut instructions_from_dereference, evaluated_left) =
-                    new_left.clone().evaluate(&final_type, context);
+                    new_left.clone().evaluate(&left_type, context);
                 instructions.append(&mut instructions_from_dereference);
 
                 let (mut instructions_from_right, new_right) =
@@ -677,58 +740,107 @@ impl Convert for ExpressionNode {
                 instructions.append(&mut instructions_from_right);
 
                 let bird_op = op.convert(context)?;
-                if common_type == final_type
-                    // in bit shift operations, the common type is always the LEFT type
-                    || matches!(
-                        bird_op,
-                        BirdsBinaryOperatorNode::ShiftLeft | BirdsBinaryOperatorNode::ShiftRight
-                    )
-                {
-                    let new_dst = new_temp_variable(&final_type, context);
-                    instructions.push(BirdsInstructionNode::Binary(
-                        bird_op,
-                        evaluated_left,
-                        new_right,
-                        new_dst.clone(),
-                    ));
-                    let (mut instructions_from_assign, returns) =
-                        ExpressionWithoutType::assign(new_dst, new_left)?;
-                    instructions.append(&mut instructions_from_assign);
-                    Ok((instructions, returns))
-                } else {
-                    let casted_left = new_temp_variable(&common_type, context);
-                    let mut instructions_from_first_cast = ExpressionWithoutType::cast(
-                        evaluated_left.clone(),
-                        casted_left.clone(),
-                        &final_type,
-                        &common_type,
-                    )?;
-                    instructions.append(&mut instructions_from_first_cast);
 
-                    let new_dst = new_temp_variable(&common_type, context);
-                    instructions.push(BirdsInstructionNode::Binary(
-                        bird_op,
-                        casted_left.clone(),
-                        new_right,
-                        new_dst.clone(),
-                    ));
-                    let casted_result = new_temp_variable(&final_type, context);
-                    let mut instructions_from_second_cast = ExpressionWithoutType::cast(
-                        new_dst.clone(),
-                        casted_result.clone(),
-                        &common_type,
-                        &final_type,
-                    )?;
-                    println!("{:?}", instructions_from_second_cast);
-                    instructions.append(&mut instructions_from_second_cast);
-                    let (mut instructions_from_assign, returns) =
-                        ExpressionWithoutType::assign(casted_result, new_left)?;
-                    instructions.append(&mut instructions_from_assign);
+                match (&bird_op, &left_type, &right_type) {
+                    (BirdsBinaryOperatorNode::Add, Type::Pointer(ref left_t), right_t)
+                        if right_t.is_integer() =>
+                    {
+                        let new_dst_type = Type::Long;
+                        let new_dst = new_temp_variable(&new_dst_type, context);
+                        instructions.push(BirdsInstructionNode::AddPointer(
+                            evaluated_left,
+                            new_right,
+                            left_t.get_size(),
+                            new_dst.clone(),
+                        ));
 
-                    Ok((instructions, returns))
+                        let (mut instructions_from_assign, returns) =
+                            ExpressionWithoutType::assign(new_dst, new_left)?;
+                        instructions.append(&mut instructions_from_assign);
+                        Ok((instructions, returns))
+                    }
+                    (BirdsBinaryOperatorNode::Subtract, Type::Pointer(ref left_t), right_t)
+                        if right_t.is_integer() =>
+                    {
+                        let negate_right = new_temp_variable(right_t, context);
+                        instructions.push(BirdsInstructionNode::Unary(
+                            BirdsUnaryOperatorNode::Negate,
+                            new_right,
+                            negate_right.clone(),
+                        ));
+
+                        let new_dst_type = Type::Long;
+                        let new_dst = new_temp_variable(&new_dst_type, context);
+                        instructions.push(BirdsInstructionNode::AddPointer(
+                            evaluated_left,
+                            negate_right,
+                            left_t.get_size(),
+                            new_dst.clone(),
+                        ));
+
+                        let (mut instructions_from_assign, returns) =
+                            ExpressionWithoutType::assign(new_dst, new_left)?;
+                        instructions.append(&mut instructions_from_assign);
+                        Ok((instructions, returns))
+                    }
+                    _ if common_type == left_type
+                        || matches!(
+                            bird_op,
+                            BirdsBinaryOperatorNode::ShiftLeft
+                                | BirdsBinaryOperatorNode::ShiftRight
+                        ) =>
+                    {
+                        let new_dst = new_temp_variable(&left_type, context);
+                        instructions.push(BirdsInstructionNode::Binary(
+                            bird_op,
+                            evaluated_left,
+                            new_right,
+                            new_dst.clone(),
+                        ));
+
+                        let (mut instructions_from_assign, returns) =
+                            ExpressionWithoutType::assign(new_dst, new_left)?;
+                        instructions.append(&mut instructions_from_assign);
+                        Ok((instructions, returns))
+                    }
+                    _ => {
+                        let casted_left = new_temp_variable(&common_type, context);
+                        let mut instructions_from_first_cast = ExpressionWithoutType::cast(
+                            evaluated_left.clone(),
+                            casted_left.clone(),
+                            &left_type,
+                            &common_type,
+                        )?;
+                        instructions.append(&mut instructions_from_first_cast);
+
+                        let new_dst = new_temp_variable(&common_type, context);
+                        instructions.push(BirdsInstructionNode::Binary(
+                            bird_op,
+                            casted_left.clone(),
+                            new_right,
+                            new_dst.clone(),
+                        ));
+                        let casted_result = new_temp_variable(&left_type, context);
+                        let mut instructions_from_second_cast = ExpressionWithoutType::cast(
+                            new_dst.clone(),
+                            casted_result.clone(),
+                            &common_type,
+                            &left_type,
+                        )?;
+                        instructions.append(&mut instructions_from_second_cast);
+
+                        let (mut instructions_from_assign, returns) =
+                            ExpressionWithoutType::assign(casted_result, new_left)?;
+                        instructions.append(&mut instructions_from_assign);
+                        Ok((instructions, returns))
+                    }
                 }
             }
-
+            // ExpressionWithoutType::Binary(op, left, right)
+            //     if matches!(op, BinaryOperatorNode::Add | BinaryOperatorNode::Subtract)
+            //         && (matches!(left, Type::Pointer(_))) => {
+            //
+            // }
             ExpressionWithoutType::Binary(op, left, right)
                 if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) =>
             {
@@ -745,26 +857,105 @@ impl Convert for ExpressionNode {
             }
             ExpressionWithoutType::Binary(op, left, right) => {
                 let left_type = left.1.clone().unwrap();
+                let right_type = right.1.clone().unwrap();
+
                 let (mut instructions, new_left) = left.convert_and_evaluate(context)?;
                 let (mut instructions_from_right, new_right) =
                     right.convert_and_evaluate(context)?;
                 instructions.append(&mut instructions_from_right);
-
                 let bird_op = op.convert(context)?;
-                let new_dst_type = if bird_op.is_relational() {
-                    Type::Integer
-                } else {
-                    left_type
-                };
-                let new_dst = new_temp_variable(&new_dst_type, context);
-                instructions.push(BirdsInstructionNode::Binary(
-                    bird_op,
-                    new_left,
-                    new_right,
-                    new_dst.clone(),
-                ));
 
-                Ok((instructions, new_dst.into()))
+                match (&bird_op, &left_type, &right_type) {
+                    (BirdsBinaryOperatorNode::Add, Type::Pointer(ref left_t), right_t)
+                        if right_t.is_integer() =>
+                    {
+                        let new_dst_type = Type::Long;
+                        let new_dst = new_temp_variable(&new_dst_type, context);
+                        instructions.push(BirdsInstructionNode::AddPointer(
+                            new_left,
+                            new_right,
+                            left_t.get_size(),
+                            new_dst.clone(),
+                        ));
+
+                        Ok((instructions, new_dst.into()))
+                    }
+                    (BirdsBinaryOperatorNode::Add, left_t, Type::Pointer(ref right_t))
+                        if left_t.is_integer() =>
+                    {
+                        let new_dst_type = Type::Long;
+                        let new_dst = new_temp_variable(&new_dst_type, context);
+                        instructions.push(BirdsInstructionNode::AddPointer(
+                            new_right,
+                            new_left,
+                            right_t.get_size(),
+                            new_dst.clone(),
+                        ));
+
+                        Ok((instructions, new_dst.into()))
+                    }
+                    (BirdsBinaryOperatorNode::Subtract, Type::Pointer(ref left_t), right_t)
+                        if right_t.is_integer() =>
+                    {
+                        let negate_right = new_temp_variable(right_t, context);
+                        instructions.push(BirdsInstructionNode::Unary(
+                            BirdsUnaryOperatorNode::Negate,
+                            new_right,
+                            negate_right.clone(),
+                        ));
+
+                        let new_dst_type = Type::Long;
+                        let new_dst = new_temp_variable(&new_dst_type, context);
+                        instructions.push(BirdsInstructionNode::AddPointer(
+                            new_left,
+                            negate_right,
+                            left_t.get_size(),
+                            new_dst.clone(),
+                        ));
+
+                        Ok((instructions, new_dst.into()))
+                    }
+                    (
+                        BirdsBinaryOperatorNode::Subtract,
+                        Type::Pointer(ref left_t),
+                        Type::Pointer(_right_t),
+                    ) => {
+                        let diff = new_temp_variable(&Type::Long, context);
+                        instructions.push(BirdsInstructionNode::Binary(
+                            BirdsBinaryOperatorNode::Subtract,
+                            new_left,
+                            new_right,
+                            diff.clone(),
+                        ));
+                        // ptrdiff_t
+                        let new_dst = new_temp_variable(&Type::Long, context);
+                        instructions.push(BirdsInstructionNode::Binary(
+                            BirdsBinaryOperatorNode::Divide,
+                            diff,
+                            get_typed_constant(left_t.get_size(), &Type::Long),
+                            new_dst.clone(),
+                        ));
+
+                        Ok((instructions, new_dst.into()))
+                    }
+
+                    _ => {
+                        let new_dst_type = if bird_op.is_relational() {
+                            Type::Integer
+                        } else {
+                            left_type
+                        };
+                        let new_dst = new_temp_variable(&new_dst_type, context);
+                        instructions.push(BirdsInstructionNode::Binary(
+                            bird_op,
+                            new_left,
+                            new_right,
+                            new_dst.clone(),
+                        ));
+
+                        Ok((instructions, new_dst.into()))
+                    }
+                }
             }
             ExpressionWithoutType::Ternary(condition, then, otherwise) => {
                 context.last_end_label_number += 1;
@@ -850,7 +1041,41 @@ impl Convert for ExpressionNode {
                     Destination::Dereference(val) => Ok((instructions, val.into())),
                 }
             }
-            ExpressionWithoutType::Subscript(_src, _inner) => todo!(),
+            ExpressionWithoutType::Subscript(src, inner) => {
+                let left_type = src.1.clone().unwrap();
+                let right_type = inner.1.clone().unwrap();
+
+                let (mut instructions, new_left) = src.convert_and_evaluate(context)?;
+                let (mut instructions_from_right, new_right) =
+                    inner.convert_and_evaluate(context)?;
+
+                let (inner_type, pointer_is_on_left) = if let Type::Pointer(t) = left_type {
+                    (t, true)
+                } else if let Type::Pointer(t) = right_type {
+                    (t, false)
+                } else {
+                    unreachable!()
+                };
+
+                instructions.append(&mut instructions_from_right);
+                let new_dst = new_temp_variable(&Type::Pointer(inner_type.clone()), context);
+                if pointer_is_on_left {
+                    instructions.push(BirdsInstructionNode::AddPointer(
+                        new_left,
+                        new_right,
+                        inner_type.get_size(),
+                        new_dst.clone(),
+                    ));
+                } else {
+                    instructions.push(BirdsInstructionNode::AddPointer(
+                        new_right,
+                        new_left,
+                        inner_type.get_size(),
+                        new_dst.clone(),
+                    ));
+                }
+                Ok((instructions, Destination::Dereference(new_dst)))
+            }
         }
     }
 }

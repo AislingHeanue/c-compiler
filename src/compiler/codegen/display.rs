@@ -52,6 +52,7 @@ impl DisplayContext {
             AssemblyType::Double => {
                 self.double();
             }
+            AssemblyType::ByteArray(_, _) => todo!(),
         }
         self.instruction_suffix.clone()
     }
@@ -124,28 +125,29 @@ impl CodeDisplay for TopLevel {
                 context.unindent();
                 out
             }
-            TopLevel::StaticVariable(name, global, alignment, init) => {
+            TopLevel::StaticVariable(name, global, alignment, initialisers) => {
                 let (address, align) = if context.is_mac {
                     (format!("_{}", name), ".balign")
                 } else {
                     (name.to_string(), ".align")
                 };
 
-                let section = if init.is_zero() {
-                    ".bss".to_string()
-                } else {
+                // only write to data if all initialisers are ZeroBytes values
+                let section = if initialisers.iter().any(|init| {
+                    !matches!(init, StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(_)))
+                }) {
                     ".data".to_string()
-                };
-
-                let global_string = if *global {
-                    format!(".globl {}\n", address.clone())
                 } else {
-                    "".to_string()
+                    ".bss".to_string()
                 };
 
                 context.indent();
                 let mut out = "".to_string();
-                out += global_string.show(context).as_str();
+                if *global {
+                    out += format!(".globl {}\n", address.clone())
+                        .show(context)
+                        .as_str();
+                }
                 out += section.to_string().show(context).as_str();
                 out += "\n";
                 out += format!("{} {}", align, alignment).show(context).as_str();
@@ -154,8 +156,10 @@ impl CodeDisplay for TopLevel {
                 out += format!("{}:", address).show(context).as_str();
                 out += "\n";
                 context.indent();
-                out += init.show(context).as_str();
-                out += "\n";
+                for init in initialisers {
+                    out += init.show(context).as_str();
+                    out += "\n";
+                }
                 context.unindent();
                 out
             }
@@ -223,14 +227,15 @@ impl CodeDisplay for TopLevel {
 impl CodeDisplay for StaticInitial {
     fn show(&self, context: &mut DisplayContext) -> String {
         let s = match self {
-            StaticInitial::Ordinal(OrdinalStatic::Integer(0)) => ".zero 4".to_string(),
+            StaticInitial::Ordinal(OrdinalStatic::Integer(0))
+            | StaticInitial::Ordinal(OrdinalStatic::Long(0))
+            | StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(0))
+            | StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(0)) => unreachable!(),
             StaticInitial::Ordinal(OrdinalStatic::Integer(i)) => format!(".long {}", i),
-            StaticInitial::Ordinal(OrdinalStatic::Long(0)) => ".zero 8".to_string(),
             StaticInitial::Ordinal(OrdinalStatic::Long(l)) => format!(".quad {}", l),
-            StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(0)) => ".zero 4".to_string(),
             StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(i)) => format!(".long {}", i),
-            StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(0)) => ".zero 8".to_string(),
             StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(l)) => format!(".quad {}", l),
+            StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(n)) => format!(".zero {}", n),
             // print 17 digits of precision so that when the linker re-converts this to a real
             // double value, this has enough precision to guarantee the original value.
             // no special case for zero values here, so that we can avoid confusion about
@@ -455,6 +460,9 @@ impl CodeDisplay for Instruction {
             Instruction::Cdq(AssemblyType::Quadword | AssemblyType::Double) => {
                 format!("{:indent$}cqo", "", indent = context.indent)
             }
+            Instruction::Cdq(AssemblyType::ByteArray(_size, _alignment)) => {
+                todo!()
+            }
             Instruction::Cmp(t, left, right) => {
                 if *t == AssemblyType::Double {
                     format!(
@@ -589,6 +597,10 @@ impl CodeDisplay for Operand {
                 context.word_length_bytes = previous_word_length;
                 out
             }
+            Operand::MockMemory(reg, num) => panic!(
+                "Tried to generate assembly code with a mock memory address: {}, {}",
+                reg, num
+            ),
             Operand::Data(name) => {
                 let label_start = if let AssemblySymbolInfo::Object(_, _, is_top_level_constant) =
                     context.symbols.get(name).unwrap()
@@ -607,6 +619,14 @@ impl CodeDisplay for Operand {
                 };
 
                 format!("{}{}(%rip)", label_start, name)
+            }
+            Operand::Indexed(base, index, scale) => {
+                format!(
+                    "({}, {}, {})",
+                    base.show(context),
+                    index.show(context),
+                    scale
+                )
             }
         }
     }
