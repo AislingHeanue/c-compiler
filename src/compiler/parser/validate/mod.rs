@@ -8,9 +8,83 @@ use super::{
     BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
     ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
     InitialiserWithoutType, OrdinalStatic, ProgramNode, StatementNode, StorageClass, StorageInfo,
-    SwitchMapKey, SymbolInfo, Type, UnaryOperatorNode, Validate, ValidateContext, ValidationPass,
-    VariableDeclaration,
+    SwitchMapKey, SymbolInfo, Type, UnaryOperatorNode, VariableDeclaration,
 };
+
+trait Validate
+where
+    Self: Sized,
+{
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
+}
+
+#[derive(Clone, Debug)]
+enum ValidationPass {
+    // variable resolution is covered by parse.rs
+    ReadLabels,
+    ValidateLabels,
+    LabelLoops,
+    TypeChecking,
+    // type checking needs to occur before this step, to make sure all array vars decay to
+    // an array pointer, which is a variable type  that we can't assign to as 'AddressOf'
+    // is not an lvalue.
+    CheckLvalues,
+}
+
+#[derive(Debug)]
+struct ValidateContext {
+    pass: ValidationPass,
+    // Function name -> user-defined name -> label name for birds
+    num_labels: usize,
+    num_loops: usize,
+    num_switches: usize,
+    num_switch_labels: usize,
+    num_strings: usize,
+    labels: HashMap<String, HashMap<String, String>>,
+    current_function_name: Option<String>,
+    // all loops + switch
+    current_enclosing_loop_name_for_break: Option<String>,
+    // all loops (not switch)
+    current_enclosing_loop_name_for_case: Option<String>,
+    current_enclosing_loop_name_for_continue: Option<String>,
+    current_switch_labels: Option<HashMap<SwitchMapKey, String>>,
+    current_switch_type: Option<Type>,
+    symbols: HashMap<String, SymbolInfo>,
+}
+
+pub fn do_validate(
+    parsed: &mut ProgramNode,
+) -> Result<HashMap<String, SymbolInfo>, Box<dyn Error>> {
+    let passes: Vec<ValidationPass> = vec![
+        ValidationPass::ReadLabels,
+        ValidationPass::ValidateLabels,
+        ValidationPass::LabelLoops,
+        ValidationPass::TypeChecking,
+        ValidationPass::CheckLvalues,
+    ];
+    let mut validate_context = ValidateContext {
+        pass: passes.first().unwrap().clone(),
+        num_labels: 0,
+        num_loops: 0,
+        num_switches: 0,
+        num_switch_labels: 0,
+        num_strings: 0,
+        labels: HashMap::new(),
+        current_function_name: None,
+        current_enclosing_loop_name_for_break: None,
+        current_enclosing_loop_name_for_case: None,
+        current_enclosing_loop_name_for_continue: None,
+        current_switch_labels: None,
+        current_switch_type: None,
+        symbols: HashMap::new(),
+    };
+    for pass in passes {
+        validate_context.pass = pass;
+        parsed.validate(&mut validate_context)?;
+    }
+
+    Ok(validate_context.symbols)
+}
 
 impl<T> Validate for Option<T>
 where

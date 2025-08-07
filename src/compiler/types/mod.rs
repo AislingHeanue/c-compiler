@@ -1,3 +1,5 @@
+mod constant;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Integer,

@@ -1,3 +1,6 @@
+use parse::do_parse;
+use validate::do_validate;
+
 use super::types::{Constant, OrdinalStatic, StorageClass, StorageInfo, Type};
 
 use super::{lexer::Token, types::SymbolInfo};
@@ -6,7 +9,6 @@ use std::{
     error::Error,
 };
 
-mod constant;
 mod display;
 mod parse;
 mod validate;
@@ -193,138 +195,10 @@ pub enum AbstractDeclarator {
     Base,
 }
 
-trait Parse
-where
-    Self: Sized,
-{
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>>;
-}
-
-struct ParseContext {
-    // map from string to sting-as-seen-in-assembly and is-externally-linked
-    current_scope_identifiers: HashMap<String, (String, bool)>,
-    outer_scope_identifiers: HashMap<String, (String, bool)>,
-    num_variables: usize,
-    do_not_validate: bool,
-    // this prevent creating an extra new scope entering function bodies
-    current_block_is_function_body: bool,
-    current_scope_is_file: bool,
-}
-
-pub fn parse(
-    mut lexed: VecDeque<Token>,
-    do_not_validate: bool,
-) -> Result<ProgramNode, Box<dyn Error>> {
-    ProgramNode::parse(
-        &mut lexed,
-        &mut ParseContext {
-            current_scope_identifiers: HashMap::new(),
-            outer_scope_identifiers: HashMap::new(),
-            num_variables: 0,
-            do_not_validate,
-            current_block_is_function_body: false,
-            current_scope_is_file: true,
-        },
-    )
-}
-
-trait Validate
-where
-    Self: Sized,
-{
-    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
-}
-
-#[derive(Clone, Debug)]
-enum ValidationPass {
-    // variable resolution is covered by parse.rs
-    ReadLabels,
-    ValidateLabels,
-    LabelLoops,
-    TypeChecking,
-    // type checking needs to occur before this step, to make sure all array vars decay to
-    // an array pointer, which is a variable type  that we can't assign to as 'AddressOf'
-    // is not an lvalue.
-    CheckLvalues,
-}
-
-#[derive(Debug)]
-struct ValidateContext {
-    pass: ValidationPass,
-    // Function name -> user-defined name -> label name for birds
-    num_labels: usize,
-    num_loops: usize,
-    num_switches: usize,
-    num_switch_labels: usize,
-    num_strings: usize,
-    labels: HashMap<String, HashMap<String, String>>,
-    current_function_name: Option<String>,
-    // all loops + switch
-    current_enclosing_loop_name_for_break: Option<String>,
-    // all loops (not switch)
-    current_enclosing_loop_name_for_case: Option<String>,
-    current_enclosing_loop_name_for_continue: Option<String>,
-    current_switch_labels: Option<HashMap<SwitchMapKey, String>>,
-    current_switch_type: Option<Type>,
-    symbols: HashMap<String, SymbolInfo>,
+pub fn parse(lexed: VecDeque<Token>, do_not_validate: bool) -> Result<ProgramNode, Box<dyn Error>> {
+    do_parse(lexed, do_not_validate)
 }
 
 pub fn validate(parsed: &mut ProgramNode) -> Result<HashMap<String, SymbolInfo>, Box<dyn Error>> {
-    let passes: Vec<ValidationPass> = vec![
-        ValidationPass::ReadLabels,
-        ValidationPass::ValidateLabels,
-        ValidationPass::LabelLoops,
-        ValidationPass::TypeChecking,
-        ValidationPass::CheckLvalues,
-    ];
-    let mut validate_context = ValidateContext {
-        pass: passes.first().unwrap().clone(),
-        num_labels: 0,
-        num_loops: 0,
-        num_switches: 0,
-        num_switch_labels: 0,
-        num_strings: 0,
-        labels: HashMap::new(),
-        current_function_name: None,
-        current_enclosing_loop_name_for_break: None,
-        current_enclosing_loop_name_for_case: None,
-        current_enclosing_loop_name_for_continue: None,
-        current_switch_labels: None,
-        current_switch_type: None,
-        symbols: HashMap::new(),
-    };
-    for pass in passes {
-        validate_context.pass = pass;
-        parsed.validate(&mut validate_context)?;
-    }
-
-    Ok(validate_context.symbols)
-}
-
-trait CodeDisplay {
-    fn show(&self, context: &mut DisplayContext) -> String;
-}
-
-#[derive(Clone)]
-pub struct DisplayContext {
-    indent: usize,
-}
-
-impl DisplayContext {
-    fn indent(&mut self) -> DisplayContext {
-        let mut s = self.clone();
-        s.indent += 4;
-        s
-    }
-    fn unindent(&mut self) -> DisplayContext {
-        let mut s = self.clone();
-        s.indent -= 4;
-        s
-    }
-    fn new_line_start(&self) -> String {
-        format!("\n{:indent$}", "", indent = self.indent)
-    }
+    do_validate(parsed)
 }

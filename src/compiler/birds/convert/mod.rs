@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::error::Error;
 
 use itertools::{process_results, Itertools};
@@ -14,8 +15,57 @@ use crate::compiler::{
 
 use super::{
     BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsProgramNode, BirdsTopLevel,
-    BirdsUnaryOperatorNode, BirdsValueNode, Convert, ConvertContext, ConvertEvaluate, Destination,
+    BirdsUnaryOperatorNode, BirdsValueNode, Destination,
 };
+
+trait Convert
+where
+    Self: Sized,
+{
+    type Output;
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>>;
+}
+
+trait ConvertEvaluate
+where
+    Self: Sized,
+{
+    type Output;
+    fn convert_and_evaluate(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Self::Output, Box<dyn Error>>;
+}
+
+pub struct ConvertContext {
+    last_end_label_number: i32,
+    last_else_label_number: i32,
+    last_false_label_number: i32,
+    last_stack_number: i32,
+    last_true_label_number: i32,
+    current_initialiser_offset: i32,
+    num_block_strings: i32,
+    symbols: HashMap<String, SymbolInfo>,
+}
+
+pub fn do_birds(
+    parsed: ProgramNode,
+    symbols: HashMap<String, SymbolInfo>,
+) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
+    let mut context = ConvertContext {
+        last_end_label_number: 0,
+        last_else_label_number: 0,
+        last_false_label_number: 0,
+        last_stack_number: 0,
+        last_true_label_number: 0,
+        current_initialiser_offset: 0,
+        num_block_strings: 0,
+        symbols,
+    };
+
+    let result = parsed.convert(&mut context)?;
+    Ok((result, context.symbols))
+}
 
 fn new_temp_variable(type_to_store: &Type, context: &mut ConvertContext) -> BirdsValueNode {
     context.last_stack_number += 1;

@@ -1,8 +1,11 @@
+use std::{collections::HashMap, error::Error};
+
+use convert::do_birds;
+
 use super::{
     parser::ProgramNode,
     types::{Constant, StaticInitial, SymbolInfo, Type},
 };
-use std::{collections::HashMap, error::Error};
 
 mod convert;
 mod display;
@@ -98,51 +101,9 @@ pub enum Destination {
     Dereference(BirdsValueNode),
 }
 
-trait Convert
-where
-    Self: Sized,
-{
-    type Output;
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>>;
-}
-
-trait ConvertEvaluate
-where
-    Self: Sized,
-{
-    type Output;
-    fn convert_and_evaluate(
-        self,
-        context: &mut ConvertContext,
-    ) -> Result<Self::Output, Box<dyn Error>>;
-}
-
-pub struct ConvertContext {
-    last_end_label_number: i32,
-    last_else_label_number: i32,
-    last_false_label_number: i32,
-    last_stack_number: i32,
-    last_true_label_number: i32,
-    current_initialiser_offset: i32,
-    num_block_strings: i32,
-    symbols: HashMap<String, SymbolInfo>,
-}
-
 pub fn birds(
     parsed: ProgramNode,
     symbols: HashMap<String, SymbolInfo>,
 ) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
-    let mut context = ConvertContext {
-        last_end_label_number: 0,
-        last_else_label_number: 0,
-        last_false_label_number: 0,
-        last_stack_number: 0,
-        last_true_label_number: 0,
-        current_initialiser_offset: 0,
-        num_block_strings: 0,
-        symbols,
-    };
-
-    let result = parsed.convert(&mut context)?;
-    Ok((result, context.symbols))
+    do_birds(parsed, symbols)
 }

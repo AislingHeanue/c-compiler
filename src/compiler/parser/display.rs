@@ -1,12 +1,37 @@
 use itertools::Itertools;
 
 use super::{
-    BinaryOperatorNode, Block, BlockItemNode, CodeDisplay, Constant, DeclarationNode,
-    DisplayContext, ExpressionNode, ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration,
-    InitialiserNode, InitialiserWithoutType, ProgramNode, StatementNode, Type, UnaryOperatorNode,
+    BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
+    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
+    InitialiserWithoutType, ProgramNode, StatementNode, Type, UnaryOperatorNode,
     VariableDeclaration,
 };
 use std::{borrow::Borrow, fmt::Display};
+
+trait CodeDisplay {
+    fn show(&self, context: &mut DisplayContext) -> String;
+}
+
+#[derive(Clone)]
+pub struct DisplayContext {
+    indent: usize,
+}
+
+impl DisplayContext {
+    fn indent(&mut self) -> DisplayContext {
+        let mut s = self.clone();
+        s.indent += 4;
+        s
+    }
+    fn unindent(&mut self) -> DisplayContext {
+        let mut s = self.clone();
+        s.indent -= 4;
+        s
+    }
+    fn new_line_start(&self) -> String {
+        format!("\n{:indent$}", "", indent = self.indent)
+    }
+}
 
 impl Display for ProgramNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -3,15 +3,53 @@ use itertools::{process_results, Itertools};
 use super::{
     AbstractDeclarator, BinaryOperatorNode, Block, BlockItemNode, DeclarationNode, Declarator,
     ExpressionNode, ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration,
-    InitialiserNode, InitialiserWithoutType, Parse, ProgramNode, StatementNode, StorageClass, Type,
+    InitialiserNode, InitialiserWithoutType, ProgramNode, StatementNode, StorageClass, Type,
     UnaryOperatorNode, VariableDeclaration,
 };
-use crate::compiler::{lexer::Token, parser::ParseContext, types::Constant};
+use crate::compiler::{lexer::Token, types::Constant};
 use std::{
     collections::{HashMap, VecDeque},
     error::Error,
     mem::discriminant,
 };
+
+trait Parse
+where
+    Self: Sized,
+{
+    fn parse(
+        tokens: &mut VecDeque<Token>,
+        context: &mut ParseContext,
+    ) -> Result<Self, Box<dyn Error>>;
+}
+
+struct ParseContext {
+    // map from string to sting-as-seen-in-assembly and is-externally-linked
+    current_scope_identifiers: HashMap<String, (String, bool)>,
+    outer_scope_identifiers: HashMap<String, (String, bool)>,
+    num_variables: usize,
+    do_not_validate: bool,
+    // this prevent creating an extra new scope entering function bodies
+    current_block_is_function_body: bool,
+    current_scope_is_file: bool,
+}
+
+pub fn do_parse(
+    mut lexed: VecDeque<Token>,
+    do_not_validate: bool,
+) -> Result<ProgramNode, Box<dyn Error>> {
+    ProgramNode::parse(
+        &mut lexed,
+        &mut ParseContext {
+            current_scope_identifiers: HashMap::new(),
+            outer_scope_identifiers: HashMap::new(),
+            num_variables: 0,
+            do_not_validate,
+            current_block_is_function_body: false,
+            current_scope_is_file: true,
+        },
+    )
+}
 
 fn match_specifier(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
     Ok(match_type(tokens)? || matches!(peek(tokens)?, Token::KeywordStatic | Token::KeywordExtern))
