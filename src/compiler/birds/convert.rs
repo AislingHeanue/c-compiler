@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use itertools::process_results;
+use itertools::{process_results, Itertools};
 
 use crate::compiler::{
     parser::{
@@ -32,47 +32,31 @@ fn new_temp_variable(type_to_store: &Type, context: &mut ConvertContext) -> Bird
 }
 
 // purely-for-utility function for getting constants (almost always 0 or 1) in the appropriate type
-fn get_typed_constant(value: i32, target: &Type) -> BirdsValueNode {
+fn get_typed_constant(value: i64, target: &Type) -> BirdsValueNode {
     match target {
-        Type::Integer => BirdsValueNode::Constant(Constant::Integer(value)),
-        Type::Long => BirdsValueNode::Constant(Constant::Long(value.into())),
+        Type::Integer => BirdsValueNode::Constant(Constant::Integer(value.try_into().unwrap())),
+        Type::Long => BirdsValueNode::Constant(Constant::Long(value)),
         Type::UnsignedInteger => {
             BirdsValueNode::Constant(Constant::UnsignedInteger(value.try_into().unwrap()))
         }
         Type::UnsignedLong => {
             BirdsValueNode::Constant(Constant::UnsignedLong(value.try_into().unwrap()))
         }
-        Type::Double => BirdsValueNode::Constant(Constant::Double(value.into())),
         // adding a constant to a pointer is only reasonable if the second operand is Long
-        Type::Pointer(_) => BirdsValueNode::Constant(Constant::Long(value.into())),
+        Type::Pointer(_) => BirdsValueNode::Constant(Constant::Long(value)),
         Type::Array(..) => unreachable!(),
         Type::Function(_, _) => unreachable!(),
-    }
-}
-
-impl Destination {
-    fn evaluate(
-        self,
-        target_type: &Type,
-        context: &mut ConvertContext,
-    ) -> (Vec<BirdsInstructionNode>, BirdsValueNode) {
-        match self {
-            Destination::Direct(val) => (Vec::new(), val),
-            Destination::Dereference(val) => {
-                let new_dst = new_temp_variable(target_type, context);
-                (
-                    vec![BirdsInstructionNode::LoadFromPointer(val, new_dst.clone())],
-                    new_dst,
-                )
-            }
+        Type::Char => BirdsValueNode::Constant(Constant::Char(value.try_into().unwrap())),
+        Type::SignedChar => BirdsValueNode::Constant(Constant::Char(value.try_into().unwrap())),
+        Type::UnsignedChar => {
+            BirdsValueNode::Constant(Constant::UnsignedChar(value.try_into().unwrap()))
         }
+        Type::Double => panic!("Can't use get_typed_constant to generate a double"),
     }
 }
 
-impl From<BirdsValueNode> for Destination {
-    fn from(value: BirdsValueNode) -> Self {
-        Destination::Direct(value)
-    }
+fn get_double(value: f64) -> BirdsValueNode {
+    BirdsValueNode::Constant(Constant::Double(value))
 }
 
 impl Convert for ProgramNode {
@@ -93,8 +77,8 @@ impl Convert for ProgramNode {
                 .symbols
                 .iter_mut()
                 .filter_map(|(name, info)| match &info.storage {
-                    StorageInfo::Static(init, global) => {
-                        let initial = match init {
+                    StorageInfo::Static(init_value, global) => {
+                        let initial = match init_value {
                             InitialValue::Tentative => vec![Constant::zero(&info.symbol_type)],
                             InitialValue::Initial(i) => i.clone(),
                             InitialValue::None => return None,
@@ -106,6 +90,11 @@ impl Convert for ProgramNode {
                             *global,
                         ))
                     }
+                    StorageInfo::Constant(init) => Some(BirdsTopLevel::StaticConstant(
+                        info.symbol_type.clone(),
+                        name.clone(),
+                        init.clone(),
+                    )),
                     _ => None,
                 })
                 .collect(),
@@ -357,9 +346,8 @@ impl Convert for StatementNode {
                     None => BirdsInstructionNode::Jump(format!("break_{}", this_name)),
                 };
 
-                let new_dst_type = expression.1.clone().unwrap();
                 let (mut instructions, new_src) = expression.convert_and_evaluate(context)?;
-                let new_tmp_results = new_temp_variable(&new_dst_type, context);
+                let new_tmp_results = new_temp_variable(&Type::Integer, context);
 
                 for (k, v) in label_map {
                     if let SwitchMapKey::Constant(c) = k {
@@ -367,7 +355,7 @@ impl Convert for StatementNode {
                             BirdsInstructionNode::Binary(
                                 BirdsBinaryOperatorNode::Equal,
                                 new_src.clone(),
-                                StaticInitial::Ordinal(c).convert(context)?,
+                                BirdsValueNode::Constant(c.to_constant()),
                                 new_tmp_results.clone(),
                             ),
                             BirdsInstructionNode::JumpNotZero(new_tmp_results.clone(), v.clone()),
@@ -399,33 +387,6 @@ impl Convert for StatementNode {
 
                 Ok(instructions)
             }
-        }
-    }
-}
-
-impl Convert for StaticInitial {
-    type Output = BirdsValueNode;
-
-    fn convert(self, _context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
-        match self {
-            StaticInitial::Ordinal(OrdinalStatic::Integer(i)) => {
-                Ok(BirdsValueNode::Constant(Constant::Integer(i)))
-            }
-            StaticInitial::Ordinal(OrdinalStatic::Long(l)) => {
-                Ok(BirdsValueNode::Constant(Constant::Long(l)))
-            }
-            StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(i)) => {
-                Ok(BirdsValueNode::Constant(Constant::UnsignedInteger(i)))
-            }
-            StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(l)) => {
-                Ok(BirdsValueNode::Constant(Constant::UnsignedLong(l)))
-            }
-            StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(n)) => match n {
-                4 => Ok(BirdsValueNode::Constant(Constant::Integer(0))),
-                8 => Ok(BirdsValueNode::Constant(Constant::Long(0))),
-                _ => unreachable!(),
-            },
-            StaticInitial::Double(d) => Ok(BirdsValueNode::Constant(Constant::Double(d))),
         }
     }
 }
@@ -465,8 +426,80 @@ impl InitialiserNode {
         dst: String,
         context: &mut ConvertContext,
     ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
-        match self.0 {
-            InitialiserWithoutType::Single(e) => {
+        match (self.0, self.1.unwrap()) {
+            (InitialiserWithoutType::Single(e), Type::Array(t, size))
+                if e.is_string_literal() && t.is_character() =>
+            {
+                let mut instructions = Vec::new();
+                let first_offset = context.current_initialiser_offset;
+                if let ExpressionWithoutType::String(v) = e.0 {
+                    let mut iter = v.iter().peekable();
+                    while iter.peek().is_some() {
+                        let count = iter.clone().count();
+                        // if we can take 8 values at the same time, do so and convert them to a
+                        // long
+                        if count >= 8 {
+                            let (one, two, three, four, five, six, seven, eight) =
+                                iter.next_tuple().unwrap();
+                            let bytes = [
+                                *one as u8,
+                                *two as u8,
+                                *three as u8,
+                                *four as u8,
+                                *five as u8,
+                                *six as u8,
+                                *seven as u8,
+                                *eight as u8,
+                            ];
+                            let converted = i64::from_le_bytes(bytes);
+                            instructions.push(BirdsInstructionNode::CopyToOffset(
+                                get_typed_constant(converted, &Type::Long),
+                                dst.clone(),
+                                context.current_initialiser_offset,
+                            ));
+
+                            context.current_initialiser_offset += 8;
+                        } else if count >= 4 {
+                            let (one, two, three, four) = iter.next_tuple().unwrap();
+                            let bytes = [*one as u8, *two as u8, *three as u8, *four as u8];
+                            let converted = i32::from_le_bytes(bytes);
+                            instructions.push(BirdsInstructionNode::CopyToOffset(
+                                get_typed_constant(converted.into(), &Type::Integer),
+                                dst.clone(),
+                                context.current_initialiser_offset,
+                            ));
+
+                            context.current_initialiser_offset += 4;
+                        } else {
+                            for next in iter.by_ref() {
+                                instructions.push(BirdsInstructionNode::CopyToOffset(
+                                    get_typed_constant((*next).into(), &Type::Char),
+                                    dst.clone(),
+                                    context.current_initialiser_offset,
+                                ));
+                                context.current_initialiser_offset += 1;
+                            }
+                        }
+                    }
+                    // for every space left in the array, add null bytes
+                    let difference_in_size =
+                        size as i32 - (context.current_initialiser_offset - first_offset);
+                    for _ in 0..difference_in_size {
+                        println!("{:?} {}", instructions, difference_in_size);
+                        instructions.push(BirdsInstructionNode::CopyToOffset(
+                            get_typed_constant(0, &Type::Char),
+                            dst.clone(),
+                            context.current_initialiser_offset,
+                        ));
+                        context.current_initialiser_offset += 1;
+                    }
+                } else {
+                    unreachable!()
+                }
+
+                Ok(instructions)
+            }
+            (InitialiserWithoutType::Single(e), _) => {
                 let offset = e.1.as_ref().unwrap().get_size();
                 let (mut instructions, new_src) = e.convert_and_evaluate(context)?;
                 if context.current_initialiser_offset == 0 {
@@ -485,7 +518,7 @@ impl InitialiserNode {
 
                 Ok(instructions)
             }
-            InitialiserWithoutType::Compound(initialisers) => {
+            (InitialiserWithoutType::Compound(initialisers), _) => {
                 let instructions: Vec<BirdsInstructionNode> = process_results(
                     initialisers
                         .into_iter()
@@ -612,7 +645,7 @@ impl Convert for ExpressionNode {
                     };
                     instructions.push(BirdsInstructionNode::AddPointer(
                         evaluated_src.clone(),
-                        get_typed_constant(constant, &new_dst_type),
+                        get_typed_constant(constant, &Type::Pointer(t.clone())),
                         t.get_size(),
                         new_dst.clone(),
                     ));
@@ -622,12 +655,21 @@ impl Convert for ExpressionNode {
                     } else {
                         BirdsBinaryOperatorNode::Subtract
                     };
-                    instructions.push(BirdsInstructionNode::Binary(
-                        bird_op,
-                        evaluated_src.clone(),
-                        get_typed_constant(1, &new_dst_type),
-                        new_dst.clone(),
-                    ));
+                    if new_dst_type == Type::Double {
+                        instructions.push(BirdsInstructionNode::Binary(
+                            bird_op,
+                            evaluated_src.clone(),
+                            get_double(1.),
+                            new_dst.clone(),
+                        ));
+                    } else {
+                        instructions.push(BirdsInstructionNode::Binary(
+                            bird_op,
+                            evaluated_src.clone(),
+                            get_typed_constant(1, &new_dst_type),
+                            new_dst.clone(),
+                        ));
+                    }
                 }
 
                 let (mut instructions_from_assign, _returns) =
@@ -663,7 +705,7 @@ impl Convert for ExpressionNode {
                     };
                     instructions.push(BirdsInstructionNode::AddPointer(
                         new_dst.clone(),
-                        get_typed_constant(constant, &new_dst_type),
+                        get_typed_constant(constant, &Type::Pointer(t.clone())),
                         t.get_size(),
                         evaluated_src.clone(),
                     ));
@@ -673,12 +715,21 @@ impl Convert for ExpressionNode {
                     } else {
                         BirdsBinaryOperatorNode::Subtract
                     };
-                    instructions.push(BirdsInstructionNode::Binary(
-                        bird_op,
-                        new_dst.clone(),
-                        get_typed_constant(1, &new_dst_type),
-                        evaluated_src.clone(),
-                    ));
+                    if new_dst_type == Type::Double {
+                        instructions.push(BirdsInstructionNode::Binary(
+                            bird_op,
+                            new_dst.clone(),
+                            get_double(1.),
+                            evaluated_src.clone(),
+                        ));
+                    } else {
+                        instructions.push(BirdsInstructionNode::Binary(
+                            bird_op,
+                            new_dst.clone(),
+                            get_typed_constant(1, &new_dst_type),
+                            evaluated_src.clone(),
+                        ));
+                    }
                 }
                 let (mut instructions_from_assign, _returns) =
                     ExpressionWithoutType::assign(evaluated_src.clone(), new_src)?;
@@ -836,11 +887,6 @@ impl Convert for ExpressionNode {
                     }
                 }
             }
-            // ExpressionWithoutType::Binary(op, left, right)
-            //     if matches!(op, BinaryOperatorNode::Add | BinaryOperatorNode::Subtract)
-            //         && (matches!(left, Type::Pointer(_))) => {
-            //
-            // }
             ExpressionWithoutType::Binary(op, left, right)
                 if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) =>
             {
@@ -932,7 +978,7 @@ impl Convert for ExpressionNode {
                         instructions.push(BirdsInstructionNode::Binary(
                             BirdsBinaryOperatorNode::Divide,
                             diff,
-                            get_typed_constant(left_t.get_size(), &Type::Long),
+                            get_typed_constant(left_t.get_size().into(), &Type::Long),
                             new_dst.clone(),
                         ));
 
@@ -1076,7 +1122,54 @@ impl Convert for ExpressionNode {
                 }
                 Ok((instructions, Destination::Dereference(new_dst)))
             }
+            ExpressionWithoutType::String(s) => {
+                // Strings in initialisers for char arrays do not use this code path
+                context.num_block_strings += 1;
+
+                let new_name = format!("string.block.{}", context.num_block_strings);
+                context.symbols.insert(
+                    new_name.clone(),
+                    SymbolInfo {
+                        symbol_type: self.1.unwrap(),
+                        // null terminator has not been appended yet, this happens later
+                        storage: StorageInfo::Static(
+                            InitialValue::Initial(vec![StaticInitial::Ordinal(
+                                OrdinalStatic::String(s, true),
+                            )]),
+                            false,
+                        ),
+                    },
+                );
+
+                let new_dst = BirdsValueNode::Var(new_name);
+                Ok((Vec::new(), new_dst.into()))
+            }
         }
+    }
+}
+
+impl Destination {
+    fn evaluate(
+        self,
+        target_type: &Type,
+        context: &mut ConvertContext,
+    ) -> (Vec<BirdsInstructionNode>, BirdsValueNode) {
+        match self {
+            Destination::Direct(val) => (Vec::new(), val),
+            Destination::Dereference(val) => {
+                let new_dst = new_temp_variable(target_type, context);
+                (
+                    vec![BirdsInstructionNode::LoadFromPointer(val, new_dst.clone())],
+                    new_dst,
+                )
+            }
+        }
+    }
+}
+
+impl From<BirdsValueNode> for Destination {
+    fn from(value: BirdsValueNode) -> Self {
+        Destination::Direct(value)
     }
 }
 
@@ -1090,10 +1183,10 @@ impl ExpressionWithoutType {
         let mut instructions = Vec::new();
         if target_type == &Type::Double {
             match this_type {
-                Type::Integer | Type::Long => {
+                Type::Integer | Type::Long | Type::Char | Type::SignedChar => {
                     instructions.push(BirdsInstructionNode::IntToDouble(src, dst.clone()));
                 }
-                Type::UnsignedInteger | Type::UnsignedLong => {
+                Type::UnsignedInteger | Type::UnsignedLong | Type::UnsignedChar => {
                     instructions.push(BirdsInstructionNode::UintToDouble(src, dst.clone()));
                 }
                 Type::Array(..) => unreachable!(),
@@ -1103,10 +1196,10 @@ impl ExpressionWithoutType {
             }
         } else if this_type == &Type::Double {
             match target_type {
-                Type::Integer | Type::Long => {
+                Type::Integer | Type::Long | Type::Char | Type::SignedChar => {
                     instructions.push(BirdsInstructionNode::DoubleToInt(src, dst.clone()));
                 }
-                Type::UnsignedInteger | Type::UnsignedLong => {
+                Type::UnsignedInteger | Type::UnsignedLong | Type::UnsignedChar => {
                     instructions.push(BirdsInstructionNode::DoubleToUint(src, dst.clone()));
                 }
                 Type::Pointer(_) => unreachable!(),

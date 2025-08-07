@@ -25,6 +25,8 @@ impl Constant {
             Constant::Long(i) => StaticInitial::from_number(*i, target),
             Constant::UnsignedInteger(i) => StaticInitial::from_number(*i, target),
             Constant::UnsignedLong(i) => StaticInitial::from_number(*i, target),
+            Constant::Char(i) => StaticInitial::from_number(*i, target),
+            Constant::UnsignedChar(i) => StaticInitial::from_number(*i, target),
             Constant::Double(_) => unreachable!(),
         }
     }
@@ -36,6 +38,8 @@ impl Constant {
             Constant::UnsignedInteger(i) => StaticInitial::from_number(*i, target),
             Constant::UnsignedLong(i) => StaticInitial::from_number(*i, target),
             Constant::Double(i) => StaticInitial::from_double(*i, target),
+            Constant::Char(i) => StaticInitial::from_number(*i, target),
+            Constant::UnsignedChar(i) => StaticInitial::from_number(*i, target),
         }
     }
     pub fn convert_to_pointer(&self) -> StaticInitial {
@@ -50,16 +54,20 @@ impl Constant {
 }
 
 trait ApproximableOrdinal:
-    ApproxInto<i32, Wrapping>
+    ApproxInto<i8, Wrapping>
+    + ApproxInto<i32, Wrapping>
     + ApproxInto<i64, Wrapping>
+    + ApproxInto<u8, Wrapping>
     + ApproxInto<u32, Wrapping>
     + ApproxInto<u64, Wrapping>
     + ApproxInto<f64>
     + Copy
 {
 }
+impl ApproximableOrdinal for i8 {}
 impl ApproximableOrdinal for i32 {}
 impl ApproximableOrdinal for i64 {}
+impl ApproximableOrdinal for u8 {}
 impl ApproximableOrdinal for u32 {}
 impl ApproximableOrdinal for u64 {}
 
@@ -71,6 +79,9 @@ impl StaticInitial {
             Type::UnsignedInteger => StaticInitial::unsigned_integer_from_double(i),
             Type::UnsignedLong => StaticInitial::unsigned_long_from_double(i),
             Type::Double => StaticInitial::Double(i),
+            Type::Char => StaticInitial::char_from_double(i),
+            Type::SignedChar => StaticInitial::char_from_double(i),
+            Type::UnsignedChar => StaticInitial::unsigned_char_from_double(i),
             Type::Function(_, _) => unreachable!(),
             Type::Pointer(_) => unreachable!(),
             Type::Array(..) => unreachable!(),
@@ -85,6 +96,9 @@ impl StaticInitial {
             Type::UnsignedInteger => StaticInitial::unsigned_integer(i),
             Type::UnsignedLong => StaticInitial::unsigned_long(i),
             Type::Double => StaticInitial::double(i),
+            Type::Char => StaticInitial::char(i),
+            Type::SignedChar => StaticInitial::char(i),
+            Type::UnsignedChar => StaticInitial::unsigned_char(i),
             Type::Pointer(_) | Type::Array(..) => {
                 let value = StaticInitial::unsigned_long(i);
                 if !matches!(
@@ -99,6 +113,14 @@ impl StaticInitial {
         }
     }
 
+    fn char<T: ApproxInto<i8, Wrapping>>(i: T) -> StaticInitial {
+        let real_i = i.approx_as_by().unwrap();
+        if real_i == 0 {
+            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::Char.get_size()));
+        }
+        StaticInitial::Ordinal(OrdinalStatic::Char(real_i))
+    }
+
     fn integer<T: ApproxInto<i32, Wrapping>>(i: T) -> StaticInitial {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
@@ -106,6 +128,7 @@ impl StaticInitial {
         }
         StaticInitial::Ordinal(OrdinalStatic::Integer(real_i))
     }
+
     fn long<T: ApproxInto<i64, Wrapping>>(i: T) -> StaticInitial {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
@@ -113,6 +136,15 @@ impl StaticInitial {
         }
         StaticInitial::Ordinal(OrdinalStatic::Long(real_i))
     }
+
+    fn unsigned_char<T: ApproxInto<u8, Wrapping>>(i: T) -> StaticInitial {
+        let real_i = i.approx_as_by().unwrap();
+        if real_i == 0 {
+            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::UnsignedChar.get_size()));
+        }
+        StaticInitial::Ordinal(OrdinalStatic::UnsignedChar(real_i))
+    }
+
     fn unsigned_integer<T: ApproxInto<u32, Wrapping>>(i: T) -> StaticInitial {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
@@ -122,6 +154,7 @@ impl StaticInitial {
         }
         StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(real_i))
     }
+
     fn unsigned_long<T: ApproxInto<u64, Wrapping>>(i: T) -> StaticInitial {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
@@ -138,6 +171,13 @@ impl StaticInitial {
         StaticInitial::Double(ConvUtil::approx_as(real_i).unwrap())
     }
 
+    fn char_from_double<T: ApproxInto<i8, RoundToZero>>(i: T) -> StaticInitial {
+        let real_i = i.approx_as_by().unwrap();
+        if real_i == 0 {
+            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::Char.get_size()));
+        }
+        StaticInitial::Ordinal(OrdinalStatic::Char(real_i))
+    }
     fn integer_from_double<T: ApproxInto<i32, RoundToZero>>(i: T) -> StaticInitial {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
@@ -145,6 +185,7 @@ impl StaticInitial {
         }
         StaticInitial::Ordinal(OrdinalStatic::Integer(real_i))
     }
+
     fn long_from_double<T: ApproxInto<i64, RoundToZero>>(i: T) -> StaticInitial {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
@@ -152,6 +193,17 @@ impl StaticInitial {
         }
         StaticInitial::Ordinal(OrdinalStatic::Long(real_i))
     }
+
+    fn unsigned_char_from_double<T: ApproxInto<u8, RoundToZero>>(i: T) -> StaticInitial {
+        let real_i = i.approx_as_by().unwrap();
+        if real_i == 0 {
+            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(
+                Type::UnsignedInteger.get_size(),
+            ));
+        }
+        StaticInitial::Ordinal(OrdinalStatic::UnsignedChar(real_i))
+    }
+
     fn unsigned_integer_from_double<T: ApproxInto<u32, RoundToZero>>(i: T) -> StaticInitial {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
@@ -161,6 +213,7 @@ impl StaticInitial {
         }
         StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(real_i))
     }
+
     fn unsigned_long_from_double<T: ApproxInto<u64, RoundToZero>>(i: T) -> StaticInitial {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {

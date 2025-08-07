@@ -18,6 +18,7 @@ pub enum BirdsTopLevel {
     Function(String, Vec<String>, Vec<BirdsInstructionNode>, bool),
     // name init global
     StaticVariable(Type, String, Vec<StaticInitial>, bool),
+    StaticConstant(Type, String, StaticInitial),
 }
 
 #[derive(Debug)]
@@ -123,6 +124,7 @@ pub struct ConvertContext {
     last_stack_number: i32,
     last_true_label_number: i32,
     current_initialiser_offset: i32,
+    num_block_strings: i32,
     symbols: HashMap<String, SymbolInfo>,
 }
 
@@ -137,6 +139,7 @@ pub fn birds(
         last_stack_number: 0,
         last_true_label_number: 0,
         current_initialiser_offset: 0,
+        num_block_strings: 0,
         symbols,
     };
 

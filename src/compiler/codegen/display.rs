@@ -23,7 +23,7 @@ impl DisplayContext {
     }
     fn short(&mut self) -> &mut DisplayContext {
         self.word_length_bytes = 1;
-        self.instruction_suffix = "".to_string(); // unused
+        self.instruction_suffix = "b".to_string(); // unused
         self
     }
     fn regular(&mut self) -> &mut DisplayContext {
@@ -52,7 +52,10 @@ impl DisplayContext {
             AssemblyType::Double => {
                 self.double();
             }
-            AssemblyType::ByteArray(_, _) => todo!(),
+            AssemblyType::Byte => {
+                self.short();
+            }
+            AssemblyType::ByteArray(_, _) => unreachable!(),
         }
         self.instruction_suffix.clone()
     }
@@ -150,8 +153,11 @@ impl CodeDisplay for TopLevel {
                 }
                 out += section.to_string().show(context).as_str();
                 out += "\n";
-                out += format!("{} {}", align, alignment).show(context).as_str();
-                out += "\n";
+                // 1-byte alignment is meaningless, so can be omitted
+                if *alignment != 1 {
+                    out += format!("{} {}", align, alignment).show(context).as_str();
+                    out += "\n";
+                }
                 context.unindent();
                 out += format!("{}:", address).show(context).as_str();
                 out += "\n";
@@ -187,10 +193,14 @@ impl CodeDisplay for TopLevel {
                 };
 
                 let section = if context.is_mac {
-                    match alignment {
-                        8 => ".literal8",
-                        16 => ".literal16",
-                        _ => unreachable!(),
+                    if matches!(init, StaticInitial::Ordinal(OrdinalStatic::String(_, _))) {
+                        ".cstring"
+                    } else {
+                        match alignment {
+                            8 => ".literal8",
+                            16 => ".literal16",
+                            _ => unreachable!(),
+                        }
                     }
                 } else {
                     ".section .rodata"
@@ -235,7 +245,22 @@ impl CodeDisplay for StaticInitial {
             StaticInitial::Ordinal(OrdinalStatic::Long(l)) => format!(".quad {}", l),
             StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(i)) => format!(".long {}", i),
             StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(l)) => format!(".quad {}", l),
+            StaticInitial::Ordinal(OrdinalStatic::Char(l)) => {
+                format!(".byte {}", *l as u8)
+            }
+            // converting unsigned char to signed char here (only to convert it back in a second)
+            StaticInitial::Ordinal(OrdinalStatic::UnsignedChar(l)) => {
+                format!(".byte {}", l)
+            }
             StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(n)) => format!(".zero {}", n),
+            StaticInitial::Ordinal(OrdinalStatic::String(l, term)) => {
+                if *term {
+                    format!(".asciz \"{}\"", l.iter().map(|f| f.show(context)).join(""))
+                } else {
+                    format!(".ascii \"{}\"", l.iter().map(|f| f.show(context)).join(""))
+                }
+            }
+            StaticInitial::Ordinal(OrdinalStatic::Pointer(l)) => format!(".quad {}", l),
             // print 17 digits of precision so that when the linker re-converts this to a real
             // double value, this has enough precision to guarantee the original value.
             // no special case for zero values here, so that we can avoid confusion about
@@ -253,6 +278,26 @@ impl CodeDisplay for StaticInitial {
         };
 
         format!("{:indent$}{}", "", s, indent = context.indent)
+    }
+}
+
+impl CodeDisplay for i8 {
+    fn show(&self, _context: &mut DisplayContext) -> String {
+        char::from_u32(*self as u32)
+            .map(|c| match c {
+                '\n' => r"\n".to_string(),
+                '\r' => r"\r".to_string(),
+                '\\' => r"\\".to_string(),
+                '\"' => r#"\""#.to_string(),
+                _ => match c as u32 {
+                    7 => r"\7".to_string(),
+                    8 => r"\8".to_string(),
+                    11 => r"\11".to_string(),
+                    12 => r"\12".to_string(),
+                    _ => c.to_string(),
+                },
+            })
+            .unwrap_or("NULL".to_string())
     }
 }
 
@@ -321,12 +366,29 @@ impl CodeDisplay for Instruction {
                     )
                 }
             }
-            Instruction::Movsx(src, dst) => {
+            Instruction::Movsx(src_type, dst_type, src, dst) => {
+                let src_suffix = context.suffix_for_type(src_type);
+                let src_show = src.show(context);
                 format!(
-                    "{:indent$}movslq {}, {}",
+                    "{:indent$}movs{}{} {}, {}",
                     "",
-                    src.show(context.regular()),
-                    dst.show(context.long()),
+                    src_suffix,
+                    context.suffix_for_type(dst_type),
+                    src_show,
+                    dst.show(context),
+                    indent = context.indent
+                )
+            }
+            Instruction::MovZeroExtend(src_type, dst_type, src, dst) => {
+                let src_suffix = context.suffix_for_type(src_type);
+                let src_show = src.show(context);
+                format!(
+                    "{:indent$}movz{}{} {}, {}",
+                    "",
+                    src_suffix,
+                    context.suffix_for_type(dst_type),
+                    src_show,
+                    dst.show(context),
                     indent = context.indent
                 )
             }
@@ -442,7 +504,7 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
-            Instruction::Cdq(AssemblyType::Longword) => {
+            Instruction::Cdq(AssemblyType::Byte | AssemblyType::Longword) => {
                 if context.comments {
                     format!(
                         "{:indent$}# Extend the 32-bit value in EAX to a 64-bit\n\
@@ -562,7 +624,6 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
-            Instruction::MovZeroExtend(_, _) => unreachable!("This was a placeholder instruction"),
             Instruction::Lea(src, dst) => {
                 context.long();
                 format!(

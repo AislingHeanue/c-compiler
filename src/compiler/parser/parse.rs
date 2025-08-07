@@ -25,6 +25,7 @@ fn match_type(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
             | Token::KeywordUnsigned
             | Token::KeywordSigned
             | Token::KeywordDouble
+            | Token::KeywordChar
     ))
 }
 
@@ -50,6 +51,7 @@ fn match_constant(tokens: &VecDeque<Token>) -> Result<bool, Box<dyn Error>> {
             | Token::UnsignedIntegerConstant(_)
             | Token::UnsignedLongConstant(_)
             | Token::DoubleConstant(_)
+            | Token::CharacterConstant(_)
     ))
 }
 
@@ -131,23 +133,32 @@ fn new_identifier(
     Ok(new_name)
 }
 
-fn enter_scope(context: &mut ParseContext) -> HashMap<String, (String, bool)> {
+type Scopes = (
+    HashMap<String, (String, bool)>,
+    HashMap<String, (String, bool)>,
+);
+
+fn enter_scope(context: &mut ParseContext) -> Scopes {
     // println!(
     //     "enter {:?} {:?}",
     //     context.outer_scope_identifiers, context.current_scope_identifiers
     // );
+    let original_current_scope_variables = context.current_scope_identifiers.clone();
     let original_outer_scope_variables = context.outer_scope_identifiers.clone();
     context
         .outer_scope_identifiers
         .extend(context.current_scope_identifiers.clone());
     context.current_scope_identifiers = HashMap::new();
 
-    original_outer_scope_variables
+    (
+        original_current_scope_variables,
+        original_outer_scope_variables,
+    )
 }
 
-fn leave_scope(previous_scope: HashMap<String, (String, bool)>, context: &mut ParseContext) {
-    context.current_scope_identifiers = context.outer_scope_identifiers.clone();
-    context.outer_scope_identifiers = previous_scope;
+fn leave_scope(previous_scopes: Scopes, context: &mut ParseContext) {
+    context.current_scope_identifiers = previous_scopes.0;
+    context.outer_scope_identifiers = previous_scopes.1;
     // println!(
     //     "leave {:?} {:?}",
     //     context.outer_scope_identifiers, context.current_scope_identifiers
@@ -200,6 +211,23 @@ impl Parse for Type {
         if out.contains(&Token::KeywordUnsigned) && out.contains(&Token::KeywordLong) {
             return Ok(Type::UnsignedLong);
         }
+        if out.contains(&Token::KeywordChar) {
+            if out.iter().any(|t| {
+                !matches!(
+                    t,
+                    Token::KeywordChar | Token::KeywordSigned | Token::KeywordUnsigned
+                )
+            }) {
+                return Err("Char type definition contained another type".into());
+            }
+            if out.contains(&Token::KeywordUnsigned) {
+                return Ok(Type::UnsignedChar);
+            }
+            if out.contains(&Token::KeywordSigned) {
+                return Ok(Type::SignedChar);
+            }
+            return Ok(Type::Char);
+        }
         if out.contains(&Token::KeywordUnsigned) {
             return Ok(Type::UnsignedInteger);
         }
@@ -217,7 +245,6 @@ impl Parse for Block {
     ) -> Result<Self, Box<dyn Error>> {
         expect(tokens, Token::OpenBrace)?;
 
-        // it's a new block it's a new scope
         // (and I'm feeling... good)
         let mut original_outer_scope_variables = None;
         // if this is a function body, this is not in fact a new scope, since the actual new scope
@@ -861,6 +888,12 @@ impl Parse for ExpressionNode {
     }
 }
 
+impl ExpressionNode {
+    pub fn is_string_literal(&self) -> bool {
+        matches!(self.0, ExpressionWithoutType::String(_))
+    }
+}
+
 impl Parse for ExpressionWithoutType {
     fn parse(
         tokens: &mut VecDeque<Token>,
@@ -1110,6 +1143,19 @@ impl ExpressionWithoutType {
                 expect(tokens, Token::CloseParen)?;
                 Some(expression)
             }
+            Token::StringLiteral(v) => {
+                expect(tokens, Token::StringLiteral(Vec::new()))?;
+                let mut out = v.clone();
+                while matches!(peek(tokens)?, Token::StringLiteral(_)) {
+                    if let Token::StringLiteral(new_v) = read(tokens)? {
+                        out.append(&mut new_v.clone())
+                    } else {
+                        unreachable!()
+                    }
+                }
+
+                Some(ExpressionWithoutType::String(out))
+            }
             _ if match_constant(tokens)? => Some(ExpressionWithoutType::Constant(Constant::parse(
                 tokens, context,
             )?)),
@@ -1131,6 +1177,7 @@ impl ExpressionWithoutType {
             ExpressionWithoutType::Var(_)
                 | ExpressionWithoutType::Dereference(_)
                 | ExpressionWithoutType::Subscript(_, _)
+                | ExpressionWithoutType::String(_) // this allows dereferencing a string
         )
     }
 
@@ -1173,6 +1220,7 @@ impl Parse for Constant {
             Token::LongConstant(v) => Ok(Constant::Long(v)),
             Token::UnsignedLongConstant(v) => Ok(Constant::UnsignedLong(v)),
             Token::DoubleConstant(v) => Ok(Constant::Double(v)),
+            Token::CharacterConstant(num) => Ok(Constant::Integer(num.into())),
             _ => unreachable!(),
         }
     }

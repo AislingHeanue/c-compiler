@@ -38,6 +38,12 @@ impl Debug for BirdsTopLevel {
                 .field("init", init)
                 .field("global", global)
                 .finish(),
+            BirdsTopLevel::StaticConstant(t, name, init) => f
+                .debug_struct("BirdTopLevel::StaticConstant")
+                .field("type", t)
+                .field("name", name)
+                .field("init", init)
+                .finish(),
         }
     }
 }

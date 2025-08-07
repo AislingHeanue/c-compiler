@@ -269,6 +269,9 @@ impl CodeDisplay for Type {
             Type::Double => "float64".to_string(),
             Type::Pointer(t) => format!("*{}", t.show(context)),
             Type::Array(t, s) => format!("[{}]{}", s, t.show(context)),
+            Type::Char => "rune".to_string(),
+            Type::SignedChar => "signed_rune".to_string(),
+            Type::UnsignedChar => "unsigned_rune".to_string(),
         }
     }
 }
@@ -357,18 +360,48 @@ impl CodeDisplay for ExpressionWithoutType {
             ExpressionWithoutType::Subscript(src, inner) => {
                 format!("{}[{}]", src.show(context), inner.show(context))
             }
+            ExpressionWithoutType::String(s) => {
+                let mut out = "\"".to_string();
+                for c in s {
+                    out += &c.show(context);
+                }
+                out += "\"";
+                out
+            }
         }
     }
 }
 
-impl CodeDisplay for Constant {
+impl CodeDisplay for i8 {
     fn show(&self, _context: &mut DisplayContext) -> String {
+        char::from_u32(*self as u32)
+            .map(|c| match c {
+                '\n' => r"\n".to_string(),
+                '\r' => r"\r".to_string(),
+                '\\' => r"\\".to_string(),
+                '\"' => r#"\""#.to_string(),
+                _ => match c as u32 {
+                    7 => r"\a".to_string(),
+                    8 => r"\b".to_string(),
+                    11 => r"\f".to_string(),
+                    12 => r"\v".to_string(),
+                    _ => c.to_string(),
+                },
+            })
+            .unwrap_or("NULL".to_string())
+    }
+}
+
+impl CodeDisplay for Constant {
+    fn show(&self, context: &mut DisplayContext) -> String {
         match self {
             Constant::Integer(c) => c.to_string(),
             Constant::Long(c) => format!("int64({})", c),
             Constant::UnsignedInteger(c) => format!("uint32({})", c),
             Constant::UnsignedLong(c) => format!("uint64({})", c),
             Constant::Double(c) => format!("float64({})", c),
+            Constant::Char(c) => format!("rune({})", c.show(context)),
+            Constant::UnsignedChar(c) => format!("unsigned_rune({})", (*c as i8).show(context)),
         }
     }
 }

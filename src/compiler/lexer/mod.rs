@@ -55,6 +55,8 @@ pub enum Token {
     DoubleConstant(f64),
     UnsignedIntegerConstant(u64),
     UnsignedLongConstant(u64),
+    CharacterConstant(i8),
+    StringLiteral(Vec<i8>),
     KeywordInt,
     KeywordVoid,
     KeywordReturn,
@@ -75,6 +77,7 @@ pub enum Token {
     KeywordSigned,
     KeywordUnsigned,
     KeywordDouble,
+    KeywordChar,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -141,6 +144,8 @@ lazy_static! {
                 Token::UnsignedIntegerConstant(_) => r"([0-9]+[uU])[^\w.]",
                 Token::UnsignedLongConstant(_) => r"([0-9]+([lL][uU]|[uU][lL]))[^\w.]",
                 Token::DoubleConstant(_) => r"((?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]",
+                Token::CharacterConstant(_) => r#"'(?:[^'\\\n]|\\['"?\\abfnrtv])'"#,
+                Token::StringLiteral(_) => r#""(?:[^"\\\n]|\\['"?\\abfnrtv])*""#,
                 // Token::IntegerConstant(_) => r"([0-9]+)\b",
                 // Token::LongConstant(_) => r"([0-9]+[lL])\b",
                 // Token::UnsignedIntegerConstant(_) => r"([0-9]+[uU])\b",
@@ -168,6 +173,7 @@ lazy_static! {
                 Token::KeywordSigned =>r"signed\b",
                 Token::KeywordUnsigned =>r"unsigned\b",
                 Token::KeywordDouble =>r"double\b",
+                Token::KeywordChar =>r"char\b",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -184,6 +190,15 @@ impl Token {
         // contents of the matching field
         match self {
             Token::Identifier(_) => Token::Identifier(text.to_string()),
+            Token::CharacterConstant(_) => {
+                // strip first and last characters (')
+                Token::CharacterConstant(Token::parse_character(&text[1..text.len() - 1]))
+            }
+            // TODO: Fix
+            Token::StringLiteral(_) => {
+                // strip first and last characters (")
+                Token::StringLiteral(Token::parse_string(text[1..text.len() - 1].to_string()))
+            }
             Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<i64>().unwrap()),
             Token::LongConstant(_) => {
                 Token::LongConstant(text.trim_end_matches(['l', 'L']).parse::<i64>().unwrap())
@@ -199,6 +214,42 @@ impl Token {
             Token::DoubleConstant(_) => Token::DoubleConstant(text.parse::<f64>().unwrap()),
             _ => self.clone(),
         }
+    }
+
+    fn parse_character(text: &str) -> i8 {
+        // println!("{:?}", text);
+        let code: u64 = match text {
+            _ if text.len() == 1 => text.chars().next().unwrap().into(),
+            r"\'" => '\''.into(),
+            r#"\""# => '\"'.into(),
+            r"\?" => '?'.into(),
+            r"\\" => '\\'.into(),
+            r"\a" => 7,  // audible bell
+            r"\b" => 8,  // backspace
+            r"\f" => 12, // form feed
+            r"\n" => '\n'.into(),
+            r"\r" => '\r'.into(),
+            r"\t" => '\t'.into(),
+            r"\v" => 11, //vertical tab
+            _ => panic!("Invalid token"),
+        };
+        code as i8
+    }
+
+    fn parse_string(mut text: String) -> Vec<i8> {
+        let mut out = Vec::new();
+        while !text.is_empty() {
+            if text.starts_with(r"\") {
+                let (substring, new_text) = text.split_at(2);
+                out.push(Self::parse_character(substring));
+                text = new_text.to_string();
+            } else {
+                let (substring, new_text) = text.split_at(1);
+                out.push(Self::parse_character(substring));
+                text = new_text.to_string();
+            }
+        }
+        out
     }
 
     fn find_next(text: &str) -> Result<(Token, usize), Box<dyn Error>> {

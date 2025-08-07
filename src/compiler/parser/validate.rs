@@ -173,9 +173,6 @@ impl Validate for VariableDeclaration {
 
 impl Validate for InitialiserNode {
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
-        // if matches!(context.pass, ValidationPass::TypeChecking) {
-        //     self.check_types(context)?
-        // }
         match self.0 {
             InitialiserWithoutType::Single(ref mut e) => {
                 e.validate(context)?;
@@ -194,11 +191,56 @@ impl InitialiserNode {
     fn create_static_init_list(
         &mut self,
         target_type: &Type,
-        _context: &mut ValidateContext,
+        context: &mut ValidateContext,
     ) -> Result<Vec<StaticInitial>, Box<dyn Error>> {
         let init_list: Vec<StaticInitial> = match (target_type, &mut self.0) {
-            (Type::Array(..), InitialiserWithoutType::Single(_)) => {
-                return Err("Cannot initialise a static array with a scalar type".into());
+            (Type::Pointer(t), InitialiserWithoutType::Single(init_e))
+                if init_e.is_string_literal() =>
+            {
+                if **t != Type::Char {
+                    return Err("Can't initialise a non-character pointer with a string".into());
+                }
+                if let ExpressionWithoutType::String(s) = &init_e.0 {
+                    context.num_strings += 1;
+                    let new_name = format!("string.constant.{}", context.num_strings);
+                    context.symbols.insert(
+                        new_name.clone(),
+                        SymbolInfo {
+                            symbol_type: Type::Array(t.clone(), s.len() as u64 + 1),
+                            storage: StorageInfo::Constant(StaticInitial::Ordinal(
+                                OrdinalStatic::String(s.to_vec(), true),
+                            )),
+                        },
+                    );
+                    vec![StaticInitial::Ordinal(OrdinalStatic::Pointer(new_name))]
+                } else {
+                    unreachable!()
+                }
+            }
+
+            (Type::Array(t, size), InitialiserWithoutType::Single(init_e)) => {
+                if let ExpressionWithoutType::String(s) = &init_e.0 {
+                    if s.len() > (*size).try_into().unwrap() {
+                        return Err("Static String is too long".into());
+                    }
+                    let difference: i32 = *size as i32 - s.len() as i32;
+
+                    if !t.is_character() {
+                        return Err("Can't initialise a non-character array with a string".into());
+                    }
+                    let mut out = vec![StaticInitial::Ordinal(OrdinalStatic::String(
+                        s.clone(),
+                        difference > 0,
+                    ))];
+                    if difference > 1 {
+                        out.push(StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(
+                            difference - 1,
+                        )))
+                    }
+                    out
+                } else {
+                    return Err("Cannot initialise a static array with a scalar type".into());
+                }
             }
             (_, InitialiserWithoutType::Single(ref i)) => {
                 if matches!(target_type, Type::Pointer(_)) && !i.equals_null_pointer() {
@@ -221,7 +263,7 @@ impl InitialiserNode {
                 let mut statics: Vec<StaticInitial> = process_results(
                     initialisers
                         .iter_mut()
-                        .map(|init| init.create_static_init_list(t, _context)),
+                        .map(|init| init.create_static_init_list(t, context)),
                     |iter| iter.flatten().collect(),
                 )?;
                 if initialisers.len() < (*size).try_into().unwrap() {
@@ -246,6 +288,23 @@ impl InitialiserNode {
     ) -> Result<(), Box<dyn Error>> {
         self.1 = Some(target_type.clone());
         match (target_type, &mut self.0) {
+            (Type::Array(t, size), InitialiserWithoutType::Single(ref mut init_e))
+                if matches!(&init_e.0, ExpressionWithoutType::String(_s)) =>
+            {
+                if let ExpressionWithoutType::String(s) = &init_e.0 {
+                    if !t.is_character() {
+                        return Err(
+                            "Can't initialise non-character array with a string literal".into()
+                        );
+                    }
+                    if s.len() > (*size).try_into().unwrap() {
+                        return Err("Initialiser has the wrong number of elements".into());
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
             (_, InitialiserWithoutType::Single(ref mut init_e)) => {
                 init_e.check_types_and_convert(context)?;
                 init_e.convert_type_by_assignment(target_type)?;
@@ -319,13 +378,34 @@ impl InitialiserNode {
                 )),
                 Some(target_type.clone()),
             ),
+            Type::Char => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::Char(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
+            Type::SignedChar => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::Char(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
+            Type::UnsignedChar => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::UnsignedChar(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
         }
     }
 }
 
 impl VariableDeclaration {
     fn validate_file_scope(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
-        let mut initial_value = if let Some(init) = self.init.as_mut() {
+        let mut initial_value = if let Some(ref mut init) = self.init.as_mut() {
             init.validate(context)?;
             InitialValue::Initial(init.create_static_init_list(&self.variable_type, context)?)
         } else if matches!(self.storage_class, Some(StorageClass::Extern)) {
@@ -571,11 +651,12 @@ impl Validate for StatementNode {
                         StatementNode::leave_switch(previous, context)
                     }
                     ValidationPass::TypeChecking => {
+                        expression.validate(context)?;
+                        expression.promote(context)?;
                         expression.check_types_and_convert(context)?;
                         let previous =
                             StatementNode::enter_switch_type_checking(expression, context);
 
-                        expression.validate(context)?;
                         if !expression.1.as_ref().unwrap().is_integer() {
                             return Err("Cannot Switch on non-integer type".into());
                         }
@@ -780,7 +861,7 @@ impl StatementNode {
         context.current_switch_labels = Some(HashMap::new());
 
         let previous_switch_type = context.current_switch_type.take();
-        context.current_switch_type = e.1.clone();
+        context.current_switch_type = Some(e.1.as_ref().unwrap().clone());
 
         (previous_switch_type, previous_switch_labels)
     }
@@ -865,6 +946,7 @@ impl Validate for ExpressionNode {
             ExpressionWithoutType::AddressOf(ref mut object) => {
                 object.validate(context)?;
             }
+            ExpressionWithoutType::String(ref mut _s) => {}
         };
         Ok(())
     }
@@ -910,6 +992,7 @@ impl ExpressionNode {
     fn get_common_type(e1: &ExpressionNode, e2: &ExpressionNode) -> Type {
         let t1 = e1.1.as_ref().unwrap();
         let t2 = e2.1.as_ref().unwrap();
+
         if t1 == t2 {
             t1.clone()
         } else if t1 == &Type::Double || t2 == &Type::Double {
@@ -958,7 +1041,7 @@ impl ExpressionNode {
         )
     }
 
-    fn convert_type(&mut self, target: &Type) {
+    pub fn convert_type(&mut self, target: &Type) {
         if self.1.as_ref().unwrap() != target {
             *self = ExpressionNode(
                 ExpressionWithoutType::Cast(target.clone(), Box::new(self.clone())),
@@ -1032,15 +1115,22 @@ impl ExpressionNode {
                 Constant::UnsignedInteger(_) => Type::UnsignedInteger,
                 Constant::UnsignedLong(_) => Type::UnsignedLong,
                 Constant::Double(_) => Type::Double,
+                Constant::Char(_) => Type::Char,
+                Constant::UnsignedChar(_) => Type::UnsignedChar,
             },
             ExpressionWithoutType::Unary(ref op, ref mut src) => {
                 src.check_types_and_convert(context)?;
                 if matches!(
                     op,
                     UnaryOperatorNode::Negate | UnaryOperatorNode::Complement
-                ) && matches!(src.1.as_ref().unwrap(), Type::Pointer(_))
-                {
-                    return Err("Can't apply - or ~ to a pointer".into());
+                ) {
+                    if matches!(src.1.as_ref().unwrap(), Type::Pointer(_)) {
+                        return Err("Can't apply - or ~ to a pointer".into());
+                    }
+                    // promote char types to int for this operation
+                    if src.1.as_ref().unwrap().is_character() {
+                        src.convert_type(&Type::Integer)
+                    }
                 }
                 match op {
                     UnaryOperatorNode::Not => Type::Integer, // returns 0 or 1 (eg boolean-like)
@@ -1056,17 +1146,22 @@ impl ExpressionNode {
             ExpressionWithoutType::Compound(ref op, ref mut left, ref mut right) => {
                 left.check_types_and_convert(context)?;
                 right.check_types_and_convert(context)?;
+                let mut left_clone = left.clone();
+                left_clone.promote(context)?;
+                right.promote(context)?;
                 // undo type conversion on Left, it will be done manually in the birds generation
                 // stage
-                let common_type = ExpressionNode::check_types_binary(op, &mut left.clone(), right)?;
+                let common_type = ExpressionNode::check_types_binary(op, &mut left_clone, right)?;
                 // verify that it is possible to assign from the common type to left, without
                 // actually doing the conversion yet.
-                left.clone().convert_type_by_assignment(&common_type)?;
+                left_clone.convert_type_by_assignment(&common_type)?;
                 common_type
             }
             ExpressionWithoutType::Binary(ref op, ref mut left, ref mut right) => {
                 left.check_types_and_convert(context)?;
                 right.check_types_and_convert(context)?;
+                left.promote(context)?;
+                right.promote(context)?;
                 ExpressionNode::check_types_binary(op, left, right)?
             }
             ExpressionWithoutType::Assignment(ref mut dst, ref mut src) => {
@@ -1143,6 +1238,10 @@ impl ExpressionNode {
                     return Err("Invalid subscript expression".into());
                 }
             }
+            ExpressionWithoutType::String(ref s) => {
+                // WEE WOO WEE WOO DON'T FORGET TO ASSIGN SPACE FOR THE NULL TERMINATOR
+                Type::Array(Box::new(Type::Char), (s.len() as u64) + 1)
+            }
         });
 
         Ok(())
@@ -1169,6 +1268,14 @@ impl ExpressionNode {
                 Some(Type::Pointer(t.clone())),
             )
         }
+        Ok(())
+    }
+
+    // promote char and unsigned char to signed int for all unary, binary and switch expressions
+    fn promote(&mut self, _context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        let t = self.1.as_ref().unwrap().promote().clone();
+        self.convert_type(&t);
+
         Ok(())
     }
 

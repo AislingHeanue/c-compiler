@@ -140,6 +140,7 @@ pub enum ExpressionWithoutType {
     Cast(Type, Box<ExpressionNode>),
     Dereference(Box<ExpressionNode>),
     AddressOf(Box<ExpressionNode>),
+    String(Vec<i8>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -258,6 +259,7 @@ struct ValidateContext {
     num_loops: usize,
     num_switches: usize,
     num_switch_labels: usize,
+    num_strings: usize,
     labels: HashMap<String, HashMap<String, String>>,
     current_function_name: Option<String>,
     // all loops + switch
@@ -284,6 +286,7 @@ pub fn validate(parsed: &mut ProgramNode) -> Result<HashMap<String, SymbolInfo>,
         num_loops: 0,
         num_switches: 0,
         num_switch_labels: 0,
+        num_strings: 0,
         labels: HashMap::new(),
         current_function_name: None,
         current_enclosing_loop_name_for_break: None,

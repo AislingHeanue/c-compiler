@@ -189,11 +189,11 @@ impl Instruction {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
             }
-            Instruction::Movsx(ref mut src, ref mut dst) => {
+            Instruction::Movsx(_, _, ref mut src, ref mut dst) => {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
             }
-            Instruction::MovZeroExtend(ref mut src, ref mut dst) => {
+            Instruction::MovZeroExtend(_, _, ref mut src, ref mut dst) => {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
             }
@@ -264,14 +264,31 @@ impl Instruction {
 
     fn rewrite_mov_zero_extend(self, _context: &mut ValidateContext) -> Vec<Instruction> {
         match self {
-            Instruction::MovZeroExtend(src, dst) if match_in_memory(&dst) => {
-                vec![
-                    Instruction::Mov(AssemblyType::Longword, src, Operand::Reg(Register::R11)),
-                    Instruction::Mov(AssemblyType::Quadword, Operand::Reg(Register::R11), dst),
-                ]
-            }
-            Instruction::MovZeroExtend(src, dst) => {
-                vec![Instruction::Mov(AssemblyType::Longword, src, dst)]
+            Instruction::MovZeroExtend(ref src_type, _, ref src, ref dst) => {
+                if src_type == &AssemblyType::Longword {
+                    if match_in_memory(dst) {
+                        vec![
+                            Instruction::Mov(
+                                AssemblyType::Longword,
+                                src.clone(),
+                                Operand::Reg(Register::R11),
+                            ),
+                            Instruction::Mov(
+                                AssemblyType::Quadword,
+                                Operand::Reg(Register::R11),
+                                dst.clone(),
+                            ),
+                        ]
+                    } else {
+                        vec![Instruction::Mov(
+                            AssemblyType::Longword,
+                            src.clone(),
+                            dst.clone(),
+                        )]
+                    }
+                } else {
+                    vec![self]
+                }
             }
             _ => vec![self],
         }
@@ -298,13 +315,13 @@ impl Instruction {
                 ),
                 Instruction::Div(t, Operand::Reg(Register::R10)),
             ],
-            Instruction::Movsx(Operand::Imm(value), dst) => vec![
-                Instruction::Mov(
-                    AssemblyType::Longword,
-                    Operand::Imm(value),
-                    Operand::Reg(Register::R10),
-                ),
-                Instruction::Movsx(Operand::Reg(Register::R10), dst),
+            Instruction::Movsx(src_type, dst_type, Operand::Imm(value), dst) => vec![
+                Instruction::Mov(src_type, Operand::Imm(value), Operand::Reg(Register::R10)),
+                Instruction::Movsx(src_type, dst_type, Operand::Reg(Register::R10), dst),
+            ],
+            Instruction::MovZeroExtend(src_type, dst_type, Operand::Imm(value), dst) => vec![
+                Instruction::Mov(src_type, Operand::Imm(value), Operand::Reg(Register::R10)),
+                Instruction::MovZeroExtend(src_type, dst_type, Operand::Reg(Register::R10), dst),
             ],
             Instruction::Cvtsi2sd(src_t, Operand::Imm(value), dst) => vec![
                 Instruction::Mov(src_t, Operand::Imm(value), Operand::Reg(Register::R10)),
@@ -383,6 +400,16 @@ impl Instruction {
                     dst,
                 )]
             }
+            Instruction::Mov(AssemblyType::Byte, Operand::Imm(mut value), dst)
+                if !value.can_fit_in_byte() =>
+            {
+                value.truncate_to_byte();
+                vec![Instruction::Mov(
+                    AssemblyType::Byte,
+                    Operand::Imm(value),
+                    dst,
+                )]
+            }
             // FIX PUSHING AN XMM REGISTER
             Instruction::Push(op) if match_double_register(&op) => {
                 vec![
@@ -414,10 +441,21 @@ impl Instruction {
                     Instruction::Mov(t, scratch_register, dst),
                 ]
             }
-            Instruction::Movsx(src, dst) if match_in_memory(&dst) => vec![
-                Instruction::Movsx(src, Operand::Reg(Register::R11)),
-                Instruction::Mov(AssemblyType::Quadword, Operand::Reg(Register::R11), dst),
+            Instruction::Movsx(src_type, dst_type, src, dst) if match_in_memory(&dst) => vec![
+                Instruction::Movsx(src_type, dst_type, src, Operand::Reg(Register::R11)),
+                Instruction::Mov(dst_type, Operand::Reg(Register::R11), dst),
             ],
+            Instruction::MovZeroExtend(src_type, dst_type, src, dst) if match_in_memory(&dst) => {
+                vec![
+                    Instruction::MovZeroExtend(
+                        src_type,
+                        dst_type,
+                        src,
+                        Operand::Reg(Register::R11),
+                    ),
+                    Instruction::Mov(dst_type, Operand::Reg(Register::R11), dst),
+                ]
+            }
             Instruction::Cvttsd2si(dst_t, src, dst) if match_in_memory(&dst) => {
                 vec![
                     Instruction::Cvttsd2si(dst_t, src, Operand::Reg(Register::R11)),

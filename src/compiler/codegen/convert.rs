@@ -118,6 +118,7 @@ impl Convert for AssemblyType {
                 Ok(AssemblyType::ByteArray(size, alignment))
             }
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
+            Type::Char | Type::SignedChar | Type::UnsignedChar => Ok(AssemblyType::Byte),
         }
     }
 }
@@ -136,6 +137,8 @@ impl AssemblyType {
             }
             BirdsValueNode::Constant(Constant::UnsignedLong(_)) => (AssemblyType::Quadword, false),
             BirdsValueNode::Constant(Constant::Double(_)) => (AssemblyType::Double, true),
+            BirdsValueNode::Constant(Constant::Char(_)) => (AssemblyType::Byte, true),
+            BirdsValueNode::Constant(Constant::UnsignedChar(_)) => (AssemblyType::Byte, false),
             BirdsValueNode::Var(name) => {
                 let var_type = context.symbols.get(name).unwrap().symbol_type.clone();
                 let signed = var_type.is_signed();
@@ -146,6 +149,7 @@ impl AssemblyType {
 
     pub fn get_alignment(&self) -> u32 {
         match self {
+            AssemblyType::Byte => 1,
             AssemblyType::Longword => 4,
             AssemblyType::Quadword => 8,
             AssemblyType::Double => 8,
@@ -155,6 +159,7 @@ impl AssemblyType {
 
     pub fn get_size(&self) -> u32 {
         match self {
+            AssemblyType::Byte => 1,
             AssemblyType::Longword => 4,
             AssemblyType::Quadword => 8,
             AssemblyType::Double => 8,
@@ -196,6 +201,11 @@ impl Convert for TopLevel {
             BirdsTopLevel::StaticVariable(t, name, init, global) => Ok(TopLevel::StaticVariable(
                 name,
                 global,
+                AssemblyType::convert(t, context)?.get_alignment(),
+                init,
+            )),
+            BirdsTopLevel::StaticConstant(t, name, init) => Ok(TopLevel::StaticConstant(
+                name,
                 AssemblyType::convert(t, context)?.get_alignment(),
                 init,
             )),
@@ -657,47 +667,59 @@ impl Convert for Instruction {
                 instructions
             }
             BirdsInstructionNode::SignedExtend(src, dst) => {
+                let src_type = AssemblyType::infer(&src, context)?.0;
+                let dst_type = AssemblyType::infer(&dst, context)?.0;
                 vec![Instruction::Movsx(
+                    src_type,
+                    dst_type,
                     Operand::convert(src, context)?,
                     Operand::convert(dst, context)?,
                 )]
             }
             BirdsInstructionNode::Truncate(src, dst) => {
+                let dst_type = AssemblyType::infer(&dst, context)?.0;
                 vec![Instruction::Mov(
-                    AssemblyType::Longword, // explicit truncation to int
+                    dst_type,
                     Operand::convert(src, context)?,
                     Operand::convert(dst, context)?,
                 )]
             }
             BirdsInstructionNode::ZeroExtend(src, dst) => {
+                let src_type = AssemblyType::infer(&src, context)?.0;
+                let dst_type = AssemblyType::infer(&dst, context)?.0;
                 vec![Instruction::MovZeroExtend(
+                    src_type,
+                    dst_type,
                     Operand::convert(src, context)?,
                     Operand::convert(dst, context)?,
                 )]
             }
             BirdsInstructionNode::DoubleToInt(src, dst) => {
                 let dst_type = AssemblyType::infer(&dst, context)?.0;
-                vec![Instruction::Cvttsd2si(
-                    dst_type,
-                    Operand::convert(src, context)?,
-                    Operand::convert(dst, context)?,
-                )]
-            }
-            BirdsInstructionNode::DoubleToUint(src, dst) => {
-                let dst_type = AssemblyType::infer(&dst, context)?.0;
-                match dst_type {
-                    AssemblyType::Longword => vec![
+                if dst_type != AssemblyType::Byte {
+                    vec![Instruction::Cvttsd2si(
+                        dst_type,
+                        Operand::convert(src, context)?,
+                        Operand::convert(dst, context)?,
+                    )]
+                } else {
+                    vec![
                         Instruction::Cvttsd2si(
-                            AssemblyType::Quadword,
+                            AssemblyType::Longword,
                             Operand::convert(src, context)?,
                             Operand::Reg(Register::AX),
                         ),
                         Instruction::Mov(
-                            AssemblyType::Longword,
+                            dst_type,
                             Operand::Reg(Register::AX),
                             Operand::convert(dst, context)?,
                         ),
-                    ],
+                    ]
+                }
+            }
+            BirdsInstructionNode::DoubleToUint(src, dst) => {
+                let dst_type = AssemblyType::infer(&dst, context)?.0;
+                match dst_type {
                     AssemblyType::Quadword => {
                         context.num_labels += 1;
                         let instruction_label = format!("double_to_uint_{}", context.num_labels);
@@ -752,24 +774,81 @@ impl Convert for Instruction {
                             Instruction::Label(format!("end_{}", &instruction_label)),
                         ]
                     }
+                    AssemblyType::Longword => vec![
+                        Instruction::Cvttsd2si(
+                            AssemblyType::Quadword,
+                            Operand::convert(src, context)?,
+                            Operand::Reg(Register::AX),
+                        ),
+                        Instruction::Mov(
+                            dst_type,
+                            Operand::Reg(Register::AX),
+                            Operand::convert(dst, context)?,
+                        ),
+                    ],
+                    AssemblyType::Byte => vec![
+                        Instruction::Cvttsd2si(
+                            AssemblyType::Longword,
+                            Operand::convert(src, context)?,
+                            Operand::Reg(Register::AX),
+                        ),
+                        Instruction::Mov(
+                            dst_type,
+                            Operand::Reg(Register::AX),
+                            Operand::convert(dst, context)?,
+                        ),
+                    ],
                     AssemblyType::Double => unreachable!(),
-                    AssemblyType::ByteArray(_size, _align) => todo!(),
+                    AssemblyType::ByteArray(_size, _align) => unreachable!(),
                 }
             }
             BirdsInstructionNode::IntToDouble(src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
-                vec![Instruction::Cvtsi2sd(
-                    src_type,
-                    Operand::convert(src, context)?,
-                    Operand::convert(dst, context)?,
-                )]
+                if src_type == AssemblyType::Byte {
+                    vec![
+                        Instruction::Movsx(
+                            src_type,
+                            AssemblyType::Longword,
+                            Operand::convert(src, context)?,
+                            Operand::Reg(Register::AX),
+                        ),
+                        Instruction::Cvtsi2sd(
+                            AssemblyType::Longword,
+                            Operand::Reg(Register::AX),
+                            Operand::convert(dst, context)?,
+                        ),
+                    ]
+                } else {
+                    vec![Instruction::Cvtsi2sd(
+                        src_type,
+                        Operand::convert(src, context)?,
+                        Operand::convert(dst, context)?,
+                    )]
+                }
             }
             BirdsInstructionNode::UintToDouble(src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
                 match src_type {
+                    AssemblyType::Byte => {
+                        vec![
+                            Instruction::MovZeroExtend(
+                                src_type,
+                                AssemblyType::Longword,
+                                Operand::convert(src, context)?,
+                                Operand::Reg(Register::AX),
+                            ),
+                            Instruction::Cvtsi2sd(
+                                AssemblyType::Longword,
+                                Operand::Reg(Register::AX),
+                                Operand::convert(dst, context)?,
+                            ),
+                        ]
+                    }
                     AssemblyType::Longword => {
                         vec![
                             Instruction::MovZeroExtend(
+                                src_type,
+                                AssemblyType::Quadword,
                                 Operand::convert(src, context)?,
                                 Operand::Reg(Register::AX),
                             ),
@@ -966,6 +1045,12 @@ impl Convert for Operand {
             BirdsValueNode::Constant(Constant::UnsignedLong(c)) => {
                 Ok(Operand::Imm(ImmediateValue::Unsigned(c)))
             }
+            BirdsValueNode::Constant(Constant::Char(c)) => {
+                Ok(Operand::Imm(ImmediateValue::Signed(c as i64)))
+            }
+            BirdsValueNode::Constant(Constant::UnsignedChar(c)) => {
+                Ok(Operand::Imm(ImmediateValue::Unsigned(c as u64)))
+            }
             BirdsValueNode::Constant(Constant::Double(c)) => {
                 Ok(create_static_constant(8, StaticInitial::Double(c), context))
             }
@@ -984,13 +1069,16 @@ impl Convert for Operand {
 impl BirdsValueNode {
     fn get_constant_value(&self) -> Option<i32> {
         match self {
-            BirdsValueNode::Constant(Constant::Integer(c)) => Some(*c),
-            BirdsValueNode::Constant(Constant::Long(c)) => Some((*c).try_into().unwrap()),
-            BirdsValueNode::Constant(Constant::UnsignedInteger(c)) => {
-                Some((*c).try_into().unwrap())
-            }
-            BirdsValueNode::Constant(Constant::UnsignedLong(c)) => Some((*c).try_into().unwrap()),
-            _ => None,
+            BirdsValueNode::Constant(constant) => match constant {
+                Constant::Integer(c) => Some(*c),
+                Constant::Long(c) => Some((*c).try_into().unwrap()),
+                Constant::UnsignedInteger(c) => Some((*c).try_into().unwrap()),
+                Constant::UnsignedLong(c) => Some((*c).try_into().unwrap()),
+                Constant::Double(_) => None,
+                Constant::Char(c) => Some((*c).into()),
+                Constant::UnsignedChar(c) => Some((*c).into()),
+            },
+            BirdsValueNode::Var(_) => None,
         }
     }
 }

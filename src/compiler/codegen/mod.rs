@@ -9,11 +9,13 @@ mod convert;
 mod display;
 mod validate;
 
+#[derive(Debug)]
 pub struct Program {
     body: Vec<TopLevel>,
     displaying_context: Option<RefCell<DisplayContext>>,
 }
 
+#[derive(Debug)]
 enum TopLevel {
     // header instructions, name, body, global
     Function(String, Vec<Instruction>, bool),
@@ -28,6 +30,7 @@ enum TopLevel {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum AssemblyType {
+    Byte,     // byte
     Longword, // i32, int
     Quadword, // i64, long
     Double,   // oh boy
@@ -48,9 +51,9 @@ enum Instruction {
     // Mov type, src, dst
     Mov(AssemblyType, Operand, Operand),
     // Mov Signed Extend src (32-bit) dst (64-bit)
-    Movsx(Operand, Operand),
+    Movsx(AssemblyType, AssemblyType, Operand, Operand),
     // Unsigned counterpart to Movsx
-    MovZeroExtend(Operand, Operand),
+    MovZeroExtend(AssemblyType, AssemblyType, Operand, Operand),
     // load effective address of src to dst
     // src MUST be Memory or Data. Data is a quadword
     Lea(Operand, Operand),
@@ -109,16 +112,30 @@ enum ImmediateValue {
 impl ImmediateValue {
     fn can_fit_in_longword(&self) -> bool {
         match self {
-            ImmediateValue::Signed(value) => *value < i32::MAX.into() && *value > i32::MIN.into(),
+            ImmediateValue::Signed(value) => *value <= i32::MAX.into() && *value >= i32::MIN.into(),
             // the boundary for immediate values being too big is ALWAYS 2^31 - 1, not 2^32 - 1 for
             // unsigned
-            ImmediateValue::Unsigned(value) => *value < i32::MAX as u64 && *value > 0,
+            ImmediateValue::Unsigned(value) => *value <= i32::MAX as u64,
+        }
+    }
+    fn can_fit_in_byte(&self) -> bool {
+        match self {
+            ImmediateValue::Signed(value) => *value <= i8::MAX.into() && *value >= i8::MIN.into(),
+            // the boundary for immediate values being too big is ALWAYS 2^31 - 1, not 2^32 - 1 for
+            // unsigned
+            ImmediateValue::Unsigned(value) => *value <= u8::MAX as u64,
         }
     }
     fn truncate(&mut self) {
         match self {
             ImmediateValue::Signed(ref mut value) => *value = (*value as i32).into(),
             ImmediateValue::Unsigned(ref mut value) => *value = (*value as u32).into(),
+        }
+    }
+    fn truncate_to_byte(&mut self) {
+        match self {
+            ImmediateValue::Signed(ref mut value) => *value = (*value as u8).into(),
+            ImmediateValue::Unsigned(ref mut value) => *value = (*value as u8).into(),
         }
     }
 }
@@ -230,6 +247,7 @@ trait CodeDisplay {
     fn show(&self, context: &mut DisplayContext) -> String;
 }
 
+#[derive(Debug)]
 pub struct DisplayContext {
     comments: bool,
     indent: usize,
@@ -270,18 +288,21 @@ pub fn codegen(
                 panic!("Function storage info has the wrong type")
             }
         } else {
-            // only remaining options are int and long and double
-            let is_static = matches!(v.storage, StorageInfo::Static(_, _));
+            let is_constant = matches!(v.storage, StorageInfo::Constant(_));
+            let is_static = is_constant || matches!(v.storage, StorageInfo::Static(_, _));
+
             let assembly_type = AssemblyType::convert(v.symbol_type, &mut context).unwrap();
 
             assembly_map.insert(
                 k.clone(),
-                AssemblySymbolInfo::Object(assembly_type, is_static, false),
+                AssemblySymbolInfo::Object(assembly_type, is_static, is_constant),
             );
-            // TODO: also parse the constants map into here
         }
     }
     for top_level in &converted.body {
+        // there are some Constant doubles left over after the conversion, so we add them to the
+        // symbols map.
+        // FIXME: This should also apply to strings but I'm not sure how
         if let TopLevel::StaticConstant(name, _, _) = top_level {
             assembly_map.insert(
                 name.clone(),
@@ -304,6 +325,7 @@ pub fn codegen(
         validate_context.pass = Some(pass.clone());
         converted.validate(&mut validate_context)?;
     }
+    // println!("{:?}", converted);
 
     // store the DisplayContext in a RefCell so that the Display trait can pick out
     // the value and modify it while it is rendering the actual Assembly code.
