@@ -12,14 +12,13 @@ use crate::compiler::{
     types::Type,
 };
 
-use super::ConvertEvaluate;
+use super::{expression_node::E, Convert, ConvertContext};
 
-use super::{Convert, ConvertContext};
-
-impl Convert for DeclarationNode {
-    type Output = Vec<BirdsInstructionNode>;
-
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+impl Convert<Vec<BirdsInstructionNode>> for DeclarationNode {
+    fn convert(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
         match self {
             DeclarationNode::Variable(v) => Ok(v.convert(context)?),
             // function declaration at the top scope does not use this path, since it is read
@@ -31,10 +30,11 @@ impl Convert for DeclarationNode {
     }
 }
 
-impl Convert for FunctionDeclaration {
-    type Output = Option<BirdsTopLevel>;
-
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+impl Convert<Option<BirdsTopLevel>> for FunctionDeclaration {
+    fn convert(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Option<BirdsTopLevel>, Box<dyn Error>> {
         let name = self.name;
         let params = self.params.to_vec();
         if let Some(body) = self.body {
@@ -63,10 +63,11 @@ impl Convert for FunctionDeclaration {
     }
 }
 
-impl Convert for VariableDeclaration {
-    type Output = Vec<BirdsInstructionNode>;
-
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+impl Convert<Vec<BirdsInstructionNode>> for VariableDeclaration {
+    fn convert(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
         // do not emit any instructions for static and extern variable definitions. These are
         // handled after the rest of the ProgramNode has been converted.
         if self.storage_class.is_some() {
@@ -170,7 +171,7 @@ impl InitialiserNode {
             }
             (InitialiserWithoutType::Single(e), _) => {
                 let offset = e.1.as_ref().unwrap().get_size();
-                let (mut instructions, new_src) = e.convert_and_evaluate(context)?;
+                let (mut instructions, new_src): E = e.convert(context)?;
                 if context.current_initialiser_offset == 0 {
                     instructions.push(BirdsInstructionNode::Copy(
                         new_src,

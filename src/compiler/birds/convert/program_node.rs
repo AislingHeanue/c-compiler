@@ -10,10 +10,8 @@ use crate::compiler::{
 
 use super::{Convert, ConvertContext};
 
-impl Convert for ProgramNode {
-    type Output = BirdsProgramNode;
-
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+impl Convert<BirdsProgramNode> for ProgramNode {
+    fn convert(self, context: &mut ConvertContext) -> Result<BirdsProgramNode, Box<dyn Error>> {
         let mut body: Vec<BirdsTopLevel> = process_results(
             self.declarations
                 .into_iter()

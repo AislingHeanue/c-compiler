@@ -36,23 +36,11 @@ pub fn do_birds(
     Ok((result, context.symbols))
 }
 
-trait Convert
+trait Convert<T>
 where
     Self: Sized,
 {
-    type Output;
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>>;
-}
-
-trait ConvertEvaluate
-where
-    Self: Sized,
-{
-    type Output;
-    fn convert_and_evaluate(
-        self,
-        context: &mut ConvertContext,
-    ) -> Result<Self::Output, Box<dyn Error>>;
+    fn convert(self, context: &mut ConvertContext) -> Result<T, Box<dyn Error>>;
 }
 
 pub struct ConvertContext {
@@ -66,38 +54,13 @@ pub struct ConvertContext {
     symbols: HashMap<String, SymbolInfo>,
 }
 
-impl<T, U, V> Convert for Option<T>
+impl<U, V> Convert<Option<U>> for Option<V>
 where
-    T: Convert<Output = (U, V)>,
+    V: Convert<U>,
 {
-    type Output = Option<(U, V)>;
-
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+    fn convert(self, context: &mut ConvertContext) -> Result<Option<U>, Box<dyn Error>> {
         match self {
-            Some(e) => {
-                let (instructions, value) = e.convert(context)?;
-                Ok(Some((instructions, value)))
-            }
-            None => Ok(None),
-        }
-    }
-}
-
-impl<T, U, V> ConvertEvaluate for Option<T>
-where
-    T: ConvertEvaluate<Output = (U, V)>,
-{
-    type Output = Option<(U, V)>;
-
-    fn convert_and_evaluate(
-        self,
-        context: &mut ConvertContext,
-    ) -> Result<Self::Output, Box<dyn Error>> {
-        match self {
-            Some(e) => {
-                let (instructions, value) = e.convert_and_evaluate(context)?;
-                Ok(Some((instructions, value)))
-            }
+            Some(e) => Ok(Some(e.convert(context)?)),
             None => Ok(None),
         }
     }
@@ -117,10 +80,11 @@ fn new_temp_variable(type_to_store: &Type, context: &mut ConvertContext) -> Bird
     BirdsValueNode::Var(new_name)
 }
 
-impl Convert for Vec<BlockItemNode> {
-    type Output = Vec<BirdsInstructionNode>;
-
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+impl Convert<Vec<BirdsInstructionNode>> for Vec<BlockItemNode> {
+    fn convert(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
         process_results(
             self.into_iter().map(|node| match node {
                 BlockItemNode::Statement(statement) => statement.convert(context),
@@ -170,10 +134,11 @@ impl BirdsBinaryOperatorNode {
     }
 }
 
-impl Convert for BinaryOperatorNode {
-    type Output = BirdsBinaryOperatorNode;
-
-    fn convert(self, _context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+impl Convert<BirdsBinaryOperatorNode> for BinaryOperatorNode {
+    fn convert(
+        self,
+        _context: &mut ConvertContext,
+    ) -> Result<BirdsBinaryOperatorNode, Box<dyn Error>> {
         let bird_op = match self {
             BinaryOperatorNode::Add => BirdsBinaryOperatorNode::Add,
             BinaryOperatorNode::Subtract => BirdsBinaryOperatorNode::Subtract,

@@ -6,15 +6,19 @@ use crate::compiler::{
     types::Type,
 };
 
-use super::{new_temp_variable, Convert, ConvertContext, ConvertEvaluate};
+use super::{
+    expression_node::{D, E},
+    new_temp_variable, Convert, ConvertContext,
+};
 
-impl Convert for StatementNode {
-    type Output = Vec<BirdsInstructionNode>;
-
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+impl Convert<Vec<BirdsInstructionNode>> for StatementNode {
+    fn convert(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
         match self {
             StatementNode::Return(expression) => {
-                let (mut instructions, new_src) = expression.convert_and_evaluate(context)?;
+                let (mut instructions, new_src) = expression.convert(context)?;
                 let return_instruction = BirdsInstructionNode::Return(new_src);
                 instructions.push(return_instruction);
                 Ok(instructions)
@@ -22,7 +26,7 @@ impl Convert for StatementNode {
             StatementNode::Expression(expression) => {
                 // expressions (including assignments) all have return values that are thrown away
                 // as we move onto the next line. eg. "a = 5" returns 5 AND ALSO assigns 5 to a.
-                let (instructions, _new_src) = expression.convert(context)?;
+                let (instructions, _new_src): D = expression.convert(context)?;
                 Ok(instructions)
             }
             StatementNode::Pass => Ok::<Vec<BirdsInstructionNode>, Box<dyn Error>>(Vec::new()),
@@ -33,7 +37,7 @@ impl Convert for StatementNode {
                     context.last_else_label_number += 1;
                     let new_else_label_name = format!("else_{}", context.last_else_label_number);
 
-                    let (mut instructions, new_cond) = condition.convert_and_evaluate(context)?;
+                    let (mut instructions, new_cond): E = condition.convert(context)?;
                     instructions.push(BirdsInstructionNode::JumpZero(
                         new_cond,
                         new_else_label_name.clone(),
@@ -48,7 +52,7 @@ impl Convert for StatementNode {
                 } else {
                     context.last_end_label_number += 1;
                     let new_end_label_name = format!("end_{}", context.last_end_label_number);
-                    let (mut instructions, new_cond) = condition.convert_and_evaluate(context)?;
+                    let (mut instructions, new_cond): E = condition.convert(context)?;
                     instructions.push(BirdsInstructionNode::JumpZero(
                         new_cond,
                         new_end_label_name.clone(),
@@ -82,8 +86,7 @@ impl Convert for StatementNode {
                     "continue_{}",
                     this_loop_label
                 ))];
-                let (mut instructions_from_condition, new_src) =
-                    expression.convert_and_evaluate(context)?;
+                let (mut instructions_from_condition, new_src): E = expression.convert(context)?;
                 instructions.append(&mut instructions_from_condition);
                 instructions.push(BirdsInstructionNode::JumpZero(
                     new_src,
@@ -117,8 +120,7 @@ impl Convert for StatementNode {
                     "continue_{}",
                     this_loop_label
                 )));
-                let (mut instructions_from_condition, new_src) =
-                    expression.convert_and_evaluate(context)?;
+                let (mut instructions_from_condition, new_src) = expression.convert(context)?;
                 instructions.append(&mut instructions_from_condition);
 
                 instructions.push(BirdsInstructionNode::JumpZero(
@@ -143,7 +145,8 @@ impl Convert for StatementNode {
                 let mut instructions = match init {
                     ForInitialiserNode::Declaration(d) => d.convert(context)?,
                     ForInitialiserNode::Expression(Some(expression)) => {
-                        expression.convert(context)?.0
+                        let (instructions, _): D = expression.convert(context)?;
+                        instructions
                     }
                     ForInitialiserNode::Expression(None) => Vec::new(),
                 };
@@ -153,7 +156,7 @@ impl Convert for StatementNode {
                     "start_{}",
                     this_loop_label
                 )));
-                let new_condition_option = cond.convert_and_evaluate(context)?;
+                let new_condition_option: Option<E> = cond.convert(context)?;
                 //only check the condition... if the condition was specified
                 if let Some(mut new_condition) = new_condition_option {
                     instructions.append(&mut new_condition.0);
@@ -171,7 +174,7 @@ impl Convert for StatementNode {
                     "continue_{}",
                     this_loop_label
                 )));
-                let maybe_post = post.convert(context)?;
+                let maybe_post: Option<D> = post.convert(context)?;
                 if let Some(mut post) = maybe_post {
                     instructions.append(&mut post.0);
                 }
@@ -196,7 +199,7 @@ impl Convert for StatementNode {
                     None => BirdsInstructionNode::Jump(format!("break_{}", this_name)),
                 };
 
-                let (mut instructions, new_src) = expression.convert_and_evaluate(context)?;
+                let (mut instructions, new_src): E = expression.convert(context)?;
                 let new_tmp_results = new_temp_variable(&Type::Integer, context);
 
                 for (k, v) in label_map {

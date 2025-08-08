@@ -13,12 +13,21 @@ use crate::compiler::{
     },
 };
 
-use super::{new_temp_variable, Convert, ConvertContext, ConvertEvaluate};
-impl Convert for ExpressionNode {
-    // outputs a list of instructions, and the location of the output of the instructions.
-    type Output = (Vec<BirdsInstructionNode>, Destination);
+use super::{new_temp_variable, Convert, ConvertContext};
 
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+// short-hand for a type that will appear a lot in this file.
+pub type D = (Vec<BirdsInstructionNode>, Destination);
+// E for Evaluated
+pub type E = (Vec<BirdsInstructionNode>, BirdsValueNode);
+type Ve = (Vec<BirdsInstructionNode>, Vec<BirdsValueNode>);
+
+impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
+    // outputs a list of instructions, and the location of the output of the instructions.
+
+    fn convert(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<(Vec<BirdsInstructionNode>, Destination), Box<dyn Error>> {
         match self.0 {
             ExpressionWithoutType::Constant(c) => {
                 Ok((Vec::new(), Destination::Direct(BirdsValueNode::Constant(c))))
@@ -27,8 +36,8 @@ impl Convert for ExpressionNode {
                 Ok((Vec::new(), Destination::Direct(BirdsValueNode::Var(name))))
             }
             ExpressionWithoutType::Assignment(left, right) => {
-                let (mut instructions, new_dst) = left.convert(context)?;
-                let (mut instructions_from_src, new_src) = right.convert_and_evaluate(context)?;
+                let (mut instructions, new_dst): D = left.convert(context)?;
+                let (mut instructions_from_src, new_src) = right.convert(context)?;
                 instructions.append(&mut instructions_from_src);
                 let (mut instructions_from_assign, returns) =
                     ExpressionWithoutType::assign(new_src, new_dst)?;
@@ -44,7 +53,7 @@ impl Convert for ExpressionNode {
                 let new_dst_type = src.1.clone().unwrap();
 
                 // How to convert and evaluate an expression which may contain a dereference
-                let (mut instructions, new_src) = src.convert(context)?;
+                let (mut instructions, new_src): D = src.convert(context)?;
                 let (mut instructions_from_evaluate, evaluated_src) =
                     new_src.clone().evaluate(&new_dst_type, context);
                 instructions.append(&mut instructions_from_evaluate);
@@ -102,7 +111,7 @@ impl Convert for ExpressionNode {
             {
                 let new_dst_type = src.1.clone().unwrap();
 
-                let (mut instructions, new_src) = src.convert(context)?;
+                let (mut instructions, new_src): D = src.convert(context)?;
                 let (mut instructions_from_evaluate, evaluated_src) =
                     new_src.clone().evaluate(&new_dst_type, context);
                 instructions.append(&mut instructions_from_evaluate);
@@ -158,7 +167,7 @@ impl Convert for ExpressionNode {
             }
             ExpressionWithoutType::Unary(op, src) => {
                 let src_type = src.1.clone().unwrap();
-                let (mut instructions, new_src) = src.convert_and_evaluate(context)?;
+                let (mut instructions, new_src): E = src.convert(context)?;
 
                 let bird_op = match op {
                     UnaryOperatorNode::Complement => BirdsUnaryOperatorNode::Complement,
@@ -199,14 +208,13 @@ impl Convert for ExpressionNode {
                 let right_type = right.1.clone().unwrap();
                 let common_type = self.1.clone().unwrap();
 
-                let (mut instructions, new_left) = left.convert(context)?;
+                let (mut instructions, new_left): D = left.convert(context)?;
 
                 let (mut instructions_from_dereference, evaluated_left) =
                     new_left.clone().evaluate(&left_type, context);
                 instructions.append(&mut instructions_from_dereference);
 
-                let (mut instructions_from_right, new_right) =
-                    right.convert_and_evaluate(context)?;
+                let (mut instructions_from_right, new_right): E = right.convert(context)?;
                 instructions.append(&mut instructions_from_right);
 
                 let bird_op = op.convert(context)?;
@@ -311,9 +319,8 @@ impl Convert for ExpressionNode {
             {
                 let dst = new_temp_variable(&Type::Integer, context);
 
-                let (mut instructions, new_left) = left.convert_and_evaluate(context)?;
-                let (mut instructions_from_right, new_right) =
-                    right.convert_and_evaluate(context)?;
+                let (mut instructions, new_left): E = left.convert(context)?;
+                let (mut instructions_from_right, new_right): E = right.convert(context)?;
                 context.last_end_label_number += 1;
                 let end_label_name = format!("end_{}", context.last_end_label_number);
 
@@ -378,9 +385,8 @@ impl Convert for ExpressionNode {
                 let left_type = left.1.clone().unwrap();
                 let right_type = right.1.clone().unwrap();
 
-                let (mut instructions, new_left) = left.convert_and_evaluate(context)?;
-                let (mut instructions_from_right, new_right) =
-                    right.convert_and_evaluate(context)?;
+                let (mut instructions, new_left): E = left.convert(context)?;
+                let (mut instructions_from_right, new_right): E = right.convert(context)?;
                 instructions.append(&mut instructions_from_right);
                 let bird_op = op.convert(context)?;
 
@@ -485,14 +491,14 @@ impl Convert for ExpressionNode {
                 context.last_else_label_number += 1;
                 let new_else_label_name = format!("else_{}", context.last_else_label_number);
 
-                let (mut instructions, new_cond) = condition.convert_and_evaluate(context)?;
+                let (mut instructions, new_cond): E = condition.convert(context)?;
                 instructions.push(BirdsInstructionNode::JumpZero(
                     new_cond,
                     new_else_label_name.clone(),
                 ));
 
                 let new_dst_type = then.1.clone().unwrap();
-                let (mut instructions_from_then, new_then) = then.convert_and_evaluate(context)?;
+                let (mut instructions_from_then, new_then): E = then.convert(context)?;
                 let new_dst = new_temp_variable(&new_dst_type, context);
 
                 instructions.append(&mut instructions_from_then);
@@ -501,8 +507,7 @@ impl Convert for ExpressionNode {
                     BirdsInstructionNode::Jump(new_end_label_name.clone()),
                     BirdsInstructionNode::Label(new_else_label_name),
                 ]);
-                let (mut instructions_from_other, new_other) =
-                    otherwise.convert_and_evaluate(context)?;
+                let (mut instructions_from_other, new_other) = otherwise.convert(context)?;
                 instructions.append(&mut instructions_from_other);
                 instructions.push(BirdsInstructionNode::Copy(new_other, new_dst.clone()));
                 instructions.push(BirdsInstructionNode::Label(new_end_label_name));
@@ -510,7 +515,7 @@ impl Convert for ExpressionNode {
                 Ok((instructions, new_dst.into()))
             }
             ExpressionWithoutType::FunctionCall(name, args) => {
-                let (mut instructions, values) = args.convert_and_evaluate(context)?;
+                let (mut instructions, values): Ve = args.convert(context)?;
 
                 let new_dst_type = if let Type::Function(ref ret, _) =
                     context.symbols.get(&name).unwrap().symbol_type
@@ -533,7 +538,7 @@ impl Convert for ExpressionNode {
             ExpressionWithoutType::Cast(target_type, e) => {
                 let this_type = e.1.clone().unwrap();
 
-                let (mut instructions, new_src) = e.convert_and_evaluate(context)?;
+                let (mut instructions, new_src): E = e.convert(context)?;
                 if target_type == this_type {
                     return Ok((instructions, new_src.into()));
                 }
@@ -549,7 +554,7 @@ impl Convert for ExpressionNode {
                 Ok((instructions, new_dst.into()))
             }
             ExpressionWithoutType::Dereference(src) => {
-                let (instructions, new_src) = src.convert_and_evaluate(context)?;
+                let (instructions, new_src): E = src.convert(context)?;
                 Ok((instructions, Destination::Dereference(new_src)))
             }
             ExpressionWithoutType::AddressOf(src) => {
@@ -567,9 +572,8 @@ impl Convert for ExpressionNode {
                 let left_type = src.1.clone().unwrap();
                 let right_type = inner.1.clone().unwrap();
 
-                let (mut instructions, new_left) = src.convert_and_evaluate(context)?;
-                let (mut instructions_from_right, new_right) =
-                    inner.convert_and_evaluate(context)?;
+                let (mut instructions, new_left): E = src.convert(context)?;
+                let (mut instructions_from_right, new_right): E = inner.convert(context)?;
 
                 let (inner_type, pointer_is_on_left) = if let Type::Pointer(t) = left_type {
                     (t, true)
@@ -697,10 +701,11 @@ impl ExpressionWithoutType {
     }
 }
 
-impl Convert for Vec<ExpressionNode> {
-    type Output = (Vec<BirdsInstructionNode>, Vec<Destination>);
-
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+impl Convert<(Vec<BirdsInstructionNode>, Vec<Destination>)> for Vec<ExpressionNode> {
+    fn convert(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<(Vec<BirdsInstructionNode>, Vec<Destination>), Box<dyn Error>> {
         let results: Vec<(Vec<BirdsInstructionNode>, Destination)> =
             process_results(self.into_iter().map(|a| a.convert(context)), |iter| {
                 iter.collect()
@@ -713,15 +718,14 @@ impl Convert for Vec<ExpressionNode> {
     }
 }
 
-impl ConvertEvaluate for ExpressionNode {
-    type Output = (Vec<BirdsInstructionNode>, BirdsValueNode);
-
-    fn convert_and_evaluate(
+impl Convert<(Vec<BirdsInstructionNode>, BirdsValueNode)> for ExpressionNode {
+    fn convert(
         self,
         context: &mut ConvertContext,
-    ) -> Result<Self::Output, Box<dyn Error>> {
+    ) -> Result<(Vec<BirdsInstructionNode>, BirdsValueNode), Box<dyn Error>> {
         let target_type = self.1.clone().unwrap();
-        let (mut instructions, new_src) = self.convert(context)?;
+        let (mut instructions, new_src): (Vec<BirdsInstructionNode>, Destination) =
+            self.convert(context)?;
         let (mut deref_instructions, new_src) = new_src.evaluate(&target_type, context);
         instructions.append(&mut deref_instructions);
 
@@ -729,16 +733,15 @@ impl ConvertEvaluate for ExpressionNode {
     }
 }
 
-impl ConvertEvaluate for Vec<ExpressionNode> {
-    type Output = (Vec<BirdsInstructionNode>, Vec<BirdsValueNode>);
-    fn convert_and_evaluate(
+impl Convert<(Vec<BirdsInstructionNode>, Vec<BirdsValueNode>)> for Vec<ExpressionNode> {
+    fn convert(
         self,
         context: &mut ConvertContext,
-    ) -> Result<Self::Output, Box<dyn Error>> {
-        let results: Vec<(Vec<BirdsInstructionNode>, BirdsValueNode)> = process_results(
-            self.into_iter().map(|a| a.convert_and_evaluate(context)),
-            |iter| iter.collect(),
-        )?;
+    ) -> Result<(Vec<BirdsInstructionNode>, Vec<BirdsValueNode>), Box<dyn Error>> {
+        let results: Vec<(Vec<BirdsInstructionNode>, BirdsValueNode)> =
+            process_results(self.into_iter().map(|a| a.convert(context)), |iter| {
+                iter.collect()
+            })?;
 
         let values = results.iter().map(|a| a.1.clone()).collect();
         let instructions = results.into_iter().flat_map(|a| a.0).collect();
