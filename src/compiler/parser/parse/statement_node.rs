@@ -1,32 +1,28 @@
 use super::{
-    expect, peek, read, BlockItemNode, ExpressionNode, ExpressionWithoutType, ForInitialiserNode,
-    Parse, ParseContext, StatementNode,
+    BlockItemNode, ExpressionNode, ExpressionWithoutType, Parse, ParseContext, StatementNode,
 };
-use crate::compiler::lexer::Token;
+use crate::compiler::lexer::{Token, TokenVector};
 use std::{collections::VecDeque, error::Error};
 
-impl Parse for StatementNode {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        match peek(tokens)? {
+impl Parse<StatementNode> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<StatementNode, Box<dyn Error>> {
+        match self.peek()? {
             Token::KeywordReturn => {
-                expect(tokens, Token::KeywordReturn)?;
-                let expression = ExpressionNode::parse(tokens, context)?;
-                expect(tokens, Token::SemiColon)?;
+                self.expect(Token::KeywordReturn)?;
+                let expression = self.parse(context)?;
+                self.expect(Token::SemiColon)?;
                 Ok(StatementNode::Return(expression))
             }
             Token::KeywordIf => {
-                expect(tokens, Token::KeywordIf)?;
-                expect(tokens, Token::OpenParen)?;
-                let condition = ExpressionNode::parse(tokens, context)?;
-                expect(tokens, Token::CloseParen)?;
-                let then = StatementNode::parse(tokens, context)?;
-                let otherwise = match peek(tokens)? {
+                self.expect(Token::KeywordIf)?;
+                self.expect(Token::OpenParen)?;
+                let condition = self.parse(context)?;
+                self.expect(Token::CloseParen)?;
+                let then = self.parse(context)?;
+                let otherwise = match self.peek()? {
                     Token::KeywordElse => {
-                        expect(tokens, Token::KeywordElse)?;
-                        Some(StatementNode::parse(tokens, context)?)
+                        self.expect(Token::KeywordElse)?;
+                        Some(self.parse(context)?)
                     }
                     _ => None,
                 };
@@ -37,47 +33,47 @@ impl Parse for StatementNode {
                 ))
             }
             Token::SemiColon => {
-                expect(tokens, Token::SemiColon)?;
+                self.expect(Token::SemiColon)?;
                 Ok(StatementNode::Pass)
             }
             Token::KeywordGoto => {
-                expect(tokens, Token::KeywordGoto)?;
-                let s = match read(tokens)? {
+                self.expect(Token::KeywordGoto)?;
+                let s = match self.read()? {
                     Token::Identifier(s) => Ok::<String, Box<dyn Error>>(s),
                     t => Err(format!("unexpected token in goto: {:?}", t).into()),
                 }?;
-                expect(tokens, Token::SemiColon)?;
+                self.expect(Token::SemiColon)?;
                 Ok(StatementNode::Goto(s))
             }
             Token::OpenBrace => {
-                let block = <Vec<BlockItemNode>>::parse(tokens, context)?;
+                let block = self.parse(context)?;
                 Ok(StatementNode::Compound(block))
             }
             Token::KeywordFor => {
-                expect(tokens, Token::KeywordFor)?;
-                expect(tokens, Token::OpenParen)?;
+                self.expect(Token::KeywordFor)?;
+                self.expect(Token::OpenParen)?;
 
                 // create a new scope just for the first line of the 'for' declaration
                 let outer_scope = BlockItemNode::enter_scope(context);
 
-                let init = ForInitialiserNode::parse(tokens, context)?;
-                let cond = Option::<ExpressionNode>::parse(tokens, context)?;
-                expect(tokens, Token::SemiColon)?;
-                let post = Option::<ExpressionNode>::parse(tokens, context)?;
-                expect(tokens, Token::CloseParen)?;
-                let body = StatementNode::parse(tokens, context)?;
+                let init = self.parse(context)?;
+                let cond = self.parse(context)?;
+                self.expect(Token::SemiColon)?;
+                let post = self.parse(context)?;
+                self.expect(Token::CloseParen)?;
+                let body = self.parse(context)?;
 
                 BlockItemNode::leave_scope(outer_scope, context);
                 Ok(StatementNode::For(init, cond, post, Box::new(body), None))
             }
             Token::KeywordDo => {
-                expect(tokens, Token::KeywordDo)?;
-                let body = StatementNode::parse(tokens, context)?;
-                expect(tokens, Token::KeywordWhile)?;
-                expect(tokens, Token::OpenParen)?;
-                let expression = ExpressionWithoutType::parse(tokens, context)?;
-                expect(tokens, Token::CloseParen)?;
-                expect(tokens, Token::SemiColon)?;
+                self.expect(Token::KeywordDo)?;
+                let body = self.parse(context)?;
+                self.expect(Token::KeywordWhile)?;
+                self.expect(Token::OpenParen)?;
+                let expression: ExpressionWithoutType = self.parse(context)?;
+                self.expect(Token::CloseParen)?;
+                self.expect(Token::SemiColon)?;
                 Ok(StatementNode::DoWhile(
                     Box::new(body),
                     expression.into(),
@@ -85,74 +81,69 @@ impl Parse for StatementNode {
                 ))
             }
             Token::KeywordWhile => {
-                expect(tokens, Token::KeywordWhile)?;
-                expect(tokens, Token::OpenParen)?;
-                let expression = ExpressionWithoutType::parse(tokens, context)?;
-                expect(tokens, Token::CloseParen)?;
-                let body = StatementNode::parse(tokens, context)?;
+                self.expect(Token::KeywordWhile)?;
+                self.expect(Token::OpenParen)?;
+                let expression: ExpressionWithoutType = self.parse(context)?;
+                self.expect(Token::CloseParen)?;
                 Ok(StatementNode::While(
                     expression.into(),
-                    Box::new(body),
+                    Box::new(self.parse(context)?),
                     None,
                 ))
             }
             Token::KeywordBreak => {
-                expect(tokens, Token::KeywordBreak)?;
-                expect(tokens, Token::SemiColon)?;
+                self.expect(Token::KeywordBreak)?;
+                self.expect(Token::SemiColon)?;
                 Ok(StatementNode::Break(None))
             }
             Token::KeywordContinue => {
-                expect(tokens, Token::KeywordContinue)?;
-                expect(tokens, Token::SemiColon)?;
+                self.expect(Token::KeywordContinue)?;
+                self.expect(Token::SemiColon)?;
                 Ok(StatementNode::Continue(None))
             }
             Token::KeywordSwitch => {
-                expect(tokens, Token::KeywordSwitch)?;
-                expect(tokens, Token::OpenParen)?;
-                let expression = ExpressionWithoutType::parse(tokens, context)?;
-                expect(tokens, Token::CloseParen)?;
+                self.expect(Token::KeywordSwitch)?;
+                self.expect(Token::OpenParen)?;
+                let expression: ExpressionWithoutType = self.parse(context)?;
+                self.expect(Token::CloseParen)?;
                 Ok(StatementNode::Switch(
                     expression.into(),
-                    Box::new(StatementNode::parse(tokens, context)?),
+                    Box::new(self.parse(context)?),
                     None,
                     None,
                 ))
             }
             Token::KeywordCase => {
-                expect(tokens, Token::KeywordCase)?;
-                let expression = ExpressionWithoutType::parse(tokens, context)?;
-                expect(tokens, Token::Colon)?;
+                self.expect(Token::KeywordCase)?;
+                let expression: ExpressionWithoutType = self.parse(context)?;
+                self.expect(Token::Colon)?;
                 Ok(StatementNode::Case(
                     expression.into(),
-                    Box::new(StatementNode::parse(tokens, context)?),
+                    Box::new(self.parse(context)?),
                     None,
                 ))
             }
             Token::KeywordDefault => {
-                expect(tokens, Token::KeywordDefault)?;
-                expect(tokens, Token::Colon)?;
-                Ok(StatementNode::Default(
-                    Box::new(StatementNode::parse(tokens, context)?),
-                    None,
-                ))
+                self.expect(Token::KeywordDefault)?;
+                self.expect(Token::Colon)?;
+                Ok(StatementNode::Default(Box::new(self.parse(context)?), None))
             }
             _ => match (
-                peek(tokens)?,
-                tokens
-                    .get(1)
+                self.peek()?,
+                self.get(1)
                     .ok_or::<Box<dyn Error>>("Statement node only has one token".into())?,
             ) {
                 (Token::Identifier(s), Token::Colon) => {
-                    expect(tokens, Token::Identifier("".to_string()))?;
-                    expect(tokens, Token::Colon)?;
+                    self.expect(Token::Identifier("".to_string()))?;
+                    self.expect(Token::Colon)?;
                     Ok(StatementNode::Label(
                         s.to_string(),
-                        Box::new(StatementNode::parse(tokens, context)?),
+                        Box::new(self.parse(context)?),
                     ))
                 }
                 _ => {
-                    let expression = ExpressionNode::parse(tokens, context)?;
-                    expect(tokens, Token::SemiColon)?;
+                    let expression: ExpressionNode = self.parse(context)?;
+                    self.expect(Token::SemiColon)?;
                     Ok(StatementNode::Expression(expression))
                 }
             },

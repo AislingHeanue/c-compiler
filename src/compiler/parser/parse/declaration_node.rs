@@ -1,24 +1,20 @@
 use itertools::Itertools;
 
-use super::{expect, peek, read, Parse, ParseContext, Type};
+use super::{Parse, ParseContext, Type};
 use crate::compiler::{
-    lexer::Token,
+    lexer::{Token, TokenVector},
     parser::{
-        BlockItemNode, DeclarationNode, Declarator, FunctionDeclaration, InitialiserNode,
-        VariableDeclaration,
+        BlockItemNode, DeclarationNode, Declarator, FunctionDeclaration, VariableDeclaration,
     },
     types::StorageClass,
 };
 use std::{collections::VecDeque, error::Error};
 
-impl Parse for DeclarationNode {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        let (base_type, storage_class) = <(Type, Option<StorageClass>)>::parse(tokens, context)?;
+impl Parse<DeclarationNode> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<DeclarationNode, Box<dyn Error>> {
+        let (base_type, storage_class) = self.parse(context)?;
 
-        let declarator = Declarator::parse(tokens, context)?;
+        let declarator: Declarator = self.parse(context)?;
         let declarator_output = declarator.apply_to_type(base_type)?;
 
         let out_type = declarator_output.out_type;
@@ -41,7 +37,7 @@ impl Parse for DeclarationNode {
                     return Err("Duplicate param name in function declaration".into());
                 }
 
-                if peek(tokens)? == Token::OpenBrace {
+                if self.peek()? == Token::OpenBrace {
                     let original_outer_scope_variables = BlockItemNode::enter_scope(context);
 
                     // resolve param names into new identifiers tied to the current scope
@@ -59,7 +55,7 @@ impl Parse for DeclarationNode {
 
                     // parse block in *not* a new scope
                     context.current_block_is_function_body = true;
-                    let body = <Vec<BlockItemNode>>::parse(tokens, context)?;
+                    let body = self.parse(context)?;
                     BlockItemNode::leave_scope(original_outer_scope_variables, context);
 
                     Ok(DeclarationNode::Function(FunctionDeclaration {
@@ -70,7 +66,7 @@ impl Parse for DeclarationNode {
                         storage_class,
                     }))
                 } else {
-                    expect(tokens, Token::SemiColon)?;
+                    self.expect(Token::SemiColon)?;
                     Ok(DeclarationNode::Function(FunctionDeclaration {
                         function_type: out_type,
                         name,
@@ -88,11 +84,11 @@ impl Parse for DeclarationNode {
                     storage_class.clone(),
                 )?;
                 // variable assignment
-                match read(tokens)? {
+                match self.read()? {
                     Token::Assignment => {
                         // file scope variable = linkage
-                        let initialiser = InitialiserNode::parse(tokens, context)?;
-                        expect(tokens, Token::SemiColon)?;
+                        let initialiser = self.parse(context)?;
+                        self.expect(Token::SemiColon)?;
                         Ok(DeclarationNode::Variable(VariableDeclaration {
                             variable_type: out_type,
                             name,
@@ -151,20 +147,20 @@ impl DeclarationNode {
     }
 }
 
-impl Parse for (Type, Option<StorageClass>) {
+impl Parse<(Type, Option<StorageClass>)> for VecDeque<Token> {
     fn parse(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
         context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
+    ) -> Result<(Type, Option<StorageClass>), Box<dyn Error>> {
         // Specifiers may be one of "static", "int" or "extern"
         // ... and there may be any non-zero amount of them
         let mut storage_classes = Vec::new();
         let mut types = Vec::new();
-        while peek(tokens)?.is_specifier() {
-            if peek(tokens)?.is_type() {
-                types.push(read(tokens)?);
+        while self.peek()?.is_specifier() {
+            if self.peek()?.is_type() {
+                types.push(self.read()?);
             } else {
-                storage_classes.push(read(tokens)?);
+                storage_classes.push(self.read()?);
             }
         }
 
@@ -182,7 +178,8 @@ impl Parse for (Type, Option<StorageClass>) {
             _ => unreachable!(),
         });
 
-        let this_type = Type::parse(&mut types.into(), context)?;
+        let types_deque: &mut VecDeque<Token> = &mut types.into();
+        let this_type = types_deque.parse(context)?;
         Ok((this_type, storage))
     }
 }

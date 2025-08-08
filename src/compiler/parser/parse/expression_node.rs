@@ -1,28 +1,25 @@
 use super::{
-    expect, peek, read, AbstractDeclarator, BinaryOperatorNode, ExpressionNode,
-    ExpressionWithoutType, Parse, ParseContext, Type, UnaryOperatorNode,
+    AbstractDeclarator, BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, Parse,
+    ParseContext, Type, UnaryOperatorNode,
 };
-use crate::compiler::{lexer::Token, types::Constant};
+use crate::compiler::lexer::{Token, TokenVector};
 use std::{collections::VecDeque, error::Error};
 
-impl Parse for ExpressionNode {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        Ok(ExpressionWithoutType::parse(tokens, context)?.into())
+impl Parse<ExpressionNode> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<ExpressionNode, Box<dyn Error>> {
+        let e1: ExpressionWithoutType = self.parse(context)?;
+        Ok(e1.into())
     }
 }
 
-impl Parse for Option<ExpressionNode> {
+impl Parse<Option<ExpressionNode>> for VecDeque<Token> {
     fn parse(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
         context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        Ok(
-            ExpressionWithoutType::parse_with_level(tokens, context, 0, true)?
-                .map(|res| res.into()),
-        )
+    ) -> Result<Option<ExpressionNode>, Box<dyn Error>> {
+        Ok(self
+            .parse_with_level(context, 0, true)?
+            .map(|res| res.into()))
     }
 }
 
@@ -37,36 +34,58 @@ impl From<ExpressionWithoutType> for ExpressionNode {
         ExpressionNode(val, None)
     }
 }
-impl Parse for ExpressionWithoutType {
+impl Parse<ExpressionWithoutType> for VecDeque<Token> {
     fn parse(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
         context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        Ok(ExpressionWithoutType::parse_with_level(tokens, context, 0, false)?.unwrap())
+    ) -> Result<ExpressionWithoutType, Box<dyn Error>> {
+        Ok(self.parse_with_level(context, 0, false)?.unwrap())
     }
 }
-
-impl ExpressionWithoutType {
+trait ParseExpression {
+    fn parse_primary(
+        &mut self,
+        context: &mut ParseContext,
+        allow_empty: bool,
+    ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>>;
+    fn parse_postfix(
+        &mut self,
+        context: &mut ParseContext,
+        allow_empty: bool,
+    ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>>;
+    fn parse_unary(
+        &mut self,
+        context: &mut ParseContext,
+        allow_empty: bool,
+    ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>>;
     fn parse_with_level(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
         context: &mut ParseContext,
         level: usize,
         allow_empty: bool,
-    ) -> Result<Option<Self>, Box<dyn Error>> {
-        let maybe_left = ExpressionWithoutType::parse_unary(tokens, context, allow_empty)?;
+    ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>>;
+}
+
+impl ParseExpression for VecDeque<Token> {
+    fn parse_with_level(
+        &mut self,
+        context: &mut ParseContext,
+        level: usize,
+        allow_empty: bool,
+    ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>> {
+        let maybe_left = self.parse_unary(context, allow_empty)?;
         if maybe_left.is_none() {
             // if allow_empty is false, parse_unary will throw the relevant error for here
             return Ok(None);
         }
         let mut left = maybe_left.unwrap();
-        while let Some(precedence) = BinaryOperatorNode::precedence(tokens)? {
+        while let Some(precedence) = BinaryOperatorNode::precedence(self)? {
             if precedence < level {
                 break;
             }
-            if peek(tokens)?.is_assignment() {
-                let operator_token = read(tokens)?;
-                let right =
-                    ExpressionWithoutType::parse_with_level(tokens, context, precedence, false)?;
+            if self.peek()?.is_assignment() {
+                let operator_token = self.read()?;
+                let right = self.parse_with_level(context, precedence, false)?;
                 left = if let Token::Assignment = operator_token {
                     ExpressionWithoutType::Assignment(
                         Box::new(left.into()),
@@ -95,15 +114,13 @@ impl ExpressionWithoutType {
                     )
                 };
             } else {
-                match peek(tokens)? {
+                match self.peek()? {
                     Token::Question => {
-                        expect(tokens, Token::Question)?;
+                        self.expect(Token::Question)?;
                         // parse this expression with precedence level reset
-                        let middle = ExpressionWithoutType::parse(tokens, context)?;
-                        expect(tokens, Token::Colon)?;
-                        let end = ExpressionWithoutType::parse_with_level(
-                            tokens, context, precedence, false,
-                        )?;
+                        let middle: ExpressionWithoutType = self.parse(context)?;
+                        self.expect(Token::Colon)?;
+                        let end = self.parse_with_level(context, precedence, false)?;
                         left = ExpressionWithoutType::Ternary(
                             Box::new(left.into()),
                             Box::new(middle.into()),
@@ -112,17 +129,12 @@ impl ExpressionWithoutType {
                     }
                     _ => {
                         left = ExpressionWithoutType::Binary(
-                            BinaryOperatorNode::parse(tokens, context)?,
+                            self.parse(context)?,
                             Box::new(left.into()),
                             Box::new(
-                                ExpressionWithoutType::parse_with_level(
-                                    tokens,
-                                    context,
-                                    precedence + 1,
-                                    false,
-                                )?
-                                .unwrap()
-                                .into(),
+                                self.parse_with_level(context, precedence + 1, false)?
+                                    .unwrap()
+                                    .into(),
                             ),
                         );
                     }
@@ -134,96 +146,87 @@ impl ExpressionWithoutType {
     }
 
     fn parse_unary(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
         context: &mut ParseContext,
         allow_empty: bool,
-    ) -> Result<Option<Self>, Box<dyn Error>> {
+    ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>> {
         let expression = {
-            match peek(tokens)? {
+            match self.peek()? {
                 Token::OpenParen => {
                     // casting
-                    expect(tokens, Token::OpenParen)?;
-                    if peek(tokens)?.is_type() {
-                        let cast_type = Type::parse(tokens, context)?;
-                        let abstract_declarator = AbstractDeclarator::parse(tokens, context)?;
+                    self.expect(Token::OpenParen)?;
+                    if self.peek()?.is_type() {
+                        let cast_type: Type = self.parse(context)?;
+                        let abstract_declarator: AbstractDeclarator = self.parse(context)?;
                         let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
-                        expect(tokens, Token::CloseParen)?;
-                        let factor =
-                            ExpressionWithoutType::parse_unary(tokens, context, false)?.unwrap();
+                        self.expect(Token::CloseParen)?;
+                        let factor = self.parse_unary(context, false)?.unwrap();
                         Some(ExpressionWithoutType::Cast(
                             real_cast_type,
                             Box::new(factor.into()),
                         ))
                     } else {
                         // baited, not actually a cast, go further down the chain...
-                        tokens.push_front(Token::OpenParen);
-                        let expression =
-                            ExpressionWithoutType::parse_postfix(tokens, context, allow_empty)?
-                                .unwrap();
+                        self.push_front(Token::OpenParen);
+                        let expression = self.parse_postfix(context, allow_empty)?.unwrap();
                         Some(expression)
                     }
                 }
                 // address-of
                 Token::BitwiseAnd => {
-                    expect(tokens, Token::BitwiseAnd)?;
+                    self.expect(Token::BitwiseAnd)?;
                     let precedence = UnaryOperatorNode::precedence();
-                    let inner_expression = ExpressionWithoutType::parse_with_level(
-                        tokens, context, precedence, false,
-                    )?;
+                    let inner_expression = self.parse_with_level(context, precedence, false)?;
                     Some(ExpressionWithoutType::AddressOf(Box::new(
                         inner_expression.unwrap().into(),
                     )))
                 }
                 // deref
                 Token::Star => {
-                    expect(tokens, Token::Star)?;
+                    self.expect(Token::Star)?;
                     let precedence = UnaryOperatorNode::precedence();
-                    let inner_expression = ExpressionWithoutType::parse_with_level(
-                        tokens, context, precedence, false,
-                    )?;
+                    let inner_expression = self.parse_with_level(context, precedence, false)?;
                     Some(ExpressionWithoutType::Dereference(Box::new(
                         inner_expression.unwrap().into(),
                     )))
                 }
-                _ if peek(tokens)?.is_unary_operator() => {
-                    let operator = UnaryOperatorNode::parse(tokens, context)?;
+                _ if self.peek()?.is_unary_operator() => {
+                    let operator = self.parse(context)?;
                     let precedence = UnaryOperatorNode::precedence(); // all unary operators have the
                                                                       // same precedence
-                    let expression = ExpressionWithoutType::parse_with_level(
-                        tokens, context, precedence, false,
-                    )?;
+                    let expression = self.parse_with_level(context, precedence, false)?;
                     Some(ExpressionWithoutType::Unary(
                         operator,
                         Box::new(expression.unwrap().into()),
                     ))
                 }
-                _ => ExpressionWithoutType::parse_postfix(tokens, context, allow_empty)?,
+                _ => self.parse_postfix(context, allow_empty)?,
             }
         };
         Ok(expression)
     }
 
     fn parse_postfix(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
         context: &mut ParseContext,
         allow_empty: bool,
-    ) -> Result<Option<Self>, Box<dyn Error>> {
-        let mut left = ExpressionWithoutType::parse_primary(tokens, context, allow_empty)?;
+    ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>> {
+        let mut left = self.parse_primary(context, allow_empty)?;
         if left.is_none() {
             return Ok(left);
         }
-        while peek(tokens)?.is_suffix_operator() {
-            match peek(tokens)? {
+        while self.peek()?.is_suffix_operator() {
+            match self.peek()? {
                 Token::Increment | Token::Decrement => {
                     left = Some(ExpressionWithoutType::Unary(
-                        UnaryOperatorNode::parse_as_suffix(tokens, context)?,
+                        UnaryOperatorNode::parse_as_suffix(self, context)?,
                         Box::new(left.unwrap().into()),
                     ));
                 }
                 Token::OpenSquareBracket => {
-                    expect(tokens, Token::OpenSquareBracket)?;
-                    let inner = ExpressionWithoutType::parse(tokens, context)?;
-                    expect(tokens, Token::CloseSquareBracket)?;
+                    self.expect(Token::OpenSquareBracket)?;
+                    let inner: ExpressionWithoutType = self.parse(context)?;
+                    self.expect(Token::CloseSquareBracket)?;
                     left = Some(ExpressionWithoutType::Subscript(
                         Box::new(left.unwrap().into()),
                         Box::new(inner.into()),
@@ -236,29 +239,29 @@ impl ExpressionWithoutType {
     }
 
     fn parse_primary(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
         context: &mut ParseContext,
         allow_empty: bool,
-    ) -> Result<Option<Self>, Box<dyn Error>> {
-        let expression = match peek(tokens)? {
+    ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>> {
+        let expression = match self.peek()? {
             Token::Identifier(name) => {
-                expect(tokens, Token::Identifier("".to_string()))?;
-                match peek(tokens)? {
+                self.expect(Token::Identifier("".to_string()))?;
+                match self.peek()? {
                     // this is a function call !!
                     Token::OpenParen => {
                         let (new_name, _external_link) =
                             ExpressionWithoutType::resolve_identifier(&name, context)?;
 
-                        expect(tokens, Token::OpenParen)?;
+                        self.expect(Token::OpenParen)?;
                         let mut arguments: Vec<ExpressionWithoutType> = Vec::new();
-                        if !matches!(peek(tokens)?, Token::CloseParen) {
-                            arguments.push(ExpressionWithoutType::parse(tokens, context)?);
+                        if !matches!(self.peek()?, Token::CloseParen) {
+                            arguments.push(self.parse(context)?);
                         }
-                        while matches!(peek(tokens)?, Token::Comma) {
-                            expect(tokens, Token::Comma)?;
-                            arguments.push(ExpressionWithoutType::parse(tokens, context)?);
+                        while matches!(self.peek()?, Token::Comma) {
+                            self.expect(Token::Comma)?;
+                            arguments.push(self.parse(context)?);
                         }
-                        expect(tokens, Token::CloseParen)?;
+                        self.expect(Token::CloseParen)?;
 
                         Some(ExpressionWithoutType::FunctionCall(
                             new_name,
@@ -275,16 +278,16 @@ impl ExpressionWithoutType {
                 }
             }
             Token::OpenParen => {
-                expect(tokens, Token::OpenParen)?;
-                let expression = ExpressionWithoutType::parse(tokens, context)?;
-                expect(tokens, Token::CloseParen)?;
+                self.expect(Token::OpenParen)?;
+                let expression = self.parse(context)?;
+                self.expect(Token::CloseParen)?;
                 Some(expression)
             }
             Token::StringLiteral(v) => {
-                expect(tokens, Token::StringLiteral(Vec::new()))?;
+                self.expect(Token::StringLiteral(Vec::new()))?;
                 let mut out = v.clone();
-                while matches!(peek(tokens)?, Token::StringLiteral(_)) {
-                    if let Token::StringLiteral(new_v) = read(tokens)? {
+                while matches!(self.peek()?, Token::StringLiteral(_)) {
+                    if let Token::StringLiteral(new_v) = self.read()? {
                         out.append(&mut new_v.clone())
                     } else {
                         unreachable!()
@@ -293,9 +296,9 @@ impl ExpressionWithoutType {
 
                 Some(ExpressionWithoutType::String(out))
             }
-            _ if peek(tokens)?.is_constant() => Some(ExpressionWithoutType::Constant(
-                Constant::parse(tokens, context)?,
-            )),
+            _ if self.peek()?.is_constant() => {
+                Some(ExpressionWithoutType::Constant(self.parse(context)?))
+            }
             t => {
                 if allow_empty {
                     None
@@ -307,8 +310,10 @@ impl ExpressionWithoutType {
 
         Ok(expression)
     }
+}
 
-    pub fn match_lvalue(&self) -> bool {
+impl ExpressionWithoutType {
+    pub fn is_lvalue(&self) -> bool {
         matches!(
             self,
             ExpressionWithoutType::Var(_)

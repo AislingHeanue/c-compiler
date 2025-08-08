@@ -3,11 +3,10 @@ use super::{
     ExpressionNode, ExpressionWithoutType, ForInitialiserNode, InitialiserNode,
     InitialiserWithoutType, ProgramNode, StatementNode, Type, UnaryOperatorNode,
 };
-use crate::compiler::{lexer::Token, types::Constant};
+use crate::compiler::{lexer::Token, lexer::TokenVector, types::Constant};
 use std::{
     collections::{HashMap, VecDeque},
     error::Error,
-    mem::discriminant,
 };
 
 mod abstract_declarator;
@@ -18,14 +17,11 @@ mod expression_node;
 mod parsed_types;
 mod statement_node;
 
-trait Parse
+trait Parse<T>
 where
     Self: Sized,
 {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>>;
+    fn parse(&mut self, context: &mut ParseContext) -> Result<T, Box<dyn Error>>;
 }
 
 pub struct ParseContext {
@@ -43,67 +39,31 @@ pub fn do_parse(
     mut lexed: VecDeque<Token>,
     do_not_validate: bool,
 ) -> Result<ProgramNode, Box<dyn Error>> {
-    ProgramNode::parse(
-        &mut lexed,
-        &mut ParseContext {
-            current_scope_identifiers: HashMap::new(),
-            outer_scope_identifiers: HashMap::new(),
-            num_variables: 0,
-            do_not_validate,
-            current_block_is_function_body: false,
-            current_scope_is_file: true,
-        },
-    )
+    lexed.parse(&mut ParseContext {
+        current_scope_identifiers: HashMap::new(),
+        outer_scope_identifiers: HashMap::new(),
+        num_variables: 0,
+        do_not_validate,
+        current_block_is_function_body: false,
+        current_scope_is_file: true,
+    })
 }
 
-fn expect(tokens: &mut VecDeque<Token>, expected: Token) -> Result<(), Box<dyn Error>> {
-    let token = read(tokens)?;
-    if discriminant(&expected) != discriminant(&token) {
-        return Err(format!(
-            "Unexpected token, got {:?}, expecting {:?}",
-            token, expected
-        )
-        .into());
-    }
-    Ok(())
-}
-
-fn read(tokens: &mut VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
-    // println!("popping {:?}", tokens.front());
-    tokens
-        .pop_front()
-        .ok_or::<Box<dyn Error>>("Unexpected end of tokens".into())
-}
-
-fn peek(tokens: &VecDeque<Token>) -> Result<Token, Box<dyn Error>> {
-    // println!("peeking {:?}", tokens.front());
-    Ok(tokens
-        .front()
-        .ok_or::<Box<dyn Error>>("Unexpected end of tokens".into())?
-        .clone())
-}
-
-impl Parse for ProgramNode {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
+impl Parse<ProgramNode> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<ProgramNode, Box<dyn Error>> {
         let mut declarations: Vec<DeclarationNode> = Vec::new();
-        while !tokens.is_empty() {
-            declarations.push(DeclarationNode::parse(tokens, context)?)
+        while !self.is_empty() {
+            declarations.push(self.parse(context)?)
         }
 
         Ok(ProgramNode { declarations })
     }
 }
 
-impl Parse for ForInitialiserNode {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        if peek(tokens)?.is_specifier() {
-            let block_item = BlockItemNode::parse(tokens, context)?;
+impl Parse<ForInitialiserNode> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<ForInitialiserNode, Box<dyn Error>> {
+        if self.peek()?.is_specifier() {
+            let block_item = self.parse(context)?;
             if let BlockItemNode::Declaration(DeclarationNode::Variable(v)) = block_item {
                 if !context.do_not_validate && v.storage_class.is_some() {
                     return Err("For initialiser must not be declared as static or extern".into());
@@ -117,38 +77,34 @@ impl Parse for ForInitialiserNode {
                 Err("Unexpected function declaration in the initialiser of a for loop".into())
             }
         } else {
-            let expression =
-                ForInitialiserNode::Expression(Option::<ExpressionNode>::parse(tokens, context)?);
-            // pop the extra semi-colon off of tokens, since expressions themselves don't
+            let expression = ForInitialiserNode::Expression(self.parse(context)?);
+            // pop the extra semi-colon off of self, since expressions themselves don't
             // expect semi-colons
-            expect(tokens, Token::SemiColon)?;
+            self.expect(Token::SemiColon)?;
             Ok(expression)
         }
     }
 }
 
-impl Parse for InitialiserNode {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        let init = match peek(tokens)? {
+impl Parse<InitialiserNode> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<InitialiserNode, Box<dyn Error>> {
+        let init = match self.peek()? {
             Token::OpenBrace => {
-                expect(tokens, Token::OpenBrace)?;
+                self.expect(Token::OpenBrace)?;
                 let mut initialisers = Vec::new();
-                initialisers.push(InitialiserNode::parse(tokens, context)?);
-                while matches!(peek(tokens)?, Token::Comma) {
-                    expect(tokens, Token::Comma)?;
-                    if matches!(peek(tokens)?, Token::CloseBrace) {
+                initialisers.push(self.parse(context)?);
+                while matches!(self.peek()?, Token::Comma) {
+                    self.expect(Token::Comma)?;
+                    if matches!(self.peek()?, Token::CloseBrace) {
                         //baited, no new init here
                         break;
                     }
-                    initialisers.push(InitialiserNode::parse(tokens, context)?);
+                    initialisers.push(self.parse(context)?);
                 }
-                expect(tokens, Token::CloseBrace)?;
+                self.expect(Token::CloseBrace)?;
                 InitialiserWithoutType::Compound(initialisers)
             }
-            _ => InitialiserWithoutType::Single(ExpressionNode::parse(tokens, context)?),
+            _ => InitialiserWithoutType::Single(self.parse(context)?),
         };
         Ok(init.into())
     }
@@ -160,12 +116,9 @@ impl From<InitialiserWithoutType> for InitialiserNode {
     }
 }
 
-impl Parse for Constant {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        _context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        match read(tokens)? {
+impl Parse<Constant> for VecDeque<Token> {
+    fn parse(&mut self, _context: &mut ParseContext) -> Result<Constant, Box<dyn Error>> {
+        match self.read()? {
             Token::IntegerConstant(v) => Ok(if v <= i32::MAX.into() {
                 Constant::Integer(v.try_into().unwrap())
             } else {
@@ -185,12 +138,9 @@ impl Parse for Constant {
     }
 }
 
-impl Parse for UnaryOperatorNode {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        _context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        match read(tokens)? {
+impl Parse<UnaryOperatorNode> for VecDeque<Token> {
+    fn parse(&mut self, _context: &mut ParseContext) -> Result<UnaryOperatorNode, Box<dyn Error>> {
+        match self.read()? {
             Token::Hyphen => Ok(UnaryOperatorNode::Negate),
             Token::Tilde => Ok(UnaryOperatorNode::Complement),
             Token::Not => Ok(UnaryOperatorNode::Not),
@@ -210,7 +160,7 @@ impl UnaryOperatorNode {
         tokens: &mut VecDeque<Token>,
         _context: &mut ParseContext,
     ) -> Result<Self, Box<dyn Error>> {
-        match read(tokens)? {
+        match tokens.read()? {
             Token::Increment => Ok(UnaryOperatorNode::SuffixIncrement),
             Token::Decrement => Ok(UnaryOperatorNode::SuffixDecrement),
             t => Err(format!(
@@ -226,12 +176,9 @@ impl UnaryOperatorNode {
     }
 }
 
-impl Parse for BinaryOperatorNode {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        _context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        Ok(match read(tokens)? {
+impl Parse<BinaryOperatorNode> for VecDeque<Token> {
+    fn parse(&mut self, _context: &mut ParseContext) -> Result<BinaryOperatorNode, Box<dyn Error>> {
+        Ok(match self.read()? {
             Token::Star => BinaryOperatorNode::Multiply,
             Token::Slash => BinaryOperatorNode::Divide,
             Token::Percent => BinaryOperatorNode::Mod,
@@ -264,7 +211,7 @@ impl Parse for BinaryOperatorNode {
 }
 impl BinaryOperatorNode {
     fn precedence(tokens: &mut VecDeque<Token>) -> Result<Option<usize>, Box<dyn Error>> {
-        Ok(Some(match peek(tokens)? {
+        Ok(Some(match tokens.peek()? {
             Token::Increment => 60,
             Token::Decrement => 60,
 

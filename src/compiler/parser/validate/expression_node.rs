@@ -73,7 +73,7 @@ impl ExpressionNode {
             ) => {
                 // VALIDATION: Make sure ++ and -- only operate on variables, not constants or
                 // other expressions
-                if !src.0.match_lvalue() {
+                if !src.0.is_lvalue() {
                     return Err(format!(
                         "Can't perform increment/decrement operation on non-variable: {:?}",
                         src,
@@ -82,12 +82,12 @@ impl ExpressionNode {
                 }
             }
             ExpressionWithoutType::Assignment(ref dst, _) => {
-                if !dst.0.match_lvalue() {
+                if !dst.0.is_lvalue() {
                     return Err(format!("Can't assign to non-variable: {:?}", dst).into());
                 }
             }
             ExpressionWithoutType::Compound(_, ref left, _) => {
-                if !left.0.match_lvalue() {
+                if !left.0.is_lvalue() {
                     return Err(format!("Can't assign to non-variable: {:?}", left).into());
                 }
             }
@@ -320,7 +320,7 @@ impl ExpressionNode {
             ExpressionWithoutType::AddressOf(ref mut e) => {
                 // don't convert e to a pointer to the first element here, we want the full array
                 e.check_types(context)?;
-                if !e.0.match_lvalue() {
+                if !e.0.is_lvalue() {
                     return Err("Can only take address of an object".into());
                 }
                 Type::Pointer(Box::new(e.1.clone().unwrap()))

@@ -1,7 +1,7 @@
-use super::{expect, peek, Parse, ParseContext};
+use super::{Parse, ParseContext};
 use crate::compiler::{
-    lexer::Token,
-    parser::{BlockItemNode, DeclarationNode, StatementNode},
+    lexer::{Token, TokenVector},
+    parser::{BlockItemNode, DeclarationNode},
     types::StorageClass,
 };
 use std::{
@@ -14,12 +14,9 @@ type Scopes = (
     HashMap<String, (String, bool)>,
 );
 
-impl Parse for Vec<BlockItemNode> {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        expect(tokens, Token::OpenBrace)?;
+impl Parse<Vec<BlockItemNode>> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<Vec<BlockItemNode>, Box<dyn Error>> {
+        self.expect(Token::OpenBrace)?;
 
         // (and I'm feeling... good)
         let mut original_outer_scope_variables = None;
@@ -34,8 +31,8 @@ impl Parse for Vec<BlockItemNode> {
         context.current_block_is_function_body = false;
 
         let mut items: Vec<BlockItemNode> = Vec::new();
-        while !matches!(peek(tokens)?, Token::CloseBrace) {
-            items.push(BlockItemNode::parse(tokens, context)?)
+        while !matches!(self.peek()?, Token::CloseBrace) {
+            items.push(self.parse(context)?)
         }
 
         if let Some(original) = original_outer_scope_variables {
@@ -44,23 +41,20 @@ impl Parse for Vec<BlockItemNode> {
             context.current_scope_is_file = true;
         }
 
-        expect(tokens, Token::CloseBrace)?;
+        self.expect(Token::CloseBrace)?;
 
         Ok(items)
     }
 }
 
-impl Parse for BlockItemNode {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        if tokens.is_empty() {
+impl Parse<BlockItemNode> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<BlockItemNode, Box<dyn Error>> {
+        if self.is_empty() {
             return Err("Block item has no tokens".into());
         }
 
-        if peek(tokens)?.is_specifier() {
-            let declaration = DeclarationNode::parse(tokens, context)?;
+        if self.peek()?.is_specifier() {
+            let declaration = self.parse(context)?;
             if let DeclarationNode::Function(ref f) = declaration {
                 if f.body.is_some() && !context.do_not_validate {
                     return Err("Block-scope function declaration may not have a body".into());
@@ -72,9 +66,7 @@ impl Parse for BlockItemNode {
             }
             Ok(BlockItemNode::Declaration(declaration))
         } else {
-            Ok(BlockItemNode::Statement(StatementNode::parse(
-                tokens, context,
-            )?))
+            Ok(BlockItemNode::Statement(self.parse(context)?))
         }
     }
 }

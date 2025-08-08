@@ -1,36 +1,33 @@
 use itertools::process_results;
 
-use super::{expect, peek, read, Declarator, Parse, ParseContext, Type};
-use crate::compiler::{lexer::Token, types::Constant};
+use super::{Declarator, Parse, ParseContext, Type};
+use crate::compiler::{
+    lexer::{Token, TokenVector},
+    types::Constant,
+};
 use std::{collections::VecDeque, error::Error};
 
-impl Parse for Declarator {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        match peek(tokens)? {
+impl Parse<Declarator> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<Declarator, Box<dyn Error>> {
+        match self.peek()? {
             Token::Star => {
-                expect(tokens, Token::Star)?;
-                Ok(Declarator::Pointer(Box::new(Declarator::parse(
-                    tokens, context,
-                )?)))
+                self.expect(Token::Star)?;
+                Ok(Declarator::Pointer(Box::new(self.parse(context)?)))
             }
             _ => {
-                let mut simple_declarator = Declarator::parse_simple_declarator(tokens, context)?;
-                match peek(tokens)? {
+                let mut simple_declarator = self.parse_simple_declarator(context)?;
+                match self.peek()? {
                     // function declaration type!
                     Token::OpenParen => {
-                        let param_list = Declarator::parse_param_list(tokens, context)?;
+                        let param_list = self.parse_param_list(context)?;
                         Ok(Declarator::Function(
                             Box::new(simple_declarator),
                             param_list,
                         ))
                     }
                     Token::OpenSquareBracket => {
-                        while matches!(peek(tokens)?, Token::OpenSquareBracket) {
-                            simple_declarator =
-                                Declarator::parse_array(tokens, simple_declarator, context)?;
+                        while matches!(self.peek()?, Token::OpenSquareBracket) {
+                            simple_declarator = self.parse_array(simple_declarator, context)?;
                         }
                         Ok(simple_declarator)
                     }
@@ -48,19 +45,40 @@ pub struct DeclaratorApplicationOutput {
     pub param_names: Option<Vec<String>>,
 }
 
-impl Declarator {
+trait ParseDeclarator {
     fn parse_simple_declarator(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<Declarator, Box<dyn Error>>;
+
+    fn parse_param_list(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<Vec<(Type, Declarator)>, Box<dyn Error>>;
+    fn parse_param(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<(Type, Declarator), Box<dyn Error>>;
+    fn parse_array(
+        &mut self,
+        declarator: Declarator,
+        context: &mut ParseContext,
+    ) -> Result<Declarator, Box<dyn Error>>;
+}
+
+impl ParseDeclarator for VecDeque<Token> {
+    fn parse_simple_declarator(
+        &mut self,
         context: &mut ParseContext,
     ) -> Result<Declarator, Box<dyn Error>> {
-        match read(tokens)? {
+        match self.read()? {
             Token::Identifier(name) => {
                 // do not process the scope of 'name' here, because it complicates parameters
                 Ok(Declarator::Name(name))
             }
             Token::OpenParen => {
-                let declarator = Declarator::parse(tokens, context)?;
-                expect(tokens, Token::CloseParen)?;
+                let declarator = self.parse(context)?;
+                self.expect(Token::CloseParen)?;
                 Ok(declarator)
             }
             _ => Err("Invalid declarator".into()),
@@ -68,44 +86,44 @@ impl Declarator {
     }
 
     fn parse_param_list(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
         context: &mut ParseContext,
     ) -> Result<Vec<(Type, Declarator)>, Box<dyn Error>> {
-        expect(tokens, Token::OpenParen)?;
+        self.expect(Token::OpenParen)?;
         let mut param_list = Vec::new();
 
-        if peek(tokens)? == Token::KeywordVoid {
-            expect(tokens, Token::KeywordVoid)?;
-            expect(tokens, Token::CloseParen)?;
+        if self.peek()? == Token::KeywordVoid {
+            self.expect(Token::KeywordVoid)?;
+            self.expect(Token::CloseParen)?;
             return Ok(param_list);
         }
 
-        param_list.push(Declarator::parse_param(tokens, context)?);
-        while peek(tokens)? != Token::CloseParen {
-            expect(tokens, Token::Comma)?;
-            param_list.push(Declarator::parse_param(tokens, context)?);
+        param_list.push(self.parse_param(context)?);
+        while self.peek()? != Token::CloseParen {
+            self.expect(Token::Comma)?;
+            param_list.push(self.parse_param(context)?);
         }
-        expect(tokens, Token::CloseParen)?;
+        self.expect(Token::CloseParen)?;
         Ok(param_list)
     }
 
     fn parse_param(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
         context: &mut ParseContext,
     ) -> Result<(Type, Declarator), Box<dyn Error>> {
-        let out_type = Type::parse(tokens, context)?;
+        let out_type = self.parse(context)?;
         // function params never have static or extern storage
-        let declarator = Declarator::parse(tokens, context)?;
+        let declarator = self.parse(context)?;
         Ok((out_type, declarator))
     }
 
     fn parse_array(
-        tokens: &mut VecDeque<Token>,
+        &mut self,
         mut declarator: Declarator,
         context: &mut ParseContext,
     ) -> Result<Declarator, Box<dyn Error>> {
-        expect(tokens, Token::OpenSquareBracket)?;
-        let c = Constant::parse(tokens, context)?;
+        self.expect(Token::OpenSquareBracket)?;
+        let c = self.parse(context)?;
         let maybe_i: Option<u64> = match c {
             Constant::Integer(i) => i.try_into().ok(),
             Constant::Long(i) => i.try_into().ok(),
@@ -122,10 +140,12 @@ impl Declarator {
         } else {
             return Err("Constant value in array type must be an integer".into());
         }
-        expect(tokens, Token::CloseSquareBracket)?;
+        self.expect(Token::CloseSquareBracket)?;
         Ok(declarator)
     }
+}
 
+impl Declarator {
     pub fn apply_to_type(
         self,
         base_type: Type,

@@ -1,15 +1,12 @@
-use super::{peek, read, Parse, ParseContext, Type};
-use crate::compiler::lexer::Token;
+use super::{Parse, ParseContext, Type};
+use crate::compiler::lexer::{Token, TokenVector};
 use std::{collections::VecDeque, error::Error};
 
-impl Parse for Type {
-    fn parse(
-        tokens: &mut VecDeque<Token>,
-        _context: &mut ParseContext,
-    ) -> Result<Self, Box<dyn Error>> {
+impl Parse<Type> for VecDeque<Token> {
+    fn parse(&mut self, _context: &mut ParseContext) -> Result<Type, Box<dyn Error>> {
         let mut out = Vec::new();
-        while !tokens.is_empty() && peek(tokens)?.is_type() {
-            out.push(read(tokens)?)
+        while !self.is_empty() && self.peek()?.is_type() {
+            out.push(self.read()?)
         }
         if out.is_empty() {
             return Err("No type tokens found".into());

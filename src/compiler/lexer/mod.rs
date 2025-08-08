@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::{collections::VecDeque, error::Error};
+use std::{collections::VecDeque, error::Error, mem::discriminant};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -352,5 +352,39 @@ impl Token {
                 | Token::ShiftLeftAssign
                 | Token::ShiftRightAssign
         )
+    }
+}
+
+pub trait TokenVector {
+    fn expect(&mut self, expected: Token) -> Result<(), Box<dyn Error>>;
+    fn read(&mut self) -> Result<Token, Box<dyn Error>>;
+    fn peek(&mut self) -> Result<Token, Box<dyn Error>>;
+}
+
+impl TokenVector for VecDeque<Token> {
+    fn expect(&mut self, expected: Token) -> Result<(), Box<dyn Error>> {
+        let token = self.read()?;
+        if discriminant(&expected) != discriminant(&token) {
+            return Err(format!(
+                "Unexpected token, got {:?}, expecting {:?}",
+                token, expected
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    fn read(&mut self) -> Result<Token, Box<dyn Error>> {
+        // println!("popping {:?}", tokens.front());
+        self.pop_front()
+            .ok_or::<Box<dyn Error>>("Unexpected end of tokens".into())
+    }
+
+    fn peek(&mut self) -> Result<Token, Box<dyn Error>> {
+        // println!("peeking {:?}", tokens.front());
+        Ok(self
+            .front()
+            .ok_or::<Box<dyn Error>>("Unexpected end of tokens".into())?
+            .clone())
     }
 }
