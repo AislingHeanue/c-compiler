@@ -4,7 +4,7 @@ use convert::do_birds;
 
 use super::{
     parser::ProgramNode,
-    types::{Constant, StaticInitial, SymbolInfo, Type},
+    types::{Constant, StaticInitialiser, SymbolInfo, Type},
 };
 
 mod convert;
@@ -20,8 +20,8 @@ pub enum BirdsTopLevel {
     // name params instructions global
     Function(String, Vec<String>, Vec<BirdsInstructionNode>, bool),
     // name init global
-    StaticVariable(Type, String, Vec<StaticInitial>, bool),
-    StaticConstant(Type, String, StaticInitial),
+    StaticVariable(Type, String, Vec<StaticInitialiser>, bool),
+    StaticConstant(Type, String, StaticInitialiser),
 }
 
 #[derive(Debug)]

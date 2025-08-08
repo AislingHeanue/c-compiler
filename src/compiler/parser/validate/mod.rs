@@ -2,12 +2,12 @@ use std::{collections::HashMap, error::Error};
 
 use itertools::process_results;
 
-use crate::compiler::types::{InitialValue, StaticInitial};
+use crate::compiler::types::{InitialValue, StaticInitialiser};
 
 use super::{
-    BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
-    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
-    InitialiserWithoutType, OrdinalStatic, ProgramNode, StatementNode, StorageClass, StorageInfo,
+    BinaryOperatorNode, Block, BlockItemNode, ComparableStatic, Constant, DeclarationNode,
+    ExpressionNode, ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration,
+    InitialiserNode, InitialiserWithoutType, ProgramNode, StatementNode, StorageClass, StorageInfo,
     SwitchMapKey, SymbolInfo, Type, UnaryOperatorNode, VariableDeclaration,
 };
 
@@ -266,8 +266,8 @@ impl InitialiserNode {
         &mut self,
         target_type: &Type,
         context: &mut ValidateContext,
-    ) -> Result<Vec<StaticInitial>, Box<dyn Error>> {
-        let init_list: Vec<StaticInitial> = match (target_type, &mut self.0) {
+    ) -> Result<Vec<StaticInitialiser>, Box<dyn Error>> {
+        let init_list: Vec<StaticInitialiser> = match (target_type, &mut self.0) {
             (Type::Pointer(t), InitialiserWithoutType::Single(init_e))
                 if init_e.is_string_literal() =>
             {
@@ -281,12 +281,14 @@ impl InitialiserNode {
                         new_name.clone(),
                         SymbolInfo {
                             symbol_type: Type::Array(t.clone(), s.len() as u64 + 1),
-                            storage: StorageInfo::Constant(StaticInitial::Ordinal(
-                                OrdinalStatic::String(s.to_vec(), true),
+                            storage: StorageInfo::Constant(StaticInitialiser::Ordinal(
+                                ComparableStatic::String(s.to_vec(), true),
                             )),
                         },
                     );
-                    vec![StaticInitial::Ordinal(OrdinalStatic::Pointer(new_name))]
+                    vec![StaticInitialiser::Ordinal(ComparableStatic::Pointer(
+                        new_name,
+                    ))]
                 } else {
                     unreachable!()
                 }
@@ -302,12 +304,12 @@ impl InitialiserNode {
                     if !t.is_character() {
                         return Err("Can't initialise a non-character array with a string".into());
                     }
-                    let mut out = vec![StaticInitial::Ordinal(OrdinalStatic::String(
+                    let mut out = vec![StaticInitialiser::Ordinal(ComparableStatic::String(
                         s.clone(),
                         difference > 0,
                     ))];
                     if difference > 1 {
-                        out.push(StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(
+                        out.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
                             difference - 1,
                         )))
                     }
@@ -334,7 +336,7 @@ impl InitialiserNode {
                 if initialisers.len() > (*size).try_into().unwrap() {
                     return Err("Too many initialisers in static declaration".into());
                 }
-                let mut statics: Vec<StaticInitial> = process_results(
+                let mut statics: Vec<StaticInitialiser> = process_results(
                     initialisers
                         .iter_mut()
                         .map(|init| init.create_static_init_list(t, context)),
@@ -342,7 +344,7 @@ impl InitialiserNode {
                 )?;
                 if initialisers.len() < (*size).try_into().unwrap() {
                     let offset = *size as i32 - initialisers.len() as i32;
-                    statics.push(StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(
+                    statics.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
                         t.get_size() * offset,
                     )));
                 }
@@ -571,7 +573,9 @@ impl VariableDeclaration {
                     }
                     None => {
                         let len = self.variable_type.get_size();
-                        InitialValue::initial(StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(len)))
+                        InitialValue::initial(StaticInitialiser::Ordinal(
+                            ComparableStatic::ZeroBytes(len),
+                        ))
                     }
                 };
                 context.symbols.insert(
@@ -858,7 +862,7 @@ impl StatementNode {
                 } else {
                     return Err("Non constant expression found in case statement".into());
                 };
-                let ordinal = if let StaticInitial::Ordinal(ref o) = constant_value {
+                let ordinal = if let StaticInitialiser::Ordinal(ref o) = constant_value {
                     o
                 } else {
                     return Err("Non ordinal (eg Double) expression found in case statement".into());

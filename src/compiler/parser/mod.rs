@@ -1,7 +1,7 @@
 use parse::do_parse;
 use validate::do_validate;
 
-use super::types::{Constant, OrdinalStatic, StorageClass, StorageInfo, Type};
+use super::types::{ComparableStatic, Constant, StorageClass, StorageInfo, Type};
 
 use super::{lexer::Token, types::SymbolInfo};
 use std::{
@@ -108,7 +108,7 @@ pub enum StatementNode {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SwitchMapKey {
     Default,
-    Constant(OrdinalStatic),
+    Constant(ComparableStatic),
 }
 
 #[derive(Debug)]

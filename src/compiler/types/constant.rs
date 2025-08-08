@@ -1,9 +1,7 @@
-use conv::{ApproxInto, ConvUtil, RoundToZero, Wrapping};
-
-use crate::compiler::types::{Constant, OrdinalStatic, StaticInitial, Type};
+use crate::compiler::types::{ComparableStatic, Constant, StaticInitialiser, Type};
 
 impl Constant {
-    pub fn convert_to(&self, target: &Type) -> StaticInitial {
+    pub fn convert_to(&self, target: &Type) -> StaticInitialiser {
         if matches!(target, Type::Pointer(_)) {
             self.convert_to_pointer()
         } else {
@@ -14,211 +12,66 @@ impl Constant {
         }
     }
 
-    pub fn zero(target: &Type) -> StaticInitial {
-        StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(target.get_size()))
-    }
-
-    pub fn convert_ordinal_to(&self, target: &Type) -> StaticInitial {
+    pub fn convert_ordinal_to(&self, target: &Type) -> StaticInitialiser {
         // match target {}
         match self {
-            Constant::Integer(i) => StaticInitial::from_number(*i, target),
-            Constant::Long(i) => StaticInitial::from_number(*i, target),
-            Constant::UnsignedInteger(i) => StaticInitial::from_number(*i, target),
-            Constant::UnsignedLong(i) => StaticInitial::from_number(*i, target),
-            Constant::Char(i) => StaticInitial::from_number(*i, target),
-            Constant::UnsignedChar(i) => StaticInitial::from_number(*i, target),
+            Constant::Integer(i) => StaticInitialiser::from_number(*i, target),
+            Constant::Long(i) => StaticInitialiser::from_number(*i, target),
+            Constant::UnsignedInteger(i) => StaticInitialiser::from_number(*i, target),
+            Constant::UnsignedLong(i) => StaticInitialiser::from_number(*i, target),
+            Constant::Char(i) => StaticInitialiser::from_number(*i, target),
+            Constant::UnsignedChar(i) => StaticInitialiser::from_number(*i, target),
             Constant::Double(_) => unreachable!(),
         }
     }
-    pub fn convert_double_to(&self, target: &Type) -> StaticInitial {
+    pub fn convert_double_to(&self, target: &Type) -> StaticInitialiser {
         // match target {}
         match self {
-            Constant::Integer(i) => StaticInitial::from_number(*i, target),
-            Constant::Long(i) => StaticInitial::from_number(*i, target),
-            Constant::UnsignedInteger(i) => StaticInitial::from_number(*i, target),
-            Constant::UnsignedLong(i) => StaticInitial::from_number(*i, target),
-            Constant::Double(i) => StaticInitial::from_double(*i, target),
-            Constant::Char(i) => StaticInitial::from_number(*i, target),
-            Constant::UnsignedChar(i) => StaticInitial::from_number(*i, target),
+            Constant::Integer(i) => StaticInitialiser::from_number(*i, target),
+            Constant::Long(i) => StaticInitialiser::from_number(*i, target),
+            Constant::UnsignedInteger(i) => StaticInitialiser::from_number(*i, target),
+            Constant::UnsignedLong(i) => StaticInitialiser::from_number(*i, target),
+            Constant::Double(i) => StaticInitialiser::from_double(*i, target),
+            Constant::Char(i) => StaticInitialiser::from_number(*i, target),
+            Constant::UnsignedChar(i) => StaticInitialiser::from_number(*i, target),
         }
     }
-    pub fn convert_to_pointer(&self) -> StaticInitial {
+    pub fn convert_to_pointer(&self) -> StaticInitialiser {
         match self {
             Constant::Integer(0)
             | Constant::Long(0)
             | Constant::UnsignedInteger(0)
-            | Constant::UnsignedLong(0) => StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(8)),
+            | Constant::UnsignedLong(0) => {
+                StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(8))
+            }
             _ => unreachable!(),
         }
     }
-}
 
-trait ApproximableOrdinal:
-    ApproxInto<i8, Wrapping>
-    + ApproxInto<i32, Wrapping>
-    + ApproxInto<i64, Wrapping>
-    + ApproxInto<u8, Wrapping>
-    + ApproxInto<u32, Wrapping>
-    + ApproxInto<u64, Wrapping>
-    + ApproxInto<f64>
-    + Copy
-{
-}
-impl ApproximableOrdinal for i8 {}
-impl ApproximableOrdinal for i32 {}
-impl ApproximableOrdinal for i64 {}
-impl ApproximableOrdinal for u8 {}
-impl ApproximableOrdinal for u32 {}
-impl ApproximableOrdinal for u64 {}
-
-impl StaticInitial {
-    fn from_double(i: f64, target: &Type) -> StaticInitial {
+    // purely-for-utility function for getting constants (almost always 0 or 1) in the appropriate type
+    pub fn get_typed(value: i64, target: &Type) -> Constant {
         match target {
-            Type::Integer => StaticInitial::integer_from_double(i),
-            Type::Long => StaticInitial::long_from_double(i),
-            Type::UnsignedInteger => StaticInitial::unsigned_integer_from_double(i),
-            Type::UnsignedLong => StaticInitial::unsigned_long_from_double(i),
-            Type::Double => StaticInitial::Double(i),
-            Type::Char => StaticInitial::char_from_double(i),
-            Type::SignedChar => StaticInitial::char_from_double(i),
-            Type::UnsignedChar => StaticInitial::unsigned_char_from_double(i),
+            Type::Integer => Constant::Integer(value.try_into().unwrap()),
+            Type::Long => Constant::Long(value),
+            Type::UnsignedInteger => Constant::UnsignedInteger(value.try_into().unwrap()),
+            Type::UnsignedLong => Constant::UnsignedLong(value.try_into().unwrap()),
+            // adding a constant to a pointer is only reasonable if the second operand is Long
+            Type::Pointer(_) => Constant::Long(value),
+            Type::Char => Constant::Char(value.try_into().unwrap()),
+            Type::SignedChar => Constant::Char(value.try_into().unwrap()),
+            Type::UnsignedChar => Constant::UnsignedChar(value.try_into().unwrap()),
+
             Type::Function(_, _) => unreachable!(),
-            Type::Pointer(_) => unreachable!(),
             Type::Array(..) => unreachable!(),
+            Type::Double => panic!("Can't use get_typed_constant to generate a double"),
         }
     }
 
-    fn from_number<T: ApproximableOrdinal>(i: T, target: &Type) -> StaticInitial {
-        // make sure this isn't -0.0, for example
-        match target {
-            Type::Integer => StaticInitial::integer(i),
-            Type::Long => StaticInitial::long(i),
-            Type::UnsignedInteger => StaticInitial::unsigned_integer(i),
-            Type::UnsignedLong => StaticInitial::unsigned_long(i),
-            Type::Double => StaticInitial::double(i),
-            Type::Char => StaticInitial::char(i),
-            Type::SignedChar => StaticInitial::char(i),
-            Type::UnsignedChar => StaticInitial::unsigned_char(i),
-            Type::Pointer(_) | Type::Array(..) => {
-                let value = StaticInitial::unsigned_long(i);
-                if !matches!(
-                    value,
-                    StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(0))
-                ) {
-                    panic!("Invalid numeric value for initialising pointer");
-                }
-                value
-            }
-            Type::Function(_, _) => unreachable!(),
-        }
+    pub fn get_double(value: f64) -> Constant {
+        Constant::Double(value)
     }
 
-    fn char<T: ApproxInto<i8, Wrapping>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::Char.get_size()));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::Char(real_i))
-    }
-
-    fn integer<T: ApproxInto<i32, Wrapping>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::Integer.get_size()));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::Integer(real_i))
-    }
-
-    fn long<T: ApproxInto<i64, Wrapping>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::Long.get_size()));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::Long(real_i))
-    }
-
-    fn unsigned_char<T: ApproxInto<u8, Wrapping>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::UnsignedChar.get_size()));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::UnsignedChar(real_i))
-    }
-
-    fn unsigned_integer<T: ApproxInto<u32, Wrapping>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(
-                Type::UnsignedInteger.get_size(),
-            ));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(real_i))
-    }
-
-    fn unsigned_long<T: ApproxInto<u64, Wrapping>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::UnsignedLong.get_size()));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(real_i))
-    }
-
-    fn double<T: ApproxInto<f64>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0. {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::Double.get_size()));
-        }
-        StaticInitial::Double(ConvUtil::approx_as(real_i).unwrap())
-    }
-
-    fn char_from_double<T: ApproxInto<i8, RoundToZero>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::Char.get_size()));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::Char(real_i))
-    }
-    fn integer_from_double<T: ApproxInto<i32, RoundToZero>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::Integer.get_size()));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::Integer(real_i))
-    }
-
-    fn long_from_double<T: ApproxInto<i64, RoundToZero>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::Long.get_size()));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::Long(real_i))
-    }
-
-    fn unsigned_char_from_double<T: ApproxInto<u8, RoundToZero>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(
-                Type::UnsignedInteger.get_size(),
-            ));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::UnsignedChar(real_i))
-    }
-
-    fn unsigned_integer_from_double<T: ApproxInto<u32, RoundToZero>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(
-                Type::UnsignedInteger.get_size(),
-            ));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(real_i))
-    }
-
-    fn unsigned_long_from_double<T: ApproxInto<u64, RoundToZero>>(i: T) -> StaticInitial {
-        let real_i = i.approx_as_by().unwrap();
-        if real_i == 0 {
-            return StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(Type::UnsignedLong.get_size()));
-        }
-        StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(real_i))
+    pub fn zero(target: &Type) -> StaticInitialiser {
+        StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(target.get_size()))
     }
 }

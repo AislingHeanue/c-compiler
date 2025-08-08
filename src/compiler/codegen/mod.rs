@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, error::Error, mem::swap};
 
 use super::{
     birds::BirdsProgramNode,
-    types::{StaticInitial, StorageInfo, SymbolInfo, Type},
+    types::{StaticInitialiser, StorageInfo, SymbolInfo, Type},
 };
 
 mod convert;
@@ -20,12 +20,12 @@ enum TopLevel {
     // header instructions, name, body, global
     Function(String, Vec<Instruction>, bool),
     // name global alignment init
-    StaticVariable(String, bool, u32, Vec<StaticInitial>),
+    StaticVariable(String, bool, u32, Vec<StaticInitialiser>),
     // used for all floating point constants. Needed anytime we need eg.
     // 'float(1)' or 'float(0)' or 'float(i64::MAX+1)'
     // will be extended to other types later.
     // name alignment init
-    StaticConstant(String, u32, StaticInitial),
+    StaticConstant(String, u32, StaticInitialiser),
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -239,7 +239,7 @@ pub struct ConvertContext {
     is_mac: bool,
     is_linux: bool,
     symbols: HashMap<String, SymbolInfo>,
-    constants: HashMap<String, (u32, StaticInitial)>,
+    constants: HashMap<String, (u32, StaticInitialiser)>,
     num_labels: u32,
 }
 

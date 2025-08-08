@@ -8,47 +8,12 @@ use crate::compiler::{
         Destination,
     },
     parser::{BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, UnaryOperatorNode},
-    types::{Constant, InitialValue, OrdinalStatic, StaticInitial, StorageInfo, SymbolInfo, Type},
+    types::{
+        ComparableStatic, Constant, InitialValue, StaticInitialiser, StorageInfo, SymbolInfo, Type,
+    },
 };
 
-use super::{
-    get_double, get_typed_constant, new_temp_variable, Convert, ConvertContext, ConvertEvaluate,
-};
-
-impl Convert for Vec<ExpressionNode> {
-    type Output = (Vec<BirdsInstructionNode>, Vec<Destination>);
-
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
-        let results: Vec<(Vec<BirdsInstructionNode>, Destination)> =
-            process_results(self.into_iter().map(|a| a.convert(context)), |iter| {
-                iter.collect()
-            })?;
-
-        let values = results.iter().map(|a| a.1.clone()).collect();
-        let instructions = results.into_iter().flat_map(|a| a.0).collect();
-
-        Ok((instructions, values))
-    }
-}
-
-impl ConvertEvaluate for Vec<ExpressionNode> {
-    type Output = (Vec<BirdsInstructionNode>, Vec<BirdsValueNode>);
-    fn convert_and_evaluate(
-        self,
-        context: &mut ConvertContext,
-    ) -> Result<Self::Output, Box<dyn Error>> {
-        let results: Vec<(Vec<BirdsInstructionNode>, BirdsValueNode)> = process_results(
-            self.into_iter().map(|a| a.convert_and_evaluate(context)),
-            |iter| iter.collect(),
-        )?;
-
-        let values = results.iter().map(|a| a.1.clone()).collect();
-        let instructions = results.into_iter().flat_map(|a| a.0).collect();
-
-        Ok((instructions, values))
-    }
-}
-
+use super::{new_temp_variable, Convert, ConvertContext, ConvertEvaluate};
 impl Convert for ExpressionNode {
     // outputs a list of instructions, and the location of the output of the instructions.
     type Output = (Vec<BirdsInstructionNode>, Destination);
@@ -93,7 +58,10 @@ impl Convert for ExpressionNode {
                     };
                     instructions.push(BirdsInstructionNode::AddPointer(
                         evaluated_src.clone(),
-                        get_typed_constant(constant, &Type::Pointer(t.clone())),
+                        BirdsValueNode::Constant(Constant::get_typed(
+                            constant,
+                            &Type::Pointer(t.clone()),
+                        )),
                         t.get_size(),
                         new_dst.clone(),
                     ));
@@ -107,14 +75,14 @@ impl Convert for ExpressionNode {
                         instructions.push(BirdsInstructionNode::Binary(
                             bird_op,
                             evaluated_src.clone(),
-                            get_double(1.),
+                            BirdsValueNode::Constant(Constant::get_double(1.)),
                             new_dst.clone(),
                         ));
                     } else {
                         instructions.push(BirdsInstructionNode::Binary(
                             bird_op,
                             evaluated_src.clone(),
-                            get_typed_constant(1, &new_dst_type),
+                            BirdsValueNode::Constant(Constant::get_typed(1, &new_dst_type)),
                             new_dst.clone(),
                         ));
                     }
@@ -153,7 +121,10 @@ impl Convert for ExpressionNode {
                     };
                     instructions.push(BirdsInstructionNode::AddPointer(
                         new_dst.clone(),
-                        get_typed_constant(constant, &Type::Pointer(t.clone())),
+                        BirdsValueNode::Constant(Constant::get_typed(
+                            constant,
+                            &Type::Pointer(t.clone()),
+                        )),
                         t.get_size(),
                         evaluated_src.clone(),
                     ));
@@ -167,14 +138,14 @@ impl Convert for ExpressionNode {
                         instructions.push(BirdsInstructionNode::Binary(
                             bird_op,
                             new_dst.clone(),
-                            get_double(1.),
+                            BirdsValueNode::Constant(Constant::get_double(1.)),
                             evaluated_src.clone(),
                         ));
                     } else {
                         instructions.push(BirdsInstructionNode::Binary(
                             bird_op,
                             new_dst.clone(),
-                            get_typed_constant(1, &new_dst_type),
+                            BirdsValueNode::Constant(Constant::get_typed(1, &new_dst_type)),
                             evaluated_src.clone(),
                         ));
                     }
@@ -338,16 +309,70 @@ impl Convert for ExpressionNode {
             ExpressionWithoutType::Binary(op, left, right)
                 if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) =>
             {
-                let new_dst = new_temp_variable(&Type::Integer, context);
-                let instructions = ExpressionNode::convert_and_or(
-                    op,
-                    left.convert_and_evaluate(context)?,
-                    right.convert_and_evaluate(context)?,
-                    new_dst.clone(),
-                    context,
-                )?;
+                let dst = new_temp_variable(&Type::Integer, context);
 
-                Ok((instructions, new_dst.into()))
+                let (mut instructions, new_left) = left.convert_and_evaluate(context)?;
+                let (mut instructions_from_right, new_right) =
+                    right.convert_and_evaluate(context)?;
+                context.last_end_label_number += 1;
+                let end_label_name = format!("end_{}", context.last_end_label_number);
+
+                context.last_false_label_number += 1;
+                let false_label_name = format!("false_{}", context.last_false_label_number);
+
+                context.last_true_label_number += 1;
+                let true_label_name = format!("true_{}", context.last_true_label_number);
+                match op {
+                    BinaryOperatorNode::Or => {
+                        instructions.push(BirdsInstructionNode::JumpNotZero(
+                            new_left,
+                            true_label_name.clone(),
+                        ));
+
+                        instructions.append(&mut instructions_from_right);
+
+                        instructions.append(&mut vec![
+                            BirdsInstructionNode::JumpNotZero(new_right, true_label_name.clone()),
+                            BirdsInstructionNode::Copy(
+                                BirdsValueNode::Constant(Constant::Integer(0)),
+                                dst.clone(),
+                            ),
+                            BirdsInstructionNode::Jump(end_label_name.clone()),
+                            BirdsInstructionNode::Label(true_label_name),
+                            BirdsInstructionNode::Copy(
+                                BirdsValueNode::Constant(Constant::Integer(1)),
+                                dst.clone(),
+                            ),
+                            BirdsInstructionNode::Label(end_label_name),
+                        ]);
+                    }
+                    BinaryOperatorNode::And => {
+                        instructions.push(BirdsInstructionNode::JumpZero(
+                            new_left,
+                            false_label_name.clone(),
+                        ));
+
+                        instructions.append(&mut instructions_from_right);
+
+                        instructions.append(&mut vec![
+                            BirdsInstructionNode::JumpZero(new_right, false_label_name.clone()),
+                            BirdsInstructionNode::Copy(
+                                BirdsValueNode::Constant(Constant::Integer(1)),
+                                dst.clone(),
+                            ),
+                            BirdsInstructionNode::Jump(end_label_name.clone()),
+                            BirdsInstructionNode::Label(false_label_name),
+                            BirdsInstructionNode::Copy(
+                                BirdsValueNode::Constant(Constant::Integer(0)),
+                                dst.clone(),
+                            ),
+                            BirdsInstructionNode::Label(end_label_name),
+                        ]);
+                    }
+                    _ => panic!("Unexpected binary operator found: {:?}", op),
+                }
+
+                Ok((instructions, dst.into()))
             }
             ExpressionWithoutType::Binary(op, left, right) => {
                 let left_type = left.1.clone().unwrap();
@@ -426,7 +451,10 @@ impl Convert for ExpressionNode {
                         instructions.push(BirdsInstructionNode::Binary(
                             BirdsBinaryOperatorNode::Divide,
                             diff,
-                            get_typed_constant(left_t.get_size().into(), &Type::Long),
+                            BirdsValueNode::Constant(Constant::get_typed(
+                                left_t.get_size().into(),
+                                &Type::Long,
+                            )),
                             new_dst.clone(),
                         ));
 
@@ -581,8 +609,8 @@ impl Convert for ExpressionNode {
                         symbol_type: self.1.unwrap(),
                         // null terminator has not been appended yet, this happens later
                         storage: StorageInfo::Static(
-                            InitialValue::Initial(vec![StaticInitial::Ordinal(
-                                OrdinalStatic::String(s, true),
+                            InitialValue::Initial(vec![StaticInitialiser::Ordinal(
+                                ComparableStatic::String(s, true),
                             )]),
                             false,
                         ),
@@ -669,74 +697,19 @@ impl ExpressionWithoutType {
     }
 }
 
-impl ExpressionNode {
-    fn convert_and_or(
-        op: BinaryOperatorNode,
-        left: (Vec<BirdsInstructionNode>, BirdsValueNode),
-        right: (Vec<BirdsInstructionNode>, BirdsValueNode),
-        dst: BirdsValueNode,
-        context: &mut ConvertContext,
-    ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
-        let (mut instructions, new_left) = left;
-        let (mut instructions_from_right, new_right) = right;
-        context.last_end_label_number += 1;
-        let end_label_name = format!("end_{}", context.last_end_label_number);
+impl Convert for Vec<ExpressionNode> {
+    type Output = (Vec<BirdsInstructionNode>, Vec<Destination>);
 
-        context.last_false_label_number += 1;
-        let false_label_name = format!("false_{}", context.last_false_label_number);
+    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
+        let results: Vec<(Vec<BirdsInstructionNode>, Destination)> =
+            process_results(self.into_iter().map(|a| a.convert(context)), |iter| {
+                iter.collect()
+            })?;
 
-        context.last_true_label_number += 1;
-        let true_label_name = format!("true_{}", context.last_true_label_number);
-        match op {
-            BinaryOperatorNode::Or => {
-                instructions.push(BirdsInstructionNode::JumpNotZero(
-                    new_left,
-                    true_label_name.clone(),
-                ));
+        let values = results.iter().map(|a| a.1.clone()).collect();
+        let instructions = results.into_iter().flat_map(|a| a.0).collect();
 
-                instructions.append(&mut instructions_from_right);
-
-                instructions.append(&mut vec![
-                    BirdsInstructionNode::JumpNotZero(new_right, true_label_name.clone()),
-                    BirdsInstructionNode::Copy(
-                        BirdsValueNode::Constant(Constant::Integer(0)),
-                        dst.clone(),
-                    ),
-                    BirdsInstructionNode::Jump(end_label_name.clone()),
-                    BirdsInstructionNode::Label(true_label_name),
-                    BirdsInstructionNode::Copy(
-                        BirdsValueNode::Constant(Constant::Integer(1)),
-                        dst.clone(),
-                    ),
-                    BirdsInstructionNode::Label(end_label_name),
-                ]);
-            }
-            BinaryOperatorNode::And => {
-                instructions.push(BirdsInstructionNode::JumpZero(
-                    new_left,
-                    false_label_name.clone(),
-                ));
-
-                instructions.append(&mut instructions_from_right);
-
-                instructions.append(&mut vec![
-                    BirdsInstructionNode::JumpZero(new_right, false_label_name.clone()),
-                    BirdsInstructionNode::Copy(
-                        BirdsValueNode::Constant(Constant::Integer(1)),
-                        dst.clone(),
-                    ),
-                    BirdsInstructionNode::Jump(end_label_name.clone()),
-                    BirdsInstructionNode::Label(false_label_name),
-                    BirdsInstructionNode::Copy(
-                        BirdsValueNode::Constant(Constant::Integer(0)),
-                        dst.clone(),
-                    ),
-                    BirdsInstructionNode::Label(end_label_name),
-                ]);
-            }
-            _ => panic!("Unexpected binary operator found: {:?}", op),
-        }
-        Ok(instructions)
+        Ok((instructions, values))
     }
 }
 
@@ -753,5 +726,23 @@ impl ConvertEvaluate for ExpressionNode {
         instructions.append(&mut deref_instructions);
 
         Ok((instructions, new_src))
+    }
+}
+
+impl ConvertEvaluate for Vec<ExpressionNode> {
+    type Output = (Vec<BirdsInstructionNode>, Vec<BirdsValueNode>);
+    fn convert_and_evaluate(
+        self,
+        context: &mut ConvertContext,
+    ) -> Result<Self::Output, Box<dyn Error>> {
+        let results: Vec<(Vec<BirdsInstructionNode>, BirdsValueNode)> = process_results(
+            self.into_iter().map(|a| a.convert_and_evaluate(context)),
+            |iter| iter.collect(),
+        )?;
+
+        let values = results.iter().map(|a| a.1.clone()).collect();
+        let instructions = results.into_iter().flat_map(|a| a.0).collect();
+
+        Ok((instructions, values))
     }
 }

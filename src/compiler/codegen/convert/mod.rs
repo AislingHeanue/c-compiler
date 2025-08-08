@@ -3,7 +3,7 @@ use crate::compiler::{
         BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsProgramNode, BirdsTopLevel,
         BirdsUnaryOperatorNode, BirdsValueNode,
     },
-    types::{Constant, StaticInitial, Type},
+    types::{Constant, StaticInitialiser, Type},
 };
 use itertools::{process_results, Itertools};
 use std::error::Error;
@@ -16,7 +16,7 @@ use super::{
 
 fn create_static_constant(
     alignment: u32,
-    value: StaticInitial,
+    value: StaticInitialiser,
     context: &mut ConvertContext,
 ) -> Operand {
     if let Some(key) = context
@@ -305,7 +305,7 @@ impl Convert for Instruction {
                     if src_type == AssemblyType::Double {
                         let zero = create_static_constant(
                             src_type.get_alignment(),
-                            StaticInitial::Double(0.),
+                            StaticInitialiser::Double(0.),
                             context,
                         );
                         Instruction::Cmp(src_type, zero, Operand::convert(src, context)?)
@@ -330,7 +330,7 @@ impl Convert for Instruction {
                 let src_type = AssemblyType::infer(&src, context)?.0;
                 if src_type == AssemblyType::Double && op == BirdsUnaryOperatorNode::Negate {
                     let negative_zero =
-                        create_static_constant(16, StaticInitial::Double(-0.0), context);
+                        create_static_constant(16, StaticInitialiser::Double(-0.0), context);
                     vec![
                         Instruction::Mov(
                             src_type,
@@ -726,7 +726,7 @@ impl Convert for Instruction {
                         let i_max_value = i64::MAX as u64 + 1;
                         let i_max = create_static_constant(
                             8,
-                            StaticInitial::Double(i_max_value as f64),
+                            StaticInitialiser::Double(i_max_value as f64),
                             context,
                         );
 
@@ -1051,9 +1051,11 @@ impl Convert for Operand {
             BirdsValueNode::Constant(Constant::UnsignedChar(c)) => {
                 Ok(Operand::Imm(ImmediateValue::Unsigned(c as u64)))
             }
-            BirdsValueNode::Constant(Constant::Double(c)) => {
-                Ok(create_static_constant(8, StaticInitial::Double(c), context))
-            }
+            BirdsValueNode::Constant(Constant::Double(c)) => Ok(create_static_constant(
+                8,
+                StaticInitialiser::Double(c),
+                context,
+            )),
             BirdsValueNode::Var(s) => {
                 let var_type = &context.symbols.get(&s).unwrap().symbol_type;
                 if var_type.is_scalar() {

@@ -3,7 +3,7 @@ use ryu::Buffer;
 
 use crate::compiler::{
     codegen::AssemblySymbolInfo,
-    types::{OrdinalStatic, StaticInitial},
+    types::{ComparableStatic, StaticInitialiser},
 };
 
 use super::{
@@ -137,7 +137,10 @@ impl CodeDisplay for TopLevel {
 
                 // only write to data if all initialisers are ZeroBytes values
                 let section = if initialisers.iter().any(|init| {
-                    !matches!(init, StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(_)))
+                    !matches!(
+                        init,
+                        StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(_))
+                    )
                 }) {
                     ".data".to_string()
                 } else {
@@ -193,7 +196,10 @@ impl CodeDisplay for TopLevel {
                 };
 
                 let section = if context.is_mac {
-                    if matches!(init, StaticInitial::Ordinal(OrdinalStatic::String(_, _))) {
+                    if matches!(
+                        init,
+                        StaticInitialiser::Ordinal(ComparableStatic::String(_, _))
+                    ) {
                         ".cstring"
                     } else {
                         match alignment {
@@ -234,38 +240,40 @@ impl CodeDisplay for TopLevel {
     }
 }
 
-impl CodeDisplay for StaticInitial {
+impl CodeDisplay for StaticInitialiser {
     fn show(&self, context: &mut DisplayContext) -> String {
         let s = match self {
-            StaticInitial::Ordinal(OrdinalStatic::Integer(0))
-            | StaticInitial::Ordinal(OrdinalStatic::Long(0))
-            | StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(0))
-            | StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(0)) => unreachable!(),
-            StaticInitial::Ordinal(OrdinalStatic::Integer(i)) => format!(".long {}", i),
-            StaticInitial::Ordinal(OrdinalStatic::Long(l)) => format!(".quad {}", l),
-            StaticInitial::Ordinal(OrdinalStatic::UnsignedInteger(i)) => format!(".long {}", i),
-            StaticInitial::Ordinal(OrdinalStatic::UnsignedLong(l)) => format!(".quad {}", l),
-            StaticInitial::Ordinal(OrdinalStatic::Char(l)) => {
+            StaticInitialiser::Ordinal(ComparableStatic::Integer(0))
+            | StaticInitialiser::Ordinal(ComparableStatic::Long(0))
+            | StaticInitialiser::Ordinal(ComparableStatic::UnsignedInteger(0))
+            | StaticInitialiser::Ordinal(ComparableStatic::UnsignedLong(0)) => unreachable!(),
+            StaticInitialiser::Ordinal(ComparableStatic::Integer(i)) => format!(".long {}", i),
+            StaticInitialiser::Ordinal(ComparableStatic::Long(l)) => format!(".quad {}", l),
+            StaticInitialiser::Ordinal(ComparableStatic::UnsignedInteger(i)) => {
+                format!(".long {}", i)
+            }
+            StaticInitialiser::Ordinal(ComparableStatic::UnsignedLong(l)) => format!(".quad {}", l),
+            StaticInitialiser::Ordinal(ComparableStatic::Char(l)) => {
                 format!(".byte {}", *l as u8)
             }
             // converting unsigned char to signed char here (only to convert it back in a second)
-            StaticInitial::Ordinal(OrdinalStatic::UnsignedChar(l)) => {
+            StaticInitialiser::Ordinal(ComparableStatic::UnsignedChar(l)) => {
                 format!(".byte {}", l)
             }
-            StaticInitial::Ordinal(OrdinalStatic::ZeroBytes(n)) => format!(".zero {}", n),
-            StaticInitial::Ordinal(OrdinalStatic::String(l, term)) => {
+            StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(n)) => format!(".zero {}", n),
+            StaticInitialiser::Ordinal(ComparableStatic::String(l, term)) => {
                 if *term {
                     format!(".asciz \"{}\"", l.iter().map(|f| f.show(context)).join(""))
                 } else {
                     format!(".ascii \"{}\"", l.iter().map(|f| f.show(context)).join(""))
                 }
             }
-            StaticInitial::Ordinal(OrdinalStatic::Pointer(l)) => format!(".quad {}", l),
+            StaticInitialiser::Ordinal(ComparableStatic::Pointer(l)) => format!(".quad {}", l),
             // print 17 digits of precision so that when the linker re-converts this to a real
             // double value, this has enough precision to guarantee the original value.
             // no special case for zero values here, so that we can avoid confusion about
             // 0.0 vs -0.0
-            StaticInitial::Double(d) => {
+            StaticInitialiser::Double(d) => {
                 // use the actual bits of the f64 value in the assembly
                 // more precise (if needed), but less nice to look at/debug
                 // let as_number = d.to_bits();

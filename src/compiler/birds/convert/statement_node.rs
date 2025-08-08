@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::compiler::{
     birds::{BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsValueNode},
-    parser::{StatementNode, SwitchMapKey},
+    parser::{ForInitialiserNode, StatementNode, SwitchMapKey},
     types::Type,
 };
 
@@ -140,7 +140,13 @@ impl Convert for StatementNode {
                 let this_loop_label = label.ok_or::<Box<dyn Error>>("For has no label".into())?;
 
                 //init
-                let mut instructions = init.convert(context)?;
+                let mut instructions = match init {
+                    ForInitialiserNode::Declaration(d) => d.convert(context)?,
+                    ForInitialiserNode::Expression(Some(expression)) => {
+                        expression.convert(context)?.0
+                    }
+                    ForInitialiserNode::Expression(None) => Vec::new(),
+                };
 
                 //cond
                 instructions.push(BirdsInstructionNode::Label(format!(

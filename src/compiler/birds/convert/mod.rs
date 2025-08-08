@@ -4,8 +4,8 @@ use std::error::Error;
 use itertools::process_results;
 
 use crate::compiler::{
-    parser::{BinaryOperatorNode, Block, BlockItemNode, ForInitialiserNode, ProgramNode},
-    types::{Constant, StorageInfo, SymbolInfo, Type},
+    parser::{BinaryOperatorNode, Block, BlockItemNode, ProgramNode},
+    types::{StorageInfo, SymbolInfo, Type},
 };
 
 use super::{
@@ -14,9 +14,27 @@ use super::{
 
 mod declaration;
 mod expression_node;
-mod initialiser_node;
 mod program_node;
 mod statement_node;
+
+pub fn do_birds(
+    parsed: ProgramNode,
+    symbols: HashMap<String, SymbolInfo>,
+) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
+    let mut context = ConvertContext {
+        last_end_label_number: 0,
+        last_else_label_number: 0,
+        last_false_label_number: 0,
+        last_stack_number: 0,
+        last_true_label_number: 0,
+        current_initialiser_offset: 0,
+        num_block_strings: 0,
+        symbols,
+    };
+
+    let result = parsed.convert(&mut context)?;
+    Ok((result, context.symbols))
+}
 
 trait Convert
 where
@@ -85,25 +103,6 @@ where
     }
 }
 
-pub fn do_birds(
-    parsed: ProgramNode,
-    symbols: HashMap<String, SymbolInfo>,
-) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
-    let mut context = ConvertContext {
-        last_end_label_number: 0,
-        last_else_label_number: 0,
-        last_false_label_number: 0,
-        last_stack_number: 0,
-        last_true_label_number: 0,
-        current_initialiser_offset: 0,
-        num_block_strings: 0,
-        symbols,
-    };
-
-    let result = parsed.convert(&mut context)?;
-    Ok((result, context.symbols))
-}
-
 fn new_temp_variable(type_to_store: &Type, context: &mut ConvertContext) -> BirdsValueNode {
     context.last_stack_number += 1;
     let new_name = format!("stack.{}", context.last_stack_number);
@@ -118,34 +117,6 @@ fn new_temp_variable(type_to_store: &Type, context: &mut ConvertContext) -> Bird
     BirdsValueNode::Var(new_name)
 }
 
-// purely-for-utility function for getting constants (almost always 0 or 1) in the appropriate type
-fn get_typed_constant(value: i64, target: &Type) -> BirdsValueNode {
-    match target {
-        Type::Integer => BirdsValueNode::Constant(Constant::Integer(value.try_into().unwrap())),
-        Type::Long => BirdsValueNode::Constant(Constant::Long(value)),
-        Type::UnsignedInteger => {
-            BirdsValueNode::Constant(Constant::UnsignedInteger(value.try_into().unwrap()))
-        }
-        Type::UnsignedLong => {
-            BirdsValueNode::Constant(Constant::UnsignedLong(value.try_into().unwrap()))
-        }
-        // adding a constant to a pointer is only reasonable if the second operand is Long
-        Type::Pointer(_) => BirdsValueNode::Constant(Constant::Long(value)),
-        Type::Array(..) => unreachable!(),
-        Type::Function(_, _) => unreachable!(),
-        Type::Char => BirdsValueNode::Constant(Constant::Char(value.try_into().unwrap())),
-        Type::SignedChar => BirdsValueNode::Constant(Constant::Char(value.try_into().unwrap())),
-        Type::UnsignedChar => {
-            BirdsValueNode::Constant(Constant::UnsignedChar(value.try_into().unwrap()))
-        }
-        Type::Double => panic!("Can't use get_typed_constant to generate a double"),
-    }
-}
-
-fn get_double(value: f64) -> BirdsValueNode {
-    BirdsValueNode::Constant(Constant::Double(value))
-}
-
 impl Convert for Block {
     type Output = Vec<BirdsInstructionNode>;
 
@@ -157,18 +128,6 @@ impl Convert for Block {
             }),
             |iter| iter.flatten().collect(),
         )
-    }
-}
-
-impl Convert for ForInitialiserNode {
-    type Output = Vec<BirdsInstructionNode>;
-
-    fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
-        match self {
-            ForInitialiserNode::Declaration(d) => Ok(d.convert(context)?),
-            ForInitialiserNode::Expression(Some(expression)) => Ok(expression.convert(context)?.0),
-            ForInitialiserNode::Expression(None) => Ok(Vec::new()),
-        }
     }
 }
 
