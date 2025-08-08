@@ -1,5 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, error::Error, mem::swap};
 
+use validate::{Validate, ValidateContext, VALIDATION_PASSES};
+
 use super::{
     birds::BirdsProgramNode,
     types::{StaticInitialiser, StorageInfo, SymbolInfo, Type},
@@ -192,7 +194,7 @@ enum UnaryOperator {
 }
 
 #[derive(Clone, Debug)]
-enum BinaryOperator {
+pub enum BinaryOperator {
     Add,
     Sub,
     Mult,
@@ -207,7 +209,7 @@ enum BinaryOperator {
 }
 
 #[derive(Debug, PartialEq)]
-enum ConditionCode {
+pub enum ConditionCode {
     E,
     Ne,
     G,
@@ -306,15 +308,7 @@ pub fn codegen(
         }
     }
 
-    let mut validate_context = ValidateContext {
-        symbols: assembly_map,
-        pass: None,
-        current_stack_size: 0,
-        current_stack_locations: HashMap::new(),
-        stack_sizes: HashMap::new(),
-        current_function_name: None,
-        num_labels: context.num_labels,
-    };
+    let mut validate_context = ValidateContext::new(assembly_map, &context);
 
     for pass in VALIDATION_PASSES.iter() {
         validate_context.pass = Some(pass.clone());
@@ -335,48 +329,4 @@ pub fn codegen(
     }));
 
     Ok(converted)
-}
-
-trait Validate
-where
-    Self: Sized,
-{
-    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
-}
-
-static VALIDATION_PASSES: [ValidationPass; 8] = [
-    // always first
-    ValidationPass::ReplaceMockRegisters,
-    // always second, sets stack sizes for each function based on the previous pass.
-    ValidationPass::AllocateFunctionStack,
-    ValidationPass::CheckNaNComparisons,
-    ValidationPass::FixShiftOperatorRegister,
-    ValidationPass::RewriteMovZeroExtend,
-    ValidationPass::FixBadSrc,
-    ValidationPass::FixBadDst,
-    // moving the double memory access instruction lower because many other passes may fix the
-    // issue that this addresses, saving a Mov instruction.
-    ValidationPass::FixTwoMemoryAccesses,
-];
-
-#[derive(Clone, Debug)]
-pub enum ValidationPass {
-    ReplaceMockRegisters,
-    AllocateFunctionStack,
-    CheckNaNComparisons,
-    FixShiftOperatorRegister,
-    RewriteMovZeroExtend,
-    FixBadSrc,
-    FixBadDst,
-    FixTwoMemoryAccesses,
-}
-
-struct ValidateContext {
-    symbols: HashMap<String, AssemblySymbolInfo>,
-    pass: Option<ValidationPass>,
-    current_stack_size: u32,
-    current_stack_locations: HashMap<String, i32>,
-    stack_sizes: HashMap<String, u32>,
-    current_function_name: Option<String>,
-    num_labels: u32,
 }

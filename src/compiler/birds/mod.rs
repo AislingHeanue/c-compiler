@@ -68,6 +68,23 @@ pub enum BirdsValueNode {
     Var(String),
 }
 
+impl BirdsValueNode {
+    pub fn get_constant_value(&self) -> Option<i32> {
+        match self {
+            BirdsValueNode::Constant(constant) => match constant {
+                Constant::Integer(c) => Some(*c),
+                Constant::Long(c) => Some((*c).try_into().unwrap()),
+                Constant::UnsignedInteger(c) => Some((*c).try_into().unwrap()),
+                Constant::UnsignedLong(c) => Some((*c).try_into().unwrap()),
+                Constant::Double(_) => None,
+                Constant::Char(c) => Some((*c).into()),
+                Constant::UnsignedChar(c) => Some((*c).into()),
+            },
+            BirdsValueNode::Var(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum BirdsUnaryOperatorNode {
     Complement,
