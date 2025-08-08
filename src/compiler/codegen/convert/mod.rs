@@ -56,29 +56,23 @@ fn classify_function_args(
         let t = AssemblyType::infer(&v, context)?.0;
         if t == AssemblyType::Double {
             if args.double.len() < 8 {
-                args.double.push(Operand::convert(v, context)?);
+                args.double.push(v.convert(context)?);
             } else {
-                args.stack.push((Operand::convert(v, context)?, t));
+                args.stack.push((v.convert(context)?, t));
             }
         } else if args.integer.len() < 6 {
-            args.integer.push((Operand::convert(v, context)?, t));
+            args.integer.push((v.convert(context)?, t));
         } else {
-            args.stack.push((Operand::convert(v, context)?, t));
+            args.stack.push((v.convert(context)?, t));
         }
     }
 
     Ok(args)
 }
 
-impl Convert for Program {
-    type Input = BirdsProgramNode;
-    type Output = Self;
-
-    fn convert(
-        parsed: BirdsProgramNode,
-        context: &mut ConvertContext,
-    ) -> Result<Self, Box<dyn Error>> {
-        let mut body = Vec::<TopLevel>::convert(parsed.body, context)?;
+impl Convert<Program> for BirdsProgramNode {
+    fn convert(self, context: &mut ConvertContext) -> Result<Program, Box<dyn Error>> {
+        let mut body = self.body.convert(context)?;
 
         for (name, (align, value)) in context.constants.iter() {
             body.push(TopLevel::StaticConstant(
@@ -95,12 +89,9 @@ impl Convert for Program {
     }
 }
 
-impl Convert for AssemblyType {
-    type Input = Type;
-    type Output = Self;
-
-    fn convert(parsed: Type, _context: &mut ConvertContext) -> Result<Self, Box<dyn Error>> {
-        match parsed {
+impl Convert<AssemblyType> for Type {
+    fn convert(self, _context: &mut ConvertContext) -> Result<AssemblyType, Box<dyn Error>> {
+        match self {
             Type::Integer => Ok(AssemblyType::Longword),
             Type::Long => Ok(AssemblyType::Quadword),
             Type::UnsignedInteger => Ok(AssemblyType::Longword),
@@ -108,7 +99,7 @@ impl Convert for AssemblyType {
             Type::Double => Ok(AssemblyType::Double),
             Type::Pointer(_) => Ok(AssemblyType::Quadword),
             Type::Array(t, size) => {
-                let assembly_t = AssemblyType::convert(*t, _context)?;
+                let assembly_t = (*t).convert(_context)?;
                 let size = assembly_t.get_size() * size as u32;
                 let alignment = if size < 16 {
                     assembly_t.get_alignment()
@@ -142,7 +133,7 @@ impl AssemblyType {
             BirdsValueNode::Var(name) => {
                 let var_type = context.symbols.get(name).unwrap().symbol_type.clone();
                 let signed = var_type.is_signed();
-                (AssemblyType::convert(var_type, context)?, signed)
+                (var_type.convert(context)?, signed)
             }
         })
     }
@@ -168,56 +159,39 @@ impl AssemblyType {
     }
 }
 
-impl<U, V> Convert for Vec<U>
+impl<U, V> Convert<Vec<U>> for Vec<V>
 where
-    U: Convert<Input = V, Output = U>,
+    V: Convert<U>,
 {
-    type Input = Vec<V>;
-    type Output = Self;
-
-    fn convert(
-        parsed: Self::Input,
-        context: &mut ConvertContext,
-    ) -> Result<Self::Output, Box<dyn Error>> {
+    fn convert(self, context: &mut ConvertContext) -> Result<Vec<U>, Box<dyn Error>> {
         process_results(
-            parsed
-                .into_iter()
-                .map(|function| U::convert(function, context)),
+            self.into_iter().map(|function| function.convert(context)),
             |iter| iter.collect(),
         )
     }
 }
 
-impl Convert for TopLevel {
-    type Input = BirdsTopLevel;
-    type Output = Self;
-
-    fn convert(
-        parsed: Self::Input,
-        context: &mut ConvertContext,
-    ) -> Result<Self::Output, Box<dyn Error>> {
-        match parsed {
-            BirdsTopLevel::Function(..) => Self::convert_function(parsed, context),
+impl Convert<TopLevel> for BirdsTopLevel {
+    fn convert(self, context: &mut ConvertContext) -> Result<TopLevel, Box<dyn Error>> {
+        match self {
+            BirdsTopLevel::Function(..) => self.convert_function(context),
             BirdsTopLevel::StaticVariable(t, name, init, global) => Ok(TopLevel::StaticVariable(
                 name,
                 global,
-                AssemblyType::convert(t, context)?.get_alignment(),
+                t.convert(context)?.get_alignment(),
                 init,
             )),
             BirdsTopLevel::StaticConstant(t, name, init) => Ok(TopLevel::StaticConstant(
                 name,
-                AssemblyType::convert(t, context)?.get_alignment(),
+                t.convert(context)?.get_alignment(),
                 init,
             )),
         }
     }
 }
-impl TopLevel {
-    fn convert_function(
-        parsed: BirdsTopLevel,
-        context: &mut ConvertContext,
-    ) -> Result<TopLevel, Box<dyn Error>> {
-        let (name, params, parsed_instructions, global) = match parsed {
+impl BirdsTopLevel {
+    fn convert_function(self, context: &mut ConvertContext) -> Result<TopLevel, Box<dyn Error>> {
+        let (name, params, parsed_instructions, global) = match self {
             BirdsTopLevel::Function(a, b, c, d) => (a, b, c, d),
             _ => unreachable!(),
         };
@@ -259,7 +233,7 @@ impl TopLevel {
         instructions.append(&mut process_results(
             parsed_instructions
                 .into_iter()
-                .map(|instruction| Instruction::convert(instruction, context)),
+                .map(|instruction| instruction.convert(context)),
             |iter| iter.flatten().collect(),
         )?);
 
@@ -267,22 +241,16 @@ impl TopLevel {
     }
 }
 
-impl Convert for Instruction {
-    type Input = BirdsInstructionNode;
-    type Output = Vec<Instruction>;
-
-    fn convert(
-        input: BirdsInstructionNode,
-        context: &mut ConvertContext,
-    ) -> Result<Vec<Instruction>, Box<dyn Error>> {
-        Ok(match input {
+impl Convert<Vec<Instruction>> for BirdsInstructionNode {
+    fn convert(self, context: &mut ConvertContext) -> Result<Vec<Instruction>, Box<dyn Error>> {
+        Ok(match self {
             BirdsInstructionNode::Return(src) => {
                 let this_type = AssemblyType::infer(&src, context)?.0;
                 if this_type == AssemblyType::Double {
                     vec![
                         Instruction::Mov(
                             this_type,
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                             Operand::Reg(Register::XMM0),
                         ),
                         Instruction::Ret,
@@ -291,7 +259,7 @@ impl Convert for Instruction {
                     vec![
                         Instruction::Mov(
                             this_type,
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                             Operand::Reg(Register::AX),
                         ),
                         Instruction::Ret,
@@ -308,12 +276,12 @@ impl Convert for Instruction {
                             StaticInitialiser::Double(0.),
                             context,
                         );
-                        Instruction::Cmp(src_type, zero, Operand::convert(src, context)?)
+                        Instruction::Cmp(src_type, zero, src.convert(context)?)
                     } else {
                         Instruction::Cmp(
                             src_type,
                             Operand::Imm(ImmediateValue::Signed(0)),
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                         )
                     },
                     // Not returns 1 is src is zero, and 0 otherwise.
@@ -321,9 +289,9 @@ impl Convert for Instruction {
                     Instruction::Mov(
                         dst_type,
                         Operand::Imm(ImmediateValue::Signed(0)),
-                        Operand::convert(dst.clone(), context)?,
+                        dst.clone().convert(context)?,
                     ),
-                    Instruction::SetCondition(ConditionCode::E, Operand::convert(dst, context)?),
+                    Instruction::SetCondition(ConditionCode::E, dst.convert(context)?),
                 ]
             }
             BirdsInstructionNode::Unary(op, src, dst) => {
@@ -334,28 +302,24 @@ impl Convert for Instruction {
                     vec![
                         Instruction::Mov(
                             src_type,
-                            Operand::convert(src, context)?,
-                            Operand::convert(dst.clone(), context)?,
+                            src.convert(context)?,
+                            dst.clone().convert(context)?,
                         ),
                         Instruction::Binary(
                             BinaryOperator::Xor,
                             src_type,
                             negative_zero,
-                            Operand::convert(dst, context)?,
+                            dst.convert(context)?,
                         ),
                     ]
                 } else {
                     vec![
                         Instruction::Mov(
                             src_type,
-                            Operand::convert(src, context)?,
-                            Operand::convert(dst.clone(), context)?,
+                            src.convert(context)?,
+                            dst.clone().convert(context)?,
                         ),
-                        Instruction::Unary(
-                            UnaryOperator::convert(op, context)?,
-                            src_type,
-                            Operand::convert(dst, context)?,
-                        ),
+                        Instruction::Unary(op.convert(context)?, src_type, dst.convert(context)?),
                     ]
                 }
             }
@@ -367,22 +331,22 @@ impl Convert for Instruction {
                     vec![
                         Instruction::Mov(
                             left_type,
-                            Operand::convert(left, context)?,
+                            left.convert(context)?,
                             Operand::Reg(Register::AX),
                         ),
                         Instruction::Cdq(left_type),
-                        Instruction::Idiv(left_type, Operand::convert(right, context)?),
+                        Instruction::Idiv(left_type, right.convert(context)?),
                         Instruction::Mov(
                             left_type,
                             Operand::Reg(Register::AX), // read quotient result from EAX
-                            Operand::convert(dst, context)?,
+                            dst.convert(context)?,
                         ),
                     ]
                 } else {
                     vec![
                         Instruction::Mov(
                             left_type,
-                            Operand::convert(left, context)?,
+                            left.convert(context)?,
                             Operand::Reg(Register::AX),
                         ),
                         // clear RDX with all zeros instead of whatever CDQ does.
@@ -391,11 +355,11 @@ impl Convert for Instruction {
                             Operand::Imm(ImmediateValue::Signed(0)),
                             Operand::Reg(Register::DX),
                         ),
-                        Instruction::Div(left_type, Operand::convert(right, context)?),
+                        Instruction::Div(left_type, right.convert(context)?),
                         Instruction::Mov(
                             left_type,
                             Operand::Reg(Register::AX), // read quotient result from EAX
-                            Operand::convert(dst, context)?,
+                            dst.convert(context)?,
                         ),
                     ]
                 }
@@ -406,22 +370,22 @@ impl Convert for Instruction {
                     vec![
                         Instruction::Mov(
                             left_type,
-                            Operand::convert(left, context)?,
+                            left.convert(context)?,
                             Operand::Reg(Register::AX),
                         ),
                         Instruction::Cdq(left_type),
-                        Instruction::Idiv(left_type, Operand::convert(right, context)?),
+                        Instruction::Idiv(left_type, right.convert(context)?),
                         Instruction::Mov(
                             left_type,
                             Operand::Reg(Register::DX), // read remainder result from EDX
-                            Operand::convert(dst, context)?,
+                            dst.convert(context)?,
                         ),
                     ]
                 } else {
                     vec![
                         Instruction::Mov(
                             left_type,
-                            Operand::convert(left, context)?,
+                            left.convert(context)?,
                             Operand::Reg(Register::AX),
                         ),
                         // clear RDX with all zeros instead of whatever CDQ does.
@@ -430,11 +394,11 @@ impl Convert for Instruction {
                             Operand::Imm(ImmediateValue::Signed(0)),
                             Operand::Reg(Register::DX),
                         ),
-                        Instruction::Div(left_type, Operand::convert(right, context)?),
+                        Instruction::Div(left_type, right.convert(context)?),
                         Instruction::Mov(
                             left_type,
                             Operand::Reg(Register::DX), // read remainder result from EDX
-                            Operand::convert(dst, context)?,
+                            dst.convert(context)?,
                         ),
                     ]
                 }
@@ -443,29 +407,22 @@ impl Convert for Instruction {
                 let (left_type, is_signed) = AssemblyType::infer(&left, context)?;
                 // use different condition codes if the expression type is unsigned
                 let instruction = if is_signed && left_type != AssemblyType::Double {
-                    Instruction::SetCondition(
-                        ConditionCode::convert(op, context)?,
-                        Operand::convert(dst.clone(), context)?,
-                    )
+                    Instruction::SetCondition(op.convert(context)?, dst.clone().convert(context)?)
                 } else {
                     Instruction::SetCondition(
-                        ConditionCode::convert_unsigned(op, context)?,
-                        Operand::convert(dst.clone(), context)?,
+                        op.convert_condition_unsigned(context)?,
+                        dst.clone().convert(context)?,
                     )
                 };
 
                 vec![
-                    Instruction::Cmp(
-                        left_type,
-                        Operand::convert(right, context)?,
-                        Operand::convert(left, context)?,
-                    ),
+                    Instruction::Cmp(left_type, right.convert(context)?, left.convert(context)?),
                     // zero out the destination (since SetCondition only affects the first byte).
                     Instruction::Mov(
                         // always returns an integer
                         AssemblyType::Longword,
                         Operand::Imm(ImmediateValue::Signed(0)),
-                        Operand::convert(dst, context)?,
+                        dst.convert(context)?,
                     ),
                     instruction,
                 ]
@@ -479,30 +436,30 @@ impl Convert for Instruction {
                 if left == dst {
                     vec![Instruction::Binary(
                         if is_signed {
-                            BinaryOperator::convert(op, context)?
+                            op.convert(context)?
                         } else {
-                            BinaryOperator::convert_unsigned(op, context)?
+                            op.convert_unsigned(context)?
                         },
                         left_type,
-                        Operand::convert(right, context)?,
-                        Operand::convert(dst, context)?,
+                        right.convert(context)?,
+                        dst.convert(context)?,
                     )]
                 } else {
                     vec![
                         Instruction::Mov(
                             left_type,
-                            Operand::convert(left, context)?,
-                            Operand::convert(dst.clone(), context)?,
+                            left.convert(context)?,
+                            dst.clone().convert(context)?,
                         ),
                         Instruction::Binary(
                             if is_signed {
-                                BinaryOperator::convert(op, context)?
+                                op.convert(context)?
                             } else {
-                                BinaryOperator::convert_unsigned(op, context)?
+                                op.convert_unsigned(context)?
                             },
                             left_type,
-                            Operand::convert(right, context)?,
-                            Operand::convert(dst, context)?,
+                            right.convert(context)?,
+                            dst.convert(context)?,
                         ),
                     ]
                 }
@@ -511,15 +468,15 @@ impl Convert for Instruction {
                 let src_type = AssemblyType::infer(&src, context)?.0;
                 vec![Instruction::Mov(
                     src_type,
-                    Operand::convert(src, context)?,
-                    Operand::convert(dst, context)?,
+                    src.convert(context)?,
+                    dst.convert(context)?,
                 )]
             }
             BirdsInstructionNode::CopyToOffset(src, dst, offset) => {
                 let t = AssemblyType::infer(&src, context)?.0;
                 vec![Instruction::Mov(
                     t,
-                    Operand::convert(src, context)?,
+                    src.convert(context)?,
                     Operand::MockMemory(dst, offset),
                 )]
             }
@@ -538,7 +495,7 @@ impl Convert for Instruction {
                         Instruction::Cmp(
                             src_type,
                             Operand::Reg(Register::XMM0),
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                         ),
                         Instruction::JmpCondition(ConditionCode::E, s),
                     ]
@@ -547,7 +504,7 @@ impl Convert for Instruction {
                         Instruction::Cmp(
                             src_type,
                             Operand::Imm(ImmediateValue::Signed(0)),
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                         ),
                         Instruction::JmpCondition(ConditionCode::E, s),
                     ]
@@ -567,7 +524,7 @@ impl Convert for Instruction {
                         Instruction::Cmp(
                             src_type,
                             Operand::Reg(Register::XMM0),
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                         ),
                         Instruction::JmpCondition(ConditionCode::Ne, s),
                     ]
@@ -576,7 +533,7 @@ impl Convert for Instruction {
                         Instruction::Cmp(
                             src_type,
                             Operand::Imm(ImmediateValue::Signed(0)),
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                         ),
                         Instruction::JmpCondition(ConditionCode::Ne, s),
                     ]
@@ -654,13 +611,13 @@ impl Convert for Instruction {
                     instructions.push(Instruction::Mov(
                         AssemblyType::Double,
                         Operand::Reg(Register::XMM0),
-                        Operand::convert(dst.clone(), context)?,
+                        dst.clone().convert(context)?,
                     ));
                 } else {
                     instructions.push(Instruction::Mov(
-                        AssemblyType::convert(*return_type, context)?,
+                        (*return_type).convert(context)?,
                         Operand::Reg(Register::AX),
-                        Operand::convert(dst.clone(), context)?,
+                        dst.clone().convert(context)?,
                     ));
                 }
 
@@ -672,16 +629,16 @@ impl Convert for Instruction {
                 vec![Instruction::Movsx(
                     src_type,
                     dst_type,
-                    Operand::convert(src, context)?,
-                    Operand::convert(dst, context)?,
+                    src.convert(context)?,
+                    dst.convert(context)?,
                 )]
             }
             BirdsInstructionNode::Truncate(src, dst) => {
                 let dst_type = AssemblyType::infer(&dst, context)?.0;
                 vec![Instruction::Mov(
                     dst_type,
-                    Operand::convert(src, context)?,
-                    Operand::convert(dst, context)?,
+                    src.convert(context)?,
+                    dst.convert(context)?,
                 )]
             }
             BirdsInstructionNode::ZeroExtend(src, dst) => {
@@ -690,8 +647,8 @@ impl Convert for Instruction {
                 vec![Instruction::MovZeroExtend(
                     src_type,
                     dst_type,
-                    Operand::convert(src, context)?,
-                    Operand::convert(dst, context)?,
+                    src.convert(context)?,
+                    dst.convert(context)?,
                 )]
             }
             BirdsInstructionNode::DoubleToInt(src, dst) => {
@@ -699,20 +656,20 @@ impl Convert for Instruction {
                 if dst_type != AssemblyType::Byte {
                     vec![Instruction::Cvttsd2si(
                         dst_type,
-                        Operand::convert(src, context)?,
-                        Operand::convert(dst, context)?,
+                        src.convert(context)?,
+                        dst.convert(context)?,
                     )]
                 } else {
                     vec![
                         Instruction::Cvttsd2si(
                             AssemblyType::Longword,
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                             Operand::Reg(Register::AX),
                         ),
                         Instruction::Mov(
                             dst_type,
                             Operand::Reg(Register::AX),
-                            Operand::convert(dst, context)?,
+                            dst.convert(context)?,
                         ),
                     ]
                 }
@@ -734,7 +691,7 @@ impl Convert for Instruction {
                             Instruction::Cmp(
                                 AssemblyType::Double,
                                 i_max.clone(),
-                                Operand::convert(src.clone(), context)?,
+                                src.clone().convert(context)?,
                             ),
                             Instruction::JmpCondition(
                                 ConditionCode::Ae,
@@ -742,8 +699,8 @@ impl Convert for Instruction {
                             ),
                             Instruction::Cvttsd2si(
                                 AssemblyType::Quadword,
-                                Operand::convert(src.clone(), context)?,
-                                Operand::convert(dst.clone(), context)?,
+                                src.clone().convert(context)?,
+                                dst.clone().convert(context)?,
                             ),
                             Instruction::Jmp(format!("end_{}", &instruction_label)),
                             Instruction::Label(format!("out_of_range_{}", &instruction_label)),
@@ -751,7 +708,7 @@ impl Convert for Instruction {
                             // later)
                             Instruction::Mov(
                                 AssemblyType::Double,
-                                Operand::convert(src, context)?,
+                                src.convert(context)?,
                                 Operand::Reg(Register::XMM0),
                             ),
                             Instruction::Binary(
@@ -763,13 +720,13 @@ impl Convert for Instruction {
                             Instruction::Cvttsd2si(
                                 AssemblyType::Quadword,
                                 Operand::Reg(Register::XMM0),
-                                Operand::convert(dst.clone(), context)?,
+                                dst.clone().convert(context)?,
                             ),
                             Instruction::Binary(
                                 BinaryOperator::Add,
                                 AssemblyType::Quadword,
                                 Operand::Imm(ImmediateValue::Unsigned(i_max_value)),
-                                Operand::convert(dst, context)?,
+                                dst.convert(context)?,
                             ),
                             Instruction::Label(format!("end_{}", &instruction_label)),
                         ]
@@ -777,25 +734,25 @@ impl Convert for Instruction {
                     AssemblyType::Longword => vec![
                         Instruction::Cvttsd2si(
                             AssemblyType::Quadword,
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                             Operand::Reg(Register::AX),
                         ),
                         Instruction::Mov(
                             dst_type,
                             Operand::Reg(Register::AX),
-                            Operand::convert(dst, context)?,
+                            dst.convert(context)?,
                         ),
                     ],
                     AssemblyType::Byte => vec![
                         Instruction::Cvttsd2si(
                             AssemblyType::Longword,
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                             Operand::Reg(Register::AX),
                         ),
                         Instruction::Mov(
                             dst_type,
                             Operand::Reg(Register::AX),
-                            Operand::convert(dst, context)?,
+                            dst.convert(context)?,
                         ),
                     ],
                     AssemblyType::Double => unreachable!(),
@@ -809,20 +766,20 @@ impl Convert for Instruction {
                         Instruction::Movsx(
                             src_type,
                             AssemblyType::Longword,
-                            Operand::convert(src, context)?,
+                            src.convert(context)?,
                             Operand::Reg(Register::AX),
                         ),
                         Instruction::Cvtsi2sd(
                             AssemblyType::Longword,
                             Operand::Reg(Register::AX),
-                            Operand::convert(dst, context)?,
+                            dst.convert(context)?,
                         ),
                     ]
                 } else {
                     vec![Instruction::Cvtsi2sd(
                         src_type,
-                        Operand::convert(src, context)?,
-                        Operand::convert(dst, context)?,
+                        src.convert(context)?,
+                        dst.convert(context)?,
                     )]
                 }
             }
@@ -834,13 +791,13 @@ impl Convert for Instruction {
                             Instruction::MovZeroExtend(
                                 src_type,
                                 AssemblyType::Longword,
-                                Operand::convert(src, context)?,
+                                src.convert(context)?,
                                 Operand::Reg(Register::AX),
                             ),
                             Instruction::Cvtsi2sd(
                                 AssemblyType::Longword,
                                 Operand::Reg(Register::AX),
-                                Operand::convert(dst, context)?,
+                                dst.convert(context)?,
                             ),
                         ]
                     }
@@ -849,13 +806,13 @@ impl Convert for Instruction {
                             Instruction::MovZeroExtend(
                                 src_type,
                                 AssemblyType::Quadword,
-                                Operand::convert(src, context)?,
+                                src.convert(context)?,
                                 Operand::Reg(Register::AX),
                             ),
                             Instruction::Cvtsi2sd(
                                 AssemblyType::Quadword,
                                 Operand::Reg(Register::AX),
-                                Operand::convert(dst, context)?,
+                                dst.convert(context)?,
                             ),
                         ]
                     }
@@ -866,7 +823,7 @@ impl Convert for Instruction {
                             Instruction::Cmp(
                                 AssemblyType::Quadword,
                                 Operand::Imm(ImmediateValue::Signed(0)),
-                                Operand::convert(src.clone(), context)?,
+                                src.clone().convert(context)?,
                             ),
                             Instruction::JmpCondition(
                                 ConditionCode::L,
@@ -874,14 +831,14 @@ impl Convert for Instruction {
                             ),
                             Instruction::Cvtsi2sd(
                                 AssemblyType::Quadword,
-                                Operand::convert(src.clone(), context)?,
-                                Operand::convert(dst.clone(), context)?,
+                                src.clone().convert(context)?,
+                                dst.clone().convert(context)?,
                             ),
                             Instruction::Jmp(format!("end_{}", &instruction_label)),
                             Instruction::Label(format!("out_of_range_{}", &instruction_label)),
                             Instruction::Mov(
                                 AssemblyType::Quadword,
-                                Operand::convert(src, context)?,
+                                src.convert(context)?,
                                 Operand::Reg(Register::AX),
                             ),
                             Instruction::Mov(
@@ -910,13 +867,13 @@ impl Convert for Instruction {
                             Instruction::Cvtsi2sd(
                                 AssemblyType::Quadword,
                                 Operand::Reg(Register::DX),
-                                Operand::convert(dst.clone(), context)?,
+                                dst.clone().convert(context)?,
                             ),
                             Instruction::Binary(
                                 BinaryOperator::Add,
                                 AssemblyType::Double,
-                                Operand::convert(dst.clone(), context)?,
-                                Operand::convert(dst, context)?,
+                                dst.clone().convert(context)?,
+                                dst.convert(context)?,
                             ),
                             Instruction::Label(format!("end_{}", &instruction_label)),
                         ]
@@ -926,8 +883,8 @@ impl Convert for Instruction {
             }
             BirdsInstructionNode::GetAddress(src, dst) => {
                 vec![Instruction::Lea(
-                    Operand::convert(src, context)?,
-                    Operand::convert(dst, context)?,
+                    src.convert(context)?,
+                    dst.convert(context)?,
                 )]
             }
             BirdsInstructionNode::LoadFromPointer(src, dst) => {
@@ -935,14 +892,10 @@ impl Convert for Instruction {
                 vec![
                     Instruction::Mov(
                         AssemblyType::Quadword,
-                        Operand::convert(src, context)?,
+                        src.convert(context)?,
                         Operand::Reg(Register::AX),
                     ),
-                    Instruction::Mov(
-                        t,
-                        Operand::Memory(Register::AX, 0),
-                        Operand::convert(dst, context)?,
-                    ),
+                    Instruction::Mov(t, Operand::Memory(Register::AX, 0), dst.convert(context)?),
                 ]
             }
             BirdsInstructionNode::StoreInPointer(src, dst) => {
@@ -950,14 +903,10 @@ impl Convert for Instruction {
                 vec![
                     Instruction::Mov(
                         AssemblyType::Quadword,
-                        Operand::convert(dst, context)?,
+                        dst.convert(context)?,
                         Operand::Reg(Register::AX),
                     ),
-                    Instruction::Mov(
-                        t,
-                        Operand::convert(src, context)?,
-                        Operand::Memory(Register::AX, 0),
-                    ),
+                    Instruction::Mov(t, src.convert(context)?, Operand::Memory(Register::AX, 0)),
                 ]
             }
             BirdsInstructionNode::AddPointer(ptr, index, scale, dst) => {
@@ -966,12 +915,12 @@ impl Convert for Instruction {
                         vec![
                             Instruction::Mov(
                                 AssemblyType::Quadword,
-                                Operand::convert(ptr, context)?,
+                                ptr.convert(context)?,
                                 Operand::Reg(Register::AX),
                             ),
                             Instruction::Lea(
                                 Operand::Memory(Register::AX, index_value * scale),
-                                Operand::convert(dst, context)?,
+                                dst.convert(context)?,
                             ),
                         ]
                     }
@@ -979,17 +928,17 @@ impl Convert for Instruction {
                         vec![
                             Instruction::Mov(
                                 AssemblyType::Quadword,
-                                Operand::convert(ptr, context)?,
+                                ptr.convert(context)?,
                                 Operand::Reg(Register::AX),
                             ),
                             Instruction::Mov(
                                 AssemblyType::Quadword,
-                                Operand::convert(index, context)?,
+                                index.convert(context)?,
                                 Operand::Reg(Register::DX),
                             ),
                             Instruction::Lea(
                                 Operand::Indexed(Register::AX, Register::DX, scale),
-                                Operand::convert(dst, context)?,
+                                dst.convert(context)?,
                             ),
                         ]
                     }
@@ -998,12 +947,12 @@ impl Convert for Instruction {
                         vec![
                             Instruction::Mov(
                                 AssemblyType::Quadword,
-                                Operand::convert(ptr, context)?,
+                                ptr.convert(context)?,
                                 Operand::Reg(Register::AX),
                             ),
                             Instruction::Mov(
                                 AssemblyType::Quadword,
-                                Operand::convert(index, context)?,
+                                index.convert(context)?,
                                 Operand::Reg(Register::DX),
                             ),
                             Instruction::Binary(
@@ -1014,7 +963,7 @@ impl Convert for Instruction {
                             ),
                             Instruction::Lea(
                                 Operand::Indexed(Register::AX, Register::DX, 1),
-                                Operand::convert(dst, context)?,
+                                dst.convert(context)?,
                             ),
                         ]
                     }
@@ -1024,15 +973,9 @@ impl Convert for Instruction {
     }
 }
 
-impl Convert for Operand {
-    type Input = BirdsValueNode;
-    type Output = Self;
-
-    fn convert(
-        input: BirdsValueNode,
-        context: &mut ConvertContext,
-    ) -> Result<Operand, Box<dyn Error>> {
-        match input {
+impl Convert<Operand> for BirdsValueNode {
+    fn convert(self, context: &mut ConvertContext) -> Result<Operand, Box<dyn Error>> {
+        match self {
             BirdsValueNode::Constant(Constant::Integer(c)) => {
                 Ok(Operand::Imm(ImmediateValue::Signed(c as i64)))
             }
@@ -1085,15 +1028,9 @@ impl BirdsValueNode {
     }
 }
 
-impl Convert for UnaryOperator {
-    type Input = BirdsUnaryOperatorNode;
-    type Output = Self;
-
-    fn convert(
-        input: BirdsUnaryOperatorNode,
-        _context: &mut ConvertContext,
-    ) -> Result<UnaryOperator, Box<dyn Error>> {
-        match input {
+impl Convert<UnaryOperator> for BirdsUnaryOperatorNode {
+    fn convert(self, _context: &mut ConvertContext) -> Result<UnaryOperator, Box<dyn Error>> {
+        match self {
             BirdsUnaryOperatorNode::Negate => Ok(UnaryOperator::Neg),
             BirdsUnaryOperatorNode::Complement => Ok(UnaryOperator::Not),
             BirdsUnaryOperatorNode::Not => {
@@ -1103,15 +1040,9 @@ impl Convert for UnaryOperator {
     }
 }
 
-impl Convert for BinaryOperator {
-    type Input = BirdsBinaryOperatorNode;
-    type Output = Self;
-
-    fn convert(
-        input: BirdsBinaryOperatorNode,
-        _context: &mut ConvertContext,
-    ) -> Result<BinaryOperator, Box<dyn Error>> {
-        match input {
+impl Convert<BinaryOperator> for BirdsBinaryOperatorNode {
+    fn convert(self, _context: &mut ConvertContext) -> Result<BinaryOperator, Box<dyn Error>> {
+        match self {
             BirdsBinaryOperatorNode::Add => Ok(BinaryOperator::Add),
             BirdsBinaryOperatorNode::Subtract => Ok(BinaryOperator::Sub),
             BirdsBinaryOperatorNode::Multiply => Ok(BinaryOperator::Mult),
@@ -1136,35 +1067,29 @@ impl Convert for BinaryOperator {
     }
 }
 
-impl BinaryOperator {
+impl BirdsBinaryOperatorNode {
     fn convert_unsigned(
-        input: BirdsBinaryOperatorNode,
+        self,
         context: &mut ConvertContext,
     ) -> Result<BinaryOperator, Box<dyn Error>> {
-        match input {
+        match self {
             BirdsBinaryOperatorNode::ShiftLeft => Ok(BinaryOperator::UnsignedShiftLeft),
             BirdsBinaryOperatorNode::ShiftRight => Ok(BinaryOperator::UnsignedShiftRight),
-            _ => BinaryOperator::convert(input, context),
+            _ => self.convert(context),
         }
     }
 }
 
-impl Convert for ConditionCode {
-    type Input = BirdsBinaryOperatorNode;
-    type Output = Self;
-
-    fn convert(
-        input: BirdsBinaryOperatorNode,
-        _context: &mut ConvertContext,
-    ) -> Result<ConditionCode, Box<dyn Error>> {
-        match input {
+impl Convert<ConditionCode> for BirdsBinaryOperatorNode {
+    fn convert(self, _context: &mut ConvertContext) -> Result<ConditionCode, Box<dyn Error>> {
+        match self {
             BirdsBinaryOperatorNode::Equal => Ok(ConditionCode::E),
             BirdsBinaryOperatorNode::NotEqual => Ok(ConditionCode::Ne),
             BirdsBinaryOperatorNode::Less => Ok(ConditionCode::L),
             BirdsBinaryOperatorNode::Greater => Ok(ConditionCode::G),
             BirdsBinaryOperatorNode::LessEqual => Ok(ConditionCode::Le),
             BirdsBinaryOperatorNode::GreaterEqual => Ok(ConditionCode::Ge),
-            _ if !input.is_relational() => {
+            _ if !self.is_relational() => {
                 panic!("non-relational binary expressions should not be treated as relational expressions")
             }
             _ => unreachable!(),
@@ -1172,19 +1097,19 @@ impl Convert for ConditionCode {
     }
 }
 
-impl ConditionCode {
-    fn convert_unsigned(
-        input: BirdsBinaryOperatorNode,
+impl BirdsBinaryOperatorNode {
+    fn convert_condition_unsigned(
+        self,
         _context: &mut ConvertContext,
     ) -> Result<ConditionCode, Box<dyn Error>> {
-        match input {
+        match self {
             BirdsBinaryOperatorNode::Equal => Ok(ConditionCode::E),
             BirdsBinaryOperatorNode::NotEqual => Ok(ConditionCode::Ne),
             BirdsBinaryOperatorNode::Less => Ok(ConditionCode::B),
             BirdsBinaryOperatorNode::Greater => Ok(ConditionCode::A),
             BirdsBinaryOperatorNode::LessEqual => Ok(ConditionCode::Be),
             BirdsBinaryOperatorNode::GreaterEqual => Ok(ConditionCode::Ae),
-            _ if !input.is_relational() => {
+            _ if !self.is_relational() => {
                 panic!("non-relational binary expressions should not be treated as relational expressions")
             }
             _ => unreachable!(),

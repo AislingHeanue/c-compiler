@@ -222,16 +222,11 @@ enum ConditionCode {
     P, // parity, needed for NaN
 }
 
-trait Convert
+trait Convert<T>
 where
     Self: Sized,
 {
-    type Input;
-    type Output;
-    fn convert(
-        parsed: Self::Input,
-        context: &mut ConvertContext,
-    ) -> Result<Self::Output, Box<dyn Error>>;
+    fn convert(self, context: &mut ConvertContext) -> Result<T, Box<dyn Error>>;
 }
 
 pub struct ConvertContext {
@@ -273,7 +268,7 @@ pub fn codegen(
         constants: HashMap::new(),
         num_labels: 0,
     };
-    let mut converted = Program::convert(parsed, &mut context)?;
+    let mut converted = parsed.convert(&mut context)?;
 
     let mut assembly_map: HashMap<String, AssemblySymbolInfo> = HashMap::new();
 
@@ -291,7 +286,7 @@ pub fn codegen(
             let is_constant = matches!(v.storage, StorageInfo::Constant(_));
             let is_static = is_constant || matches!(v.storage, StorageInfo::Static(_, _));
 
-            let assembly_type = AssemblyType::convert(v.symbol_type, &mut context).unwrap();
+            let assembly_type = v.symbol_type.convert(&mut context).unwrap();
 
             assembly_map.insert(
                 k.clone(),
