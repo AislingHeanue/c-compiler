@@ -1,5 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, error::Error, mem::swap};
 
+use convert::{Convert, ConvertContext};
+use display::DisplayContext;
 use validate::{Validate, ValidateContext, VALIDATION_PASSES};
 
 use super::{
@@ -224,37 +226,6 @@ pub enum ConditionCode {
     P, // parity, needed for NaN
 }
 
-trait Convert<T>
-where
-    Self: Sized,
-{
-    fn convert(self, context: &mut ConvertContext) -> Result<T, Box<dyn Error>>;
-}
-
-pub struct ConvertContext {
-    comments: bool,
-    is_mac: bool,
-    is_linux: bool,
-    symbols: HashMap<String, SymbolInfo>,
-    constants: HashMap<String, (u32, StaticInitialiser)>,
-    num_labels: u32,
-}
-
-trait CodeDisplay {
-    fn show(&self, context: &mut DisplayContext) -> String;
-}
-
-#[derive(Debug)]
-pub struct DisplayContext {
-    comments: bool,
-    indent: usize,
-    is_linux: bool,
-    is_mac: bool,
-    word_length_bytes: i32,
-    instruction_suffix: String,
-    symbols: HashMap<String, AssemblySymbolInfo>,
-}
-
 pub fn codegen(
     parsed: BirdsProgramNode,
     comments: bool,
@@ -262,14 +233,7 @@ pub fn codegen(
     mac: bool,
     symbols: HashMap<String, SymbolInfo>,
 ) -> Result<Program, Box<dyn Error>> {
-    let mut context = ConvertContext {
-        comments,
-        is_linux: linux,
-        is_mac: mac,
-        symbols,
-        constants: HashMap::new(),
-        num_labels: 0,
-    };
+    let mut context = ConvertContext::new(comments, linux, mac, symbols);
     let mut converted = parsed.convert(&mut context)?;
 
     let mut assembly_map: HashMap<String, AssemblySymbolInfo> = HashMap::new();
@@ -318,15 +282,10 @@ pub fn codegen(
 
     // store the DisplayContext in a RefCell so that the Display trait can pick out
     // the value and modify it while it is rendering the actual Assembly code.
-    converted.displaying_context = Some(RefCell::new(DisplayContext {
-        comments: context.comments,
-        indent: 0,
-        word_length_bytes: 4,
-        instruction_suffix: "l".to_string(),
-        is_linux: context.is_linux,
-        is_mac: context.is_mac,
-        symbols: validate_context.symbols,
-    }));
+    converted.displaying_context = Some(RefCell::new(DisplayContext::new(
+        &context,
+        validate_context,
+    )));
 
     Ok(converted)
 }

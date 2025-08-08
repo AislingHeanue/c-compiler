@@ -7,12 +7,39 @@ use crate::compiler::{
 };
 
 use super::{
-    AssemblyType, BinaryOperator, CodeDisplay, ConditionCode, DisplayContext, ImmediateValue,
-    Instruction, Operand, Program, Register, TopLevel, UnaryOperator,
+    convert::ConvertContext, validate::ValidateContext, AssemblyType, BinaryOperator,
+    ConditionCode, ImmediateValue, Instruction, Operand, Program, Register, TopLevel,
+    UnaryOperator,
 };
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
+
+pub trait CodeDisplay {
+    fn show(&self, context: &mut DisplayContext) -> String;
+}
+
+#[derive(Debug)]
+pub struct DisplayContext {
+    comments: bool,
+    indent: usize,
+    is_linux: bool,
+    is_mac: bool,
+    word_length_bytes: i32,
+    instruction_suffix: String,
+    pub symbols: HashMap<String, AssemblySymbolInfo>,
+}
 
 impl DisplayContext {
+    pub fn new(context: &ConvertContext, validate_context: ValidateContext) -> DisplayContext {
+        DisplayContext {
+            comments: context.comments,
+            indent: 0,
+            word_length_bytes: 4,
+            instruction_suffix: "l".to_string(),
+            is_linux: context.is_linux,
+            is_mac: context.is_mac,
+            symbols: validate_context.symbols,
+        }
+    }
     fn indent(&mut self) -> &mut DisplayContext {
         self.indent += 4;
         self

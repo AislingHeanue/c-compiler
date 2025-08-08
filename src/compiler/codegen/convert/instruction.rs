@@ -1,7 +1,7 @@
 use crate::compiler::{
     birds::{BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsUnaryOperatorNode},
     codegen::{
-        convert::create_static_constant, AssemblyType, BinaryOperator, ConditionCode, Convert,
+        convert::create_static_constant, AssemblyType, BinaryOperator, ConditionCode,
         ConvertContext, ImmediateValue, Instruction, Operand, Register, DOUBLE_PARAM_REGISTERS,
         FUNCTION_PARAM_REGISTERS,
     },
@@ -9,7 +9,7 @@ use crate::compiler::{
 };
 use std::error::Error;
 
-use super::classify_function_args;
+use super::{classify_function_args, Convert};
 
 impl Convert<Vec<Instruction>> for BirdsInstructionNode {
     fn convert(self, context: &mut ConvertContext) -> Result<Vec<Instruction>, Box<dyn Error>> {

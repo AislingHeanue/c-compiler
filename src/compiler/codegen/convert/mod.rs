@@ -1,14 +1,13 @@
 use crate::compiler::{
     birds::{BirdsProgramNode, BirdsValueNode},
-    types::StaticInitialiser,
+    types::{StaticInitialiser, SymbolInfo},
 };
 use itertools::process_results;
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
 
 use super::{
-    AssemblyType, BinaryOperator, ConditionCode, Convert, ConvertContext, ImmediateValue,
-    Instruction, Operand, Program, Register, TopLevel, UnaryOperator, DOUBLE_PARAM_REGISTERS,
-    FUNCTION_PARAM_REGISTERS,
+    AssemblyType, BinaryOperator, ConditionCode, ImmediateValue, Instruction, Operand, Program,
+    Register, TopLevel, UnaryOperator, DOUBLE_PARAM_REGISTERS, FUNCTION_PARAM_REGISTERS,
 };
 
 mod assembly_type;
@@ -16,6 +15,40 @@ mod instruction;
 mod operand;
 mod operators;
 mod top_level;
+
+pub trait Convert<T>
+where
+    Self: Sized,
+{
+    fn convert(self, context: &mut ConvertContext) -> Result<T, Box<dyn Error>>;
+}
+
+pub struct ConvertContext {
+    pub symbols: HashMap<String, SymbolInfo>,
+    pub comments: bool,
+    pub is_mac: bool,
+    pub is_linux: bool,
+    constants: HashMap<String, (u32, StaticInitialiser)>,
+    pub num_labels: u32,
+}
+
+impl ConvertContext {
+    pub fn new(
+        comments: bool,
+        linux: bool,
+        mac: bool,
+        symbols: HashMap<String, SymbolInfo>,
+    ) -> ConvertContext {
+        ConvertContext {
+            comments,
+            is_linux: linux,
+            is_mac: mac,
+            symbols,
+            constants: HashMap::new(),
+            num_labels: 0,
+        }
+    }
+}
 
 struct Args {
     double: Vec<Operand>,
