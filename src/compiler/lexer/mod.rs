@@ -293,3 +293,64 @@ pub fn lex(mut contents: &str) -> Result<VecDeque<Token>, Box<dyn Error>> {
 
     Ok(tokens)
 }
+
+impl Token {
+    pub fn is_specifier(&self) -> bool {
+        self.is_type() || matches!(self, Token::KeywordStatic | Token::KeywordExtern)
+    }
+
+    pub fn is_type(&self) -> bool {
+        matches!(
+            self,
+            Token::KeywordLong
+                | Token::KeywordInt
+                | Token::KeywordUnsigned
+                | Token::KeywordSigned
+                | Token::KeywordDouble
+                | Token::KeywordChar
+        )
+    }
+
+    pub fn is_unary_operator(&self) -> bool {
+        matches!(
+            self,
+            Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement
+        )
+    }
+
+    pub fn is_suffix_operator(&self) -> bool {
+        matches!(
+            self,
+            Token::Increment | Token::Decrement | Token::OpenSquareBracket
+        )
+    }
+
+    pub fn is_constant(&self) -> bool {
+        matches!(
+            self,
+            Token::IntegerConstant(_)
+                | Token::LongConstant(_)
+                | Token::UnsignedIntegerConstant(_)
+                | Token::UnsignedLongConstant(_)
+                | Token::DoubleConstant(_)
+                | Token::CharacterConstant(_)
+        )
+    }
+
+    pub fn is_assignment(&self) -> bool {
+        matches!(
+            self,
+            Token::Assignment
+                | Token::AddAssign
+                | Token::SubtractAssign
+                | Token::MultiplyAssign
+                | Token::DivideAssign
+                | Token::ModAssign
+                | Token::BitwiseAndAssign
+                | Token::BitwiseXorAssign
+                | Token::BitwiseOrAssign
+                | Token::ShiftLeftAssign
+                | Token::ShiftRightAssign
+        )
+    }
+}

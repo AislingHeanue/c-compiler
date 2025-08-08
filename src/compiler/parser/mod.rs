@@ -1,7 +1,7 @@
 use parse::do_parse;
 use validate::do_validate;
 
-use super::types::{ComparableStatic, Constant, StorageClass, StorageInfo, Type};
+use super::types::{ComparableStatic, Constant, StorageClass, Type};
 
 use super::{lexer::Token, types::SymbolInfo};
 use std::{
@@ -22,7 +22,7 @@ pub struct FunctionDeclaration {
     pub function_type: Type,
     pub name: String,
     pub params: Vec<String>,
-    pub body: Option<Block>,
+    pub body: Option<Vec<BlockItemNode>>,
     pub storage_class: Option<StorageClass>,
 }
 
@@ -46,8 +46,6 @@ pub enum InitialiserWithoutType {
     Compound(Vec<InitialiserNode>),
 }
 
-pub type Block = Vec<BlockItemNode>;
-
 #[derive(Debug)]
 pub enum BlockItemNode {
     Statement(StatementNode),
@@ -67,7 +65,7 @@ pub enum StatementNode {
     Label(String, Box<StatementNode>),
     Goto(String),
     Expression(ExpressionNode),
-    Compound(Block),
+    Compound(Vec<BlockItemNode>),
     // condition, then, else
     If(
         ExpressionNode,

@@ -1,7 +1,7 @@
 use itertools::Itertools;
 
 use super::{
-    BinaryOperatorNode, Block, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
+    BinaryOperatorNode, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
     ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
     InitialiserWithoutType, ProgramNode, StatementNode, Type, UnaryOperatorNode,
     VariableDeclaration,
@@ -51,7 +51,7 @@ impl CodeDisplay for Vec<DeclarationNode> {
     }
 }
 
-impl CodeDisplay for Block {
+impl CodeDisplay for Vec<BlockItemNode> {
     fn show(&self, context: &mut DisplayContext) -> String {
         // "\n".to_string()
         self.iter()

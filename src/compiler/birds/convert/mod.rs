@@ -4,7 +4,7 @@ use std::error::Error;
 use itertools::process_results;
 
 use crate::compiler::{
-    parser::{BinaryOperatorNode, Block, BlockItemNode, ProgramNode},
+    parser::{BinaryOperatorNode, BlockItemNode, ProgramNode},
     types::{StorageInfo, SymbolInfo, Type},
 };
 
@@ -117,7 +117,7 @@ fn new_temp_variable(type_to_store: &Type, context: &mut ConvertContext) -> Bird
     BirdsValueNode::Var(new_name)
 }
 
-impl Convert for Block {
+impl Convert for Vec<BlockItemNode> {
     type Output = Vec<BirdsInstructionNode>;
 
     fn convert(self, context: &mut ConvertContext) -> Result<Self::Output, Box<dyn Error>> {
