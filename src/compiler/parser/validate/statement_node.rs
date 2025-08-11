@@ -5,7 +5,7 @@ use crate::compiler::{
     types::{StaticInitialiser, Type},
 };
 
-use super::{Validate, ValidateContext, ValidationPass};
+use super::{CheckTypes, Validate, ValidateContext, ValidationPass};
 
 impl Validate for StatementNode {
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
@@ -33,6 +33,14 @@ impl Validate for StatementNode {
             StatementNode::Return(ref mut e) => e.validate(context)?,
             StatementNode::If(ref mut condition, ref mut then, ref mut otherwise) => {
                 condition.validate(context)?;
+                if matches!(context.pass, ValidationPass::TypeChecking) {
+                    condition.check_types(context)?;
+                    if !condition.1.as_ref().unwrap().is_scalar() {
+                        return Err(
+                            "Can't construct an if statement with a non-scalar condition".into(),
+                        );
+                    }
+                }
                 then.validate(context)?;
                 otherwise.validate(context)?;
             }
@@ -56,6 +64,14 @@ impl Validate for StatementNode {
                     StatementNode::leave_loop(previous, context)
                 } else {
                     expression.validate(context)?;
+                    if matches!(context.pass, ValidationPass::TypeChecking) {
+                        expression.check_types(context)?;
+                        if !expression.1.as_ref().unwrap().is_scalar() {
+                            return Err(
+                                "Can't construct a while loop with a non-scalar condition".into()
+                            );
+                        }
+                    }
                     body.validate(context)?;
                 };
             }
@@ -71,6 +87,15 @@ impl Validate for StatementNode {
                 } else {
                     body.validate(context)?;
                     expression.validate(context)?;
+                    if matches!(context.pass, ValidationPass::TypeChecking) {
+                        expression.check_types(context)?;
+                        if !expression.1.as_ref().unwrap().is_scalar() {
+                            return Err(
+                                "Can't construct a do-while loop with a non-scalar condition"
+                                    .into(),
+                            );
+                        }
+                    }
                 };
             }
             StatementNode::For(
@@ -93,6 +118,15 @@ impl Validate for StatementNode {
                 } else {
                     init.validate(context)?;
                     cond.validate(context)?;
+                    if matches!(context.pass, ValidationPass::TypeChecking) && cond.is_some() {
+                        let cond = cond.as_mut().unwrap();
+                        cond.check_types(context)?;
+                        if !cond.1.as_ref().unwrap().is_scalar() {
+                            return Err(
+                                "Can't construct a for loop with a non-scalar condition".into()
+                            );
+                        }
+                    }
                     post.validate(context)?;
                     body.validate(context)?;
                 };
@@ -135,6 +169,81 @@ impl Validate for StatementNode {
                 body.validate(context)?;
             }
             StatementNode::Default(body, _) => body.validate(context)?,
+        };
+        Ok(())
+    }
+}
+
+impl CheckTypes for StatementNode {
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        match self {
+            StatementNode::Return(exp) => {
+                let out_type = if let Type::Function(out, _) = &context
+                    .symbols
+                    .get(context.current_function_name.as_ref().unwrap())
+                    .unwrap()
+                    .symbol_type
+                {
+                    out.clone()
+                } else {
+                    unreachable!();
+                };
+
+                if let Some(e) = exp {
+                    e.check_types_and_convert(context)?;
+                    e.convert_type_by_assignment(&out_type)?;
+                } else if *out_type != Type::Void {
+                    return Err("Return in non-void function must have a value".into());
+                }
+            }
+            StatementNode::Case(ref mut e, _, ref label) => {
+                e.check_types_and_convert(context)?;
+
+                let target_type = context
+                    .current_switch_type
+                    .clone()
+                    .ok_or::<Box<dyn Error>>("Case is not in a switch statement".into())?;
+
+                let constant_value = if let ExpressionWithoutType::Constant(ref mut c) = e.0 {
+                    c.convert_ordinal_to(&target_type)
+                } else {
+                    return Err("Non constant expression found in case statement".into());
+                };
+                let ordinal = if let StaticInitialiser::Ordinal(ref o) = constant_value {
+                    o
+                } else {
+                    return Err("Non ordinal (eg Double) expression found in case statement".into());
+                };
+
+                let already_present = context
+                    .current_switch_labels
+                    .as_mut()
+                    .ok_or("Switch label map not found")?
+                    .insert(
+                        SwitchMapKey::Constant(ordinal.clone()),
+                        label.as_ref().unwrap().clone(),
+                    );
+
+                if already_present.is_some() {
+                    return Err(format!(
+                        "Duplicate case expression in switch: {:?}",
+                        constant_value
+                    )
+                    .into());
+                }
+            }
+            StatementNode::Default(_, label) => {
+                let already_present = context
+                    .current_switch_labels
+                    .as_mut()
+                    .ok_or("Switch label map not found")?
+                    .insert(SwitchMapKey::Default, label.clone().unwrap());
+
+                if already_present.is_some() {
+                    return Err("Duplicate default in switch".into());
+                }
+            }
+            _ => (),
         };
         Ok(())
     }
@@ -210,86 +319,6 @@ impl StatementNode {
                 *label = format!("{}_default", switch_label).into();
             }
             _ => {}
-        };
-        Ok(())
-    }
-
-    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
-        match self {
-            StatementNode::Return(exp) => {
-                if let Some(e) = exp {
-                    e.check_types_and_convert(context)?;
-                    if let Type::Function(out, _) = &context
-                        .symbols
-                        .get(context.current_function_name.as_ref().unwrap())
-                        .unwrap()
-                        .symbol_type
-                    {
-                        e.convert_type_by_assignment(out)?;
-                    } else {
-                        unreachable!();
-                    };
-                } else if let Type::Function(out, _) = &context
-                    .symbols
-                    .get(context.current_function_name.as_ref().unwrap())
-                    .unwrap()
-                    .symbol_type
-                {
-                    if **out != Type::Void {
-                        return Err("Return in non-void function must have a value".into());
-                    };
-                } else {
-                    unreachable!()
-                }
-            }
-            StatementNode::Case(ref mut e, _, ref label) => {
-                e.check_types_and_convert(context)?;
-
-                let target_type = context
-                    .current_switch_type
-                    .clone()
-                    .ok_or::<Box<dyn Error>>("Case is not in a switch statement".into())?;
-
-                let constant_value = if let ExpressionWithoutType::Constant(ref mut c) = e.0 {
-                    c.convert_ordinal_to(&target_type)
-                } else {
-                    return Err("Non constant expression found in case statement".into());
-                };
-                let ordinal = if let StaticInitialiser::Ordinal(ref o) = constant_value {
-                    o
-                } else {
-                    return Err("Non ordinal (eg Double) expression found in case statement".into());
-                };
-
-                let already_present = context
-                    .current_switch_labels
-                    .as_mut()
-                    .ok_or("Switch label map not found")?
-                    .insert(
-                        SwitchMapKey::Constant(ordinal.clone()),
-                        label.as_ref().unwrap().clone(),
-                    );
-
-                if already_present.is_some() {
-                    return Err(format!(
-                        "Duplicate case expression in switch: {:?}",
-                        constant_value
-                    )
-                    .into());
-                }
-            }
-            StatementNode::Default(_, label) => {
-                let already_present = context
-                    .current_switch_labels
-                    .as_mut()
-                    .ok_or("Switch label map not found")?
-                    .insert(SwitchMapKey::Default, label.clone().unwrap());
-
-                if already_present.is_some() {
-                    return Err("Duplicate default in switch".into());
-                }
-            }
-            _ => (),
         };
         Ok(())
     }

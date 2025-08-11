@@ -17,7 +17,7 @@ impl Convert<AssemblyType> for Type {
             Type::Pointer(_) => Ok(AssemblyType::Quadword),
             Type::Array(t, size) => {
                 let assembly_t = (*t).convert(_context)?;
-                let size = assembly_t.get_size() * size as u32;
+                let size = assembly_t.get_size() * size;
                 let alignment = if size < 16 {
                     assembly_t.get_alignment()
                 } else {
@@ -66,7 +66,7 @@ impl AssemblyType {
         }
     }
 
-    pub fn get_size(&self) -> u32 {
+    pub fn get_size(&self) -> u64 {
         match self {
             AssemblyType::Byte => 1,
             AssemblyType::Longword => 4,

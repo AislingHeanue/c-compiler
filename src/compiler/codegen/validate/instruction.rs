@@ -53,7 +53,7 @@ impl Validate for Vec<Instruction> {
                         BinaryOperator::Sub,
                         AssemblyType::Quadword,
                         Operand::Imm(ImmediateValue::Unsigned(
-                            align_stack_size(*stack_size, 16).into(),
+                            align_stack_size((*stack_size).into(), 16).into(),
                         )),
                         Operand::Reg(Register::SP),
                     ),

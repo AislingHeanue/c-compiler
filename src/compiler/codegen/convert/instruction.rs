@@ -14,7 +14,7 @@ use super::{classify_function_args, Convert};
 impl Convert<Vec<Instruction>> for BirdsInstructionNode {
     fn convert(self, context: &mut ConvertContext) -> Result<Vec<Instruction>, Box<dyn Error>> {
         Ok(match self {
-            BirdsInstructionNode::Return(src) => {
+            BirdsInstructionNode::Return(Some(src)) => {
                 let this_type = AssemblyType::infer(&src, context)?.0;
                 if this_type == AssemblyType::Double {
                     vec![
@@ -36,6 +36,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     ]
                 }
             }
+            BirdsInstructionNode::Return(None) => vec![Instruction::Ret],
             BirdsInstructionNode::Unary(BirdsUnaryOperatorNode::Not, src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
                 let dst_type = AssemblyType::infer(&dst, context)?.0;
@@ -381,13 +382,13 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     instructions.push(Instruction::Mov(
                         AssemblyType::Double,
                         Operand::Reg(Register::XMM0),
-                        dst.clone().convert(context)?,
+                        dst.clone().unwrap().convert(context)?,
                     ));
-                } else {
+                } else if *return_type != Type::Void {
                     instructions.push(Instruction::Mov(
                         (*return_type).convert(context)?,
                         Operand::Reg(Register::AX),
-                        dst.clone().convert(context)?,
+                        dst.clone().unwrap().convert(context)?,
                     ));
                 }
 
@@ -689,7 +690,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                                 Operand::Reg(Register::AX),
                             ),
                             Instruction::Lea(
-                                Operand::Memory(Register::AX, index_value * scale),
+                                Operand::Memory(Register::AX, index_value * scale as i32),
                                 dst.convert(context)?,
                             ),
                         ]
@@ -707,7 +708,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                                 Operand::Reg(Register::DX),
                             ),
                             Instruction::Lea(
-                                Operand::Indexed(Register::AX, Register::DX, scale),
+                                Operand::Indexed(Register::AX, Register::DX, scale as i32),
                                 dst.convert(context)?,
                             ),
                         ]
@@ -728,7 +729,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             Instruction::Binary(
                                 BinaryOperator::Mult,
                                 AssemblyType::Quadword,
-                                Operand::Imm(ImmediateValue::Signed(scale.into())),
+                                Operand::Imm(ImmediateValue::Unsigned(scale)),
                                 Operand::Reg(Register::DX),
                             ),
                             Instruction::Lea(

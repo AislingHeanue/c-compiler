@@ -130,7 +130,12 @@ pub enum ExpressionWithoutType {
     Binary(BinaryOperatorNode, Box<ExpressionNode>, Box<ExpressionNode>),
     // eg a += 5
     // op, left, right
-    Compound(BinaryOperatorNode, Box<ExpressionNode>, Box<ExpressionNode>),
+    Compound(
+        BinaryOperatorNode,
+        Box<ExpressionNode>,
+        Box<ExpressionNode>,
+        Option<Type>,
+    ),
     // eg a[b]
     Subscript(Box<ExpressionNode>, Box<ExpressionNode>),
     Var(String),

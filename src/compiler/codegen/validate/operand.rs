@@ -54,7 +54,8 @@ impl Operand {
                 // multiple of 8
                 let alignment = t.get_alignment();
                 context.current_stack_size =
-                    align_stack_size(context.current_stack_size + size, alignment);
+                    align_stack_size(context.current_stack_size as u64 + size, alignment.into())
+                        as u32;
                 let new_location = -(context.current_stack_size as i32);
                 context
                     .current_stack_locations

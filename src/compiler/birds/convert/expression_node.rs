@@ -194,7 +194,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 ));
                 Ok((instructions, new_dst.into()))
             }
-            ExpressionWithoutType::Compound(op, left, right) => {
+            ExpressionWithoutType::Compound(op, left, right, common) => {
                 // since this is an assignment, we've already carried out type checking for the
                 // return of this expression in the validation step.
                 //
@@ -206,7 +206,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 // a += 5l => a = int(long(a) + 5l)
                 let left_type = left.1.clone().unwrap();
                 let right_type = right.1.clone().unwrap();
-                let common_type = self.1.clone().unwrap();
+                let common_type = common.unwrap();
 
                 let (mut instructions, new_left): D = left.convert(context)?;
 
@@ -458,7 +458,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             BirdsBinaryOperatorNode::Divide,
                             diff,
                             BirdsValueNode::Constant(Constant::get_typed(
-                                left_t.get_size().into(),
+                                (*left_t).get_size() as i64,
                                 &Type::Long,
                             )),
                             new_dst.clone(),
@@ -496,23 +496,37 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     new_cond,
                     new_else_label_name.clone(),
                 ));
-
                 let new_dst_type = then.1.clone().unwrap();
-                let (mut instructions_from_then, new_then): E = then.convert(context)?;
-                let new_dst = new_temp_variable(&new_dst_type, context);
+                if new_dst_type == Type::Void {
+                    let (mut instructions_from_then, _): D = then.convert(context)?;
+                    instructions.append(&mut instructions_from_then);
 
-                instructions.append(&mut instructions_from_then);
-                instructions.append(&mut vec![
-                    BirdsInstructionNode::Copy(new_then.clone(), new_dst.clone()),
-                    BirdsInstructionNode::Jump(new_end_label_name.clone()),
-                    BirdsInstructionNode::Label(new_else_label_name),
-                ]);
-                let (mut instructions_from_other, new_other) = otherwise.convert(context)?;
-                instructions.append(&mut instructions_from_other);
-                instructions.push(BirdsInstructionNode::Copy(new_other, new_dst.clone()));
-                instructions.push(BirdsInstructionNode::Label(new_end_label_name));
+                    instructions.append(&mut vec![
+                        BirdsInstructionNode::Jump(new_end_label_name.clone()),
+                        BirdsInstructionNode::Label(new_else_label_name),
+                    ]);
+                    let (mut instructions_from_other, _): D = otherwise.convert(context)?;
+                    instructions.append(&mut instructions_from_other);
+                    instructions.push(BirdsInstructionNode::Label(new_end_label_name));
 
-                Ok((instructions, new_dst.into()))
+                    Ok((instructions, BirdsValueNode::Var("!".to_string()).into()))
+                } else {
+                    let (mut instructions_from_then, new_then): E = then.convert(context)?;
+                    let new_dst = new_temp_variable(&new_dst_type, context);
+
+                    instructions.append(&mut instructions_from_then);
+                    instructions.append(&mut vec![
+                        BirdsInstructionNode::Copy(new_then.clone(), new_dst.clone()),
+                        BirdsInstructionNode::Jump(new_end_label_name.clone()),
+                        BirdsInstructionNode::Label(new_else_label_name),
+                    ]);
+                    let (mut instructions_from_other, new_other) = otherwise.convert(context)?;
+                    instructions.append(&mut instructions_from_other);
+                    instructions.push(BirdsInstructionNode::Copy(new_other, new_dst.clone()));
+                    instructions.push(BirdsInstructionNode::Label(new_end_label_name));
+
+                    Ok((instructions, new_dst.into()))
+                }
             }
             ExpressionWithoutType::FunctionCall(name, args) => {
                 let (mut instructions, values): Ve = args.convert(context)?;
@@ -522,25 +536,29 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 {
                     ret.as_ref().clone()
                 } else {
-                    return Err(
-                        "Function stored in symbol table does not have function type".into(),
-                    );
+                    unreachable!()
                 };
-                let new_dst = new_temp_variable(&new_dst_type, context);
-                instructions.push(BirdsInstructionNode::FunctionCall(
-                    name,
-                    values,
-                    new_dst.clone(),
-                ));
-
-                Ok((instructions, new_dst.into()))
+                if new_dst_type == Type::Void {
+                    instructions.push(BirdsInstructionNode::FunctionCall(name, values, None));
+                    Ok((instructions, BirdsValueNode::Var("!".to_string()).into()))
+                } else {
+                    let new_dst = new_temp_variable(&new_dst_type, context);
+                    instructions.push(BirdsInstructionNode::FunctionCall(
+                        name,
+                        values,
+                        Some(new_dst.clone()),
+                    ));
+                    Ok((instructions, new_dst.into()))
+                }
             }
             ExpressionWithoutType::Cast(target_type, e) => {
                 let this_type = e.1.clone().unwrap();
-
                 let (mut instructions, new_src): E = e.convert(context)?;
+
                 if target_type == this_type {
                     return Ok((instructions, new_src.into()));
+                } else if target_type == Type::Void {
+                    return Ok((instructions, BirdsValueNode::Var("!".to_string()).into()));
                 }
                 let new_dst = new_temp_variable(&target_type, context);
                 let mut instructions_from_cast = ExpressionWithoutType::cast(
@@ -624,8 +642,21 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 let new_dst = BirdsValueNode::Var(new_name);
                 Ok((Vec::new(), new_dst.into()))
             }
-            ExpressionWithoutType::SizeOf(_) => todo!(),
-            ExpressionWithoutType::SizeOfType(_) => todo!(),
+            ExpressionWithoutType::SizeOf(e) => {
+                let t = e.1.as_ref().unwrap();
+                Ok((
+                    Vec::new(),
+                    BirdsValueNode::Constant(Constant::UnsignedLong(t.get_size() as u64)).into(),
+                ))
+            }
+            ExpressionWithoutType::SizeOfType(t) => {
+                println!("{:?}", t);
+                println!("{:?}", t.get_size());
+                Ok((
+                    Vec::new(),
+                    BirdsValueNode::Constant(Constant::UnsignedLong(t.get_size() as u64)).into(),
+                ))
+            }
         }
     }
 }

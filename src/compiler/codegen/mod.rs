@@ -39,7 +39,7 @@ pub enum AssemblyType {
     Quadword, // i64, long
     Double,   // oh boy
     // size, alignment
-    ByteArray(u32, u32), // 'opaque chunk of memory' eg arrays
+    ByteArray(u64, u32), // 'opaque chunk of memory' eg arrays
 }
 
 #[derive(Debug)]

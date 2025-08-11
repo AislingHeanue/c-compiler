@@ -4,14 +4,21 @@ use crate::compiler::{
     parser::VariableDeclaration,
     types::{
         ComparableStatic, InitialValue, StaticInitialiser, StorageClass, StorageInfo, SymbolInfo,
+        Type,
     },
 };
 
-use super::{Validate, ValidateContext, ValidationPass};
+use super::{CheckTypes, Validate, ValidateContext, ValidationPass};
 
 impl Validate for VariableDeclaration {
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         if matches!(context.pass, ValidationPass::TypeChecking) {
+            // check the type of the declared variable always
+            self.variable_type.check_types(context)?;
+            if self.variable_type == Type::Void {
+                return Err("Cannot declare a variable with a void type".into());
+            }
+
             if context.current_function_name.is_none() {
                 self.validate_file_scope(context)?;
             } else {

@@ -3,6 +3,7 @@ use std::{collections::HashMap, error::Error};
 mod expression_node;
 mod function_declaration;
 mod initialiser_node;
+mod parsed_types;
 mod statement_node;
 mod variable_declaration;
 
@@ -16,6 +17,13 @@ where
     Self: Sized,
 {
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
+}
+
+trait CheckTypes
+where
+    Self: Sized,
+{
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
 }
 
 #[derive(Clone, Debug)]
@@ -124,7 +132,11 @@ impl Validate for DeclarationNode {
         match self {
             DeclarationNode::Variable(v) => v.validate(context)?,
             DeclarationNode::Function(f) => f.validate(context)?,
-            DeclarationNode::Type(_) => {}
+            DeclarationNode::Type(t) => {
+                if matches!(context.pass, ValidationPass::TypeChecking) {
+                    t.target_type.check_types(context)?;
+                }
+            }
         };
         Ok(())
     }

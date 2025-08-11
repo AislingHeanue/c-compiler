@@ -26,7 +26,7 @@ pub enum BirdsTopLevel {
 
 #[derive(Debug)]
 pub enum BirdsInstructionNode {
-    Return(BirdsValueNode),
+    Return(Option<BirdsValueNode>),
     // op, src, dst
     Unary(BirdsUnaryOperatorNode, BirdsValueNode, BirdsValueNode),
     // op, left, right, dst
@@ -42,7 +42,7 @@ pub enum BirdsInstructionNode {
     JumpNotZero(BirdsValueNode, String),
     Label(String),
     // name, args, dst
-    FunctionCall(String, Vec<BirdsValueNode>, BirdsValueNode),
+    FunctionCall(String, Vec<BirdsValueNode>, Option<BirdsValueNode>),
     // src (32 bits) to dst (64 bits)
     SignedExtend(BirdsValueNode, BirdsValueNode),
     // src (64 bits) to dst (32 bits)
@@ -57,7 +57,7 @@ pub enum BirdsInstructionNode {
     LoadFromPointer(BirdsValueNode, BirdsValueNode),
     StoreInPointer(BirdsValueNode, BirdsValueNode),
     // src, index, scale (sizeof type in bytes), dst
-    AddPointer(BirdsValueNode, BirdsValueNode, i32, BirdsValueNode),
+    AddPointer(BirdsValueNode, BirdsValueNode, u64, BirdsValueNode),
     // src, name of some aggregate type variable, offset (bytes)
     CopyToOffset(BirdsValueNode, String, i32),
 }

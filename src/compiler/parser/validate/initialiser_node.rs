@@ -74,7 +74,7 @@ impl InitialiserNode {
                     ))];
                     if difference > 1 {
                         out.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                            difference - 1,
+                            (difference - 1).try_into().unwrap(),
                         )))
                     }
                     out
@@ -107,7 +107,7 @@ impl InitialiserNode {
                     |iter| iter.flatten().collect(),
                 )?;
                 if initialisers.len() < (*size).try_into().unwrap() {
-                    let offset = *size as i32 - initialisers.len() as i32;
+                    let offset = *size - initialisers.len() as u64;
                     statics.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
                         t.get_size() * offset,
                     )));

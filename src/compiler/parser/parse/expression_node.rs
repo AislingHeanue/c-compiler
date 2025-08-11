@@ -147,6 +147,7 @@ impl ParseExpression for VecDeque<Token> {
                         operator,
                         Box::new(left.into()),
                         Box::new(right.unwrap().into()),
+                        None,
                     )
                 };
             } else {

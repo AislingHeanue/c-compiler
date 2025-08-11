@@ -69,7 +69,7 @@ pub enum ComparableStatic {
     Char(i8),
     UnsignedChar(u8),
     // initialiser representing n * 0x00 bytes
-    ZeroBytes(i32),
+    ZeroBytes(u64),
     String(Vec<i8>, bool),
     Pointer(String),
 }

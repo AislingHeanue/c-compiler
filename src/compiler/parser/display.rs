@@ -362,7 +362,7 @@ impl CodeDisplay for ExpressionWithoutType {
                     right.show(&mut context.indent())
                 )
             }
-            ExpressionWithoutType::Compound(op, l, r) => {
+            ExpressionWithoutType::Compound(op, l, r, _) => {
                 format!(
                     "({} {}= {})",
                     l.show(&mut context.indent()),

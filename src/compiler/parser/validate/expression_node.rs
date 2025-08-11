@@ -5,7 +5,7 @@ use crate::compiler::{
     types::{Constant, Type},
 };
 
-use super::{Validate, ValidateContext, ValidationPass};
+use super::{CheckTypes, Validate, ValidateContext, ValidationPass};
 
 impl Validate for ExpressionNode {
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
@@ -21,7 +21,7 @@ impl Validate for ExpressionNode {
             ExpressionWithoutType::Unary(_, ref mut src) => {
                 src.validate(context)?;
             }
-            ExpressionWithoutType::Compound(_, ref mut left, ref mut right) => {
+            ExpressionWithoutType::Compound(_, ref mut left, ref mut right, _) => {
                 left.validate(context)?;
                 right.validate(context)?;
             }
@@ -56,143 +56,15 @@ impl Validate for ExpressionNode {
                 object.validate(context)?;
             }
             ExpressionWithoutType::String(ref mut _s) => {}
-            ExpressionWithoutType::SizeOf(_) => todo!(),
-            ExpressionWithoutType::SizeOfType(_) => todo!(),
+            ExpressionWithoutType::SizeOf(ref mut e) => {
+                e.validate(context)?;
+            }
+            ExpressionWithoutType::SizeOfType(ref _t) => {}
         };
         Ok(())
     }
 }
-
-impl ExpressionNode {
-    fn validate_lvalues(&mut self, _context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
-        match &self.0 {
-            ExpressionWithoutType::Unary(
-                UnaryOperatorNode::PrefixIncrement
-                | UnaryOperatorNode::PrefixDecrement
-                | UnaryOperatorNode::SuffixIncrement
-                | UnaryOperatorNode::SuffixDecrement,
-                src,
-            ) => {
-                // VALIDATION: Make sure ++ and -- only operate on variables, not constants or
-                // other expressions
-                if !src.0.is_lvalue() {
-                    return Err(format!(
-                        "Can't perform increment/decrement operation on non-variable: {:?}",
-                        src,
-                    )
-                    .into());
-                }
-            }
-            ExpressionWithoutType::Assignment(ref dst, _) => {
-                if !dst.0.is_lvalue() {
-                    return Err(format!("Can't assign to non-variable: {:?}", dst).into());
-                }
-            }
-            ExpressionWithoutType::Compound(_, ref left, _) => {
-                if !left.0.is_lvalue() {
-                    return Err(format!("Can't assign to non-variable: {:?}", left).into());
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    // See System V ABI list of rules for how to reconcile types of various sizes
-    // C Spec 6.3.1.8, Paragraph 1
-    fn get_common_type(e1: &ExpressionNode, e2: &ExpressionNode) -> Type {
-        let t1 = e1.1.as_ref().unwrap();
-        let t2 = e2.1.as_ref().unwrap();
-
-        if t1 == t2 {
-            t1.clone()
-        } else if t1 == &Type::Double || t2 == &Type::Double {
-            Type::Double
-        } else if t1.get_size() == t2.get_size() {
-            if t1.is_signed() {
-                t2.clone()
-            } else {
-                t1.clone()
-            }
-        } else if t1.get_size() > t2.get_size() {
-            t1.clone()
-        } else {
-            t2.clone()
-        }
-    }
-
-    fn get_common_pointer_type(
-        e1: &ExpressionNode,
-        e2: &ExpressionNode,
-    ) -> Result<Type, Box<dyn Error>> {
-        let t1 = e1.1.as_ref().unwrap();
-        let t2 = e2.1.as_ref().unwrap();
-        if t1 == t2 {
-            Ok(t1.clone())
-        } else if e1.equals_null_pointer() {
-            Ok(t2.clone())
-        } else if e2.equals_null_pointer() {
-            Ok(t1.clone())
-        } else {
-            Err(format!(
-                "Incompatible types for implicit pointer cast: {:?} and {:?}",
-                e1, e2
-            )
-            .into())
-        }
-    }
-
-    pub fn equals_null_pointer(&self) -> bool {
-        matches!(
-            self.0,
-            ExpressionWithoutType::Constant(Constant::Integer(0))
-                | ExpressionWithoutType::Constant(Constant::Long(0))
-                | ExpressionWithoutType::Constant(Constant::UnsignedInteger(0))
-                | ExpressionWithoutType::Constant(Constant::UnsignedLong(0))
-        )
-    }
-
-    pub fn convert_type(&mut self, target: &Type) {
-        if self.1.as_ref().unwrap() != target {
-            *self = ExpressionNode(
-                ExpressionWithoutType::Cast(target.clone(), Box::new(self.clone())),
-                Some(target.clone()),
-            )
-        }
-    }
-
-    pub fn convert_type_by_assignment(&mut self, target: &Type) -> Result<(), Box<dyn Error>> {
-        if matches!(target, Type::Array(_, _)) {
-            return Err("Can't assign to an array type".into());
-        }
-        let t1 = self.1.as_ref().unwrap();
-        if t1 != target {
-            if (t1.is_arithmetic() && target.is_arithmetic())
-                || (self.equals_null_pointer() && matches!(target, Type::Pointer(_)))
-            {
-                self.convert_type(target);
-            } else {
-                return Err(
-                    format!("Can't convert {:?} to {:?} by assignment", t1, target).into(),
-                    // format!("Can't convert {:?} to {:?} by assignment", self, target).into(),
-                );
-            }
-        }
-        Ok(())
-    }
-
-    // required because functions that are compiled by clang assume that the caller always pads
-    // 1-byte args to 4 bytes.
-    pub fn pad_single_byte_arg(&mut self) -> Result<(), Box<dyn Error>> {
-        let t1 = self.1.as_ref().unwrap();
-        match t1 {
-            Type::Char | Type::SignedChar => self.convert_type(&Type::Integer),
-            Type::UnsignedChar => self.convert_type(&Type::UnsignedInteger),
-            _ => {}
-        }
-        Ok(())
-    }
-
+impl CheckTypes for ExpressionNode {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         if self.1.is_some() {
             // no need to type check this expression a second time
@@ -248,13 +120,16 @@ impl ExpressionNode {
                     op,
                     UnaryOperatorNode::Negate | UnaryOperatorNode::Complement
                 ) {
-                    if matches!(src.1.as_ref().unwrap(), Type::Pointer(_)) {
-                        return Err("Can't apply - or ~ to a pointer".into());
+                    if !src.1.as_ref().unwrap().is_arithmetic() {
+                        return Err("Can't apply - or ~ to a non-arithmetic type".into());
                     }
                     // promote char types to int for this operation
                     if src.1.as_ref().unwrap().is_character() {
                         src.convert_type(&Type::Integer)
                     }
+                }
+                if matches!(op, UnaryOperatorNode::Not) && !src.1.as_ref().unwrap().is_scalar() {
+                    return Err("Can't apply ! to a non-scalar type".into());
                 }
                 match op {
                     UnaryOperatorNode::Not => Type::Integer, // returns 0 or 1 (eg boolean-like)
@@ -267,7 +142,12 @@ impl ExpressionNode {
                     _ => src.1.clone().unwrap(),
                 }
             }
-            ExpressionWithoutType::Compound(ref op, ref mut left, ref mut right) => {
+            ExpressionWithoutType::Compound(
+                ref op,
+                ref mut left,
+                ref mut right,
+                ref mut common_type,
+            ) => {
                 left.check_types_and_convert(context)?;
                 right.check_types_and_convert(context)?;
                 let mut left_clone = left.clone();
@@ -275,11 +155,13 @@ impl ExpressionNode {
                 right.promote(context)?;
                 // undo type conversion on Left, it will be done manually in the birds generation
                 // stage
-                let common_type = ExpressionNode::check_types_binary(op, &mut left_clone, right)?;
+                let common = ExpressionNode::check_types_binary(op, &mut left_clone, right)?;
                 // verify that it is possible to assign from the common type to left, without
                 // actually doing the conversion yet.
-                left_clone.convert_type_by_assignment(&common_type)?;
-                common_type
+                left_clone.convert_type_by_assignment(&common)?;
+
+                *common_type = Some(common);
+                left.1.clone().unwrap()
             }
             ExpressionWithoutType::Binary(ref op, ref mut left, ref mut right) => {
                 left.check_types_and_convert(context)?;
@@ -298,35 +180,56 @@ impl ExpressionNode {
                 cond.check_types_and_convert(context)?;
                 then.check_types_and_convert(context)?;
                 other.check_types_and_convert(context)?;
-                let common_type = if matches!(then.1.as_ref().unwrap(), Type::Pointer(_))
-                    || matches!(other.1.as_ref().unwrap(), Type::Pointer(_))
+                if !cond.1.as_ref().unwrap().is_scalar() {
+                    return Err(
+                        "Can't construct a ternary expression with a non-scalar condition".into(),
+                    );
+                }
+                let then_type = then.1.as_ref().unwrap();
+                let other_type = other.1.as_ref().unwrap();
+                let common_type = if then_type == &Type::Void && other_type == &Type::Void {
+                    Type::Void
+                } else if then_type.is_arithmetic() && other_type.is_arithmetic() {
+                    ExpressionNode::get_common_type(then, other)
+                } else if matches!(then_type, Type::Pointer(_))
+                    || matches!(other_type, Type::Pointer(_))
                 {
                     ExpressionNode::get_common_pointer_type(then, other)?
                 } else {
-                    ExpressionNode::get_common_type(then, other)
+                    return Err("Invalid types for ternary expression".into());
                 };
                 then.convert_type(&common_type);
                 other.convert_type(&common_type);
 
                 common_type
             }
-            ExpressionWithoutType::Cast(ref target, ref mut e) => {
+            ExpressionWithoutType::Cast(ref mut target, ref mut e) => {
                 e.check_types_and_convert(context)?;
                 let src_type = e.1.as_ref().unwrap();
-                if matches!((src_type, target), (Type::Double, Type::Pointer(_)))
-                    || matches!((target, src_type), (Type::Double, Type::Pointer(_)))
+                if matches!((&src_type, &target), (&Type::Double, &Type::Pointer(_)))
+                    || matches!((&target, &src_type), (&Type::Double, &Type::Pointer(_)))
                 {
                     return Err("Cannot cast between Double and Pointer types".into());
                 }
 
-                if matches!(target, Type::Array(_, _)) {
-                    return Err("Cannot cast to an Array type".into());
+                target.check_types(context)?;
+
+                if *target == Type::Void {
+                    target.clone()
+                } else if !target.is_scalar() {
+                    return Err("Cannot cast to a non-scalar type".into());
+                } else if !src_type.is_scalar() {
+                    return Err("Cannot cast from a non-scalar type".into());
+                } else {
+                    target.clone()
                 }
-                target.clone()
             }
             ExpressionWithoutType::Dereference(ref mut e) => {
                 e.check_types_and_convert(context)?;
                 if let Type::Pointer(t) = e.1.as_ref().unwrap() {
+                    if **t == Type::Void {
+                        return Err("Cannot dereference a pointer to void".into());
+                    }
                     *t.clone()
                 } else {
                     return Err("Dereference can only operate on pointer types".into());
@@ -347,13 +250,13 @@ impl ExpressionNode {
                 let inner_type = inner.1.as_ref().unwrap();
 
                 if let Type::Pointer(left) = src_type {
-                    if !inner_type.is_integer() {
+                    if !inner_type.is_integer() || !left.is_complete() {
                         return Err("Invalid subscript expression".into());
                     }
                     inner.convert_type(&Type::Long);
                     *left.clone()
                 } else if let Type::Pointer(right) = inner_type {
-                    if !src_type.is_integer() {
+                    if !src_type.is_integer() || !right.is_complete() {
                         return Err("Invalid subscript expression".into());
                     }
                     src.convert_type(&Type::Long);
@@ -366,10 +269,173 @@ impl ExpressionNode {
                 // WEE WOO WEE WOO DON'T FORGET TO ASSIGN SPACE FOR THE NULL TERMINATOR
                 Type::Array(Box::new(Type::Char), (s.len() as u64) + 1)
             }
-            ExpressionWithoutType::SizeOf(_) => todo!(),
-            ExpressionWithoutType::SizeOfType(_) => todo!(),
+            ExpressionWithoutType::SizeOf(ref mut e) => {
+                e.check_types(context)?;
+                if !e.1.as_ref().unwrap().is_complete() {
+                    return Err(
+                        "Can't get the size of an expression returning an incomplete type".into(),
+                    );
+                }
+                // size_t
+                Type::UnsignedLong
+            }
+            ExpressionWithoutType::SizeOfType(ref mut t) => {
+                t.check_types(context)?;
+                if !t.is_complete() {
+                    return Err("Can't get the size of an incomplete type".into());
+                }
+                // size_t
+                Type::UnsignedLong
+            }
         });
 
+        Ok(())
+    }
+}
+
+impl ExpressionNode {
+    fn validate_lvalues(&mut self, _context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        match &self.0 {
+            ExpressionWithoutType::Unary(
+                UnaryOperatorNode::PrefixIncrement
+                | UnaryOperatorNode::PrefixDecrement
+                | UnaryOperatorNode::SuffixIncrement
+                | UnaryOperatorNode::SuffixDecrement,
+                src,
+            ) => {
+                // VALIDATION: Make sure ++ and -- only operate on variables, not constants or
+                // other expressions, and not pointers to void
+                if !src.0.is_lvalue()
+                    || src.1.as_ref().unwrap() == &Type::Pointer(Box::new(Type::Void))
+                {
+                    return Err(format!(
+                        "Can't perform increment/decrement operation on non-variable: {:?}",
+                        src,
+                    )
+                    .into());
+                }
+            }
+            ExpressionWithoutType::Assignment(ref dst, _) => {
+                if !dst.0.is_lvalue() {
+                    return Err(format!("Can't assign to non-variable: {:?}", dst).into());
+                }
+            }
+            ExpressionWithoutType::Compound(_, ref left, _, _) => {
+                if !left.0.is_lvalue() {
+                    return Err(format!("Can't assign to non-variable: {:?}", left).into());
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    // See System V ABI list of rules for how to reconcile types of various sizes
+    // C Spec 6.3.1.8, Paragraph 1
+    fn get_common_type(e1: &ExpressionNode, e2: &ExpressionNode) -> Type {
+        let t1 = e1.1.as_ref().unwrap();
+        let t2 = e2.1.as_ref().unwrap();
+
+        if t1 == t2 {
+            t1.clone()
+        } else if t1 == &Type::Double || t2 == &Type::Double {
+            Type::Double
+        } else if t1.get_size() == t2.get_size() {
+            if t1.is_signed() {
+                t2.clone()
+            } else {
+                t1.clone()
+            }
+        } else if t1.get_size() > t2.get_size() {
+            t1.clone()
+        } else {
+            t2.clone()
+        }
+    }
+
+    fn get_common_pointer_type(
+        e1: &ExpressionNode,
+        e2: &ExpressionNode,
+    ) -> Result<Type, Box<dyn Error>> {
+        let t1 = e1.1.as_ref().unwrap();
+        let t2 = e2.1.as_ref().unwrap();
+        if t1 == t2 {
+            Ok(t1.clone())
+        } else if e1.equals_null_pointer() {
+            Ok(t2.clone())
+        } else if e2.equals_null_pointer() {
+            Ok(t1.clone())
+        } else if let (Type::Pointer(p1), Type::Pointer(p2)) = (t1, t2) {
+            if **p1 == Type::Void || **p2 == Type::Void {
+                return Ok(Type::Pointer(Box::new(Type::Void)));
+            } else {
+                Err(format!(
+                    "Incompatible types for implicit pointer cast: {:?} and {:?}",
+                    e1, e2
+                )
+                .into())
+            }
+        } else {
+            Err(format!(
+                "Incompatible types for implicit pointer cast: {:?} and {:?}",
+                e1, e2
+            )
+            .into())
+        }
+    }
+
+    pub fn equals_null_pointer(&self) -> bool {
+        matches!(
+            self.0,
+            ExpressionWithoutType::Constant(Constant::Integer(0))
+                | ExpressionWithoutType::Constant(Constant::Long(0))
+                | ExpressionWithoutType::Constant(Constant::UnsignedInteger(0))
+                | ExpressionWithoutType::Constant(Constant::UnsignedLong(0))
+        )
+    }
+
+    pub fn convert_type(&mut self, target: &Type) {
+        if self.1.as_ref().unwrap() != target {
+            *self = ExpressionNode(
+                ExpressionWithoutType::Cast(target.clone(), Box::new(self.clone())),
+                Some(target.clone()),
+            )
+        }
+    }
+
+    pub fn convert_type_by_assignment(&mut self, target: &Type) -> Result<(), Box<dyn Error>> {
+        if matches!(target, Type::Array(_, _)) {
+            return Err("Can't assign to an array type".into());
+        }
+        let t1 = self.1.as_ref().unwrap();
+        if t1 != target {
+            if (t1.is_arithmetic() && target.is_arithmetic())
+                || (self.equals_null_pointer() && matches!(target, Type::Pointer(_)))
+                || (*t1 == Type::Pointer(Box::new(Type::Void))
+                    && matches!(target, Type::Pointer(_)))
+                || (*target == Type::Pointer(Box::new(Type::Void))
+                    && matches!(t1, Type::Pointer(_)))
+            {
+                self.convert_type(target);
+            } else {
+                return Err(
+                    format!("Can't convert {:?} to {:?} by assignment", t1, target).into(),
+                    // format!("Can't convert {:?} to {:?} by assignment", self, target).into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    // required because functions that are compiled by clang assume that the caller always pads
+    // 1-byte args to 4 bytes.
+    pub fn pad_single_byte_arg(&mut self) -> Result<(), Box<dyn Error>> {
+        let t1 = self.1.as_ref().unwrap();
+        match t1 {
+            Type::Char | Type::SignedChar => self.convert_type(&Type::Integer),
+            Type::UnsignedChar => self.convert_type(&Type::UnsignedInteger),
+            _ => {}
+        }
         Ok(())
     }
 
@@ -410,8 +476,8 @@ impl ExpressionNode {
         left: &mut ExpressionNode,
         right: &mut ExpressionNode,
     ) -> Result<Type, Box<dyn Error>> {
-        let left_type = left.1.as_ref().unwrap();
-        let right_type = right.1.as_ref().unwrap();
+        let left_type = left.1.as_ref().unwrap().clone();
+        let right_type = right.1.as_ref().unwrap().clone();
 
         // Get the common type of this expression
         // also handle ALL pointer arithmetic type-checking cases in this block
@@ -419,10 +485,10 @@ impl ExpressionNode {
             if (matches!(left_type, Type::Pointer(_)) || matches!(right_type, Type::Pointer(_))) {
                 match op {
                     BinaryOperatorNode::Add => {
-                        if matches!(left_type, Type::Pointer(_)) && right_type.is_integer() {
+                        if left_type.is_complete_pointer() && right_type.is_integer() {
                             right.convert_type(&Type::Long);
                             (left_type.clone(), true)
-                        } else if matches!(right_type, Type::Pointer(_)) && left_type.is_integer() {
+                        } else if right_type.is_complete_pointer() && left_type.is_integer() {
                             left.convert_type(&Type::Long);
                             (right_type.clone(), true)
                         } else {
@@ -430,10 +496,10 @@ impl ExpressionNode {
                         }
                     }
                     BinaryOperatorNode::Subtract => {
-                        if matches!(left_type, Type::Pointer(_)) && right_type.is_integer() {
+                        if left_type.is_complete_pointer() && right_type.is_integer() {
                             right.convert_type(&Type::Long);
                             (left_type.clone(), true)
-                        } else if left_type == right_type {
+                        } else if left_type == right_type && left_type.is_complete_pointer() {
                             // typedef stuff: for <stddef.h>, this type should be annotated as ptrdiff_t
                             (Type::Long, true)
                         } else {
@@ -456,9 +522,21 @@ impl ExpressionNode {
                     BinaryOperatorNode::And | BinaryOperatorNode::Or => (Type::Integer, false),
                     o => return Err(format!("Invalid pointer operation: {:?}", o).into()),
                 }
-            } else {
+            } else if left_type.is_arithmetic() && right_type.is_arithmetic() {
                 (ExpressionNode::get_common_type(left, right), false)
+            } else {
+                return Err(format!(
+                    "Cannot perform binary operation on non-arithmetic types {:?} and {:?}",
+                    left_type, right_type
+                )
+                .into());
             };
+
+        if (!left_type.is_scalar() || !right_type.is_scalar())
+            && matches!(op, BinaryOperatorNode::And | BinaryOperatorNode::Or)
+        {
+            return Err(format!("Invalid pointer operation on non-scalars: {:?}", op).into());
+        }
 
         // convert the left and right to the common type (with exceptions)
         if !is_pointer_arithmetic
@@ -485,7 +563,7 @@ impl ExpressionNode {
                     | BinaryOperatorNode::ShiftRight
                     | BinaryOperatorNode::Mod
             ))
-            || (matches!(right.1.as_ref().unwrap(), Type::Double)
+            || (matches!(right_type, Type::Double)
                 && matches!(
                     op,
                     BinaryOperatorNode::Mod

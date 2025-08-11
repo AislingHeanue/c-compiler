@@ -1,7 +1,7 @@
 use super::Type;
 
 impl Type {
-    pub fn get_size(&self) -> i32 {
+    pub fn get_size(&self) -> u64 {
         // bytes
         match self {
             Type::Integer => 4,
@@ -10,7 +10,7 @@ impl Type {
             Type::UnsignedInteger => 4,
             Type::UnsignedLong => 8,
             Type::Pointer(_) => 8, // pointer is stored like u64
-            Type::Array(t, size) => t.get_size() * (*size) as i32, // arrays are like pointers except that they aren't
+            Type::Array(t, size) => t.get_size() * (*size), // arrays are like pointers except that they aren't
             Type::Function(_, _) => unreachable!(),
             Type::Char => 1,
             Type::SignedChar => 1,
@@ -49,7 +49,7 @@ impl Type {
             Type::Char => true,
             Type::SignedChar => true,
             Type::UnsignedChar => true,
-            Type::Void => unreachable!(),
+            Type::Void => false,
         }
     }
 
@@ -61,7 +61,19 @@ impl Type {
     }
 
     pub fn is_scalar(&self) -> bool {
-        !matches!(self, Type::Array(..))
+        !matches!(self, Type::Array(..) | Type::Void | Type::Function(_, _))
+    }
+
+    pub fn is_complete(&self) -> bool {
+        !matches!(self, Type::Void)
+    }
+
+    pub fn is_complete_pointer(&self) -> bool {
+        if let Type::Pointer(p1) = self {
+            p1.is_complete()
+        } else {
+            false
+        }
     }
 
     pub fn is_character(&self) -> bool {

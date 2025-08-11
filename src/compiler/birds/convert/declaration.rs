@@ -43,20 +43,27 @@ impl Convert<Option<BirdsTopLevel>> for FunctionDeclaration {
             // add an extra "return 0;" at the end because the C standard dictates that if main() exits
             // without a return statement, then it must actually return 0. If a return statement is
             // otherwise present, this instruction will never be run (dead code).
-            instructions.push(BirdsInstructionNode::Return(BirdsValueNode::Constant(
-                Constant::Integer(0),
-            )));
-            if let StorageInfo::Function(_defined, global) =
-                context.symbols.get(&name).unwrap().storage
-            {
+            let map_entry = context.symbols.get(&name).unwrap();
+            if let Type::Function(out, _) = &map_entry.symbol_type {
+                if **out != Type::Void {
+                    instructions.push(BirdsInstructionNode::Return(Some(
+                        BirdsValueNode::Constant(Constant::Integer(0)),
+                    )));
+                } else {
+                    instructions.push(BirdsInstructionNode::Return(None));
+                }
+            } else {
+                unreachable!()
+            }
+            if let StorageInfo::Function(_defined, global) = &map_entry.storage {
                 Ok(Some(BirdsTopLevel::Function(
                     name,
                     params,
                     instructions,
-                    global,
+                    *global,
                 )))
             } else {
-                panic!("Symbol info missing from map for defined function")
+                unreachable!()
             }
         } else {
             Ok(None)
@@ -184,7 +191,7 @@ impl InitialiserNode {
                         context.current_initialiser_offset,
                     ));
                 }
-                context.current_initialiser_offset += offset;
+                context.current_initialiser_offset += offset as i32;
 
                 Ok(instructions)
             }

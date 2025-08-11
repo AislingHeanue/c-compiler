@@ -20,11 +20,12 @@ impl Convert<Vec<BirdsInstructionNode>> for StatementNode {
             StatementNode::Return(expression) => {
                 if let Some(e) = expression {
                     let (mut instructions, new_src) = e.convert(context)?;
-                    let return_instruction = BirdsInstructionNode::Return(new_src);
+                    let return_instruction = BirdsInstructionNode::Return(Some(new_src));
                     instructions.push(return_instruction);
                     Ok(instructions)
                 } else {
-                    todo!()
+                    let return_instruction = BirdsInstructionNode::Return(None);
+                    Ok(vec![return_instruction])
                 }
             }
             StatementNode::Expression(expression) => {

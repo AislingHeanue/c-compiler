@@ -69,8 +69,8 @@ impl ValidateContext {
     }
 }
 
-pub fn align_stack_size(initial: u32, alignment: u32) -> u32 {
-    initial + (alignment as i32 - initial as i32).rem_euclid(alignment as i32) as u32
+pub fn align_stack_size(initial: u64, alignment: u64) -> u64 {
+    initial + (alignment as i64 - initial as i64).rem_euclid(alignment as i64) as u64
 }
 
 impl Validate for Program {
