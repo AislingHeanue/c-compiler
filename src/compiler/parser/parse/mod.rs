@@ -176,10 +176,6 @@ impl UnaryOperatorNode {
             .into()),
         }
     }
-
-    fn precedence() -> usize {
-        55
-    }
 }
 
 impl Parse<BinaryOperatorNode> for VecDeque<Token> {

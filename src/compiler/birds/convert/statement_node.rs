@@ -18,10 +18,14 @@ impl Convert<Vec<BirdsInstructionNode>> for StatementNode {
     ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
         match self {
             StatementNode::Return(expression) => {
-                let (mut instructions, new_src) = expression.convert(context)?;
-                let return_instruction = BirdsInstructionNode::Return(new_src);
-                instructions.push(return_instruction);
-                Ok(instructions)
+                if let Some(e) = expression {
+                    let (mut instructions, new_src) = e.convert(context)?;
+                    let return_instruction = BirdsInstructionNode::Return(new_src);
+                    instructions.push(return_instruction);
+                    Ok(instructions)
+                } else {
+                    todo!()
+                }
             }
             StatementNode::Expression(expression) => {
                 // expressions (including assignments) all have return values that are thrown away

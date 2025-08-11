@@ -64,6 +64,7 @@ impl Constant {
             Type::Function(_, _) => unreachable!(),
             Type::Array(..) => unreachable!(),
             Type::Double => panic!("Can't use get_typed_constant to generate a double"),
+            Type::Void => unreachable!(),
         }
     }
 

@@ -216,18 +216,31 @@ impl StatementNode {
 
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         match self {
-            StatementNode::Return(e) => {
-                e.check_types_and_convert(context)?;
-                if let Type::Function(out, _) = &context
+            StatementNode::Return(exp) => {
+                if let Some(e) = exp {
+                    e.check_types_and_convert(context)?;
+                    if let Type::Function(out, _) = &context
+                        .symbols
+                        .get(context.current_function_name.as_ref().unwrap())
+                        .unwrap()
+                        .symbol_type
+                    {
+                        e.convert_type_by_assignment(out)?;
+                    } else {
+                        unreachable!();
+                    };
+                } else if let Type::Function(out, _) = &context
                     .symbols
                     .get(context.current_function_name.as_ref().unwrap())
                     .unwrap()
                     .symbol_type
                 {
-                    e.convert_type_by_assignment(out)?;
+                    if **out != Type::Void {
+                        return Err("Return in non-void function must have a value".into());
+                    };
                 } else {
-                    unreachable!();
-                };
+                    unreachable!()
+                }
             }
             StatementNode::Case(ref mut e, _, ref label) => {
                 e.check_types_and_convert(context)?;

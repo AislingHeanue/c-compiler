@@ -79,6 +79,7 @@ pub enum Token {
     KeywordDouble,
     KeywordChar,
     KeywordTypedef,
+    KeywordSizeof,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -176,6 +177,7 @@ lazy_static! {
                 Token::KeywordDouble =>r"double\b",
                 Token::KeywordChar =>r"char\b",
                 Token::KeywordTypedef =>r"typedef\b",
+                Token::KeywordSizeof => r"sizeof\b"
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;

@@ -624,6 +624,8 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 let new_dst = BirdsValueNode::Var(new_name);
                 Ok((Vec::new(), new_dst.into()))
             }
+            ExpressionWithoutType::SizeOf(_) => todo!(),
+            ExpressionWithoutType::SizeOfType(_) => todo!(),
         }
     }
 }
@@ -648,6 +650,7 @@ impl ExpressionWithoutType {
                 Type::Pointer(_) => unreachable!(),
                 Type::Double => unreachable!(),
                 Type::Function(_, _) => unreachable!(),
+                Type::Void => unreachable!(),
             }
         } else if this_type == &Type::Double {
             match target_type {
@@ -661,6 +664,7 @@ impl ExpressionWithoutType {
                 Type::Array(..) => unreachable!(),
                 Type::Double => unreachable!(),
                 Type::Function(_, _) => unreachable!(),
+                Type::Void => unreachable!(),
             }
         } else if target_type.get_size() == this_type.get_size() {
             // mov the old type into the new type directly

@@ -17,6 +17,7 @@ pub enum Type {
     Char,
     SignedChar,
     UnsignedChar,
+    Void,
 }
 
 #[derive(Clone, Debug, PartialEq)]

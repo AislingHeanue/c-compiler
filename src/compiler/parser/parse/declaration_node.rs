@@ -240,10 +240,10 @@ impl Parse<(Type, Option<StorageClass>, Declarator)> for VecDeque<Token> {
             // Entering this section means that we failed to properly split the type and the
             // declarator, so try again with a different split
 
-            // println!(
-            //     "Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?}",
-            //     types_deque,this_type,  declarator_deque, declarator
-            // );
+            println!(
+                "Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?}",
+                types_deque,this_type,  declarator_deque, declarator
+            );
             let move_this_to_the_declarator = types_deque.pop_back().unwrap();
             declarator_deque.push_front(move_this_to_the_declarator);
         }

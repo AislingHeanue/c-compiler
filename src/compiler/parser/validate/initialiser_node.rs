@@ -239,6 +239,9 @@ impl InitialiserNode {
                 )),
                 Some(target_type.clone()),
             ),
+            Type::Void => {
+                unreachable!()
+            }
         }
     }
 }

@@ -96,8 +96,13 @@ impl ParseDeclarator for VecDeque<Token> {
 
         if self.peek()? == Token::KeywordVoid {
             self.expect(Token::KeywordVoid)?;
-            self.expect(Token::CloseParen)?;
-            return Ok(param_list);
+            if matches!(self.peek()?, Token::CloseParen) {
+                self.expect(Token::CloseParen)?;
+                return Ok(param_list);
+            } else {
+                // void wasn't in parentheses by itself, so keep scanning param list
+                self.push_front(Token::KeywordVoid)
+            }
         }
 
         param_list.push(self.parse_param(context)?);

@@ -56,6 +56,8 @@ impl Validate for ExpressionNode {
                 object.validate(context)?;
             }
             ExpressionWithoutType::String(ref mut _s) => {}
+            ExpressionWithoutType::SizeOf(_) => todo!(),
+            ExpressionWithoutType::SizeOfType(_) => todo!(),
         };
         Ok(())
     }
@@ -364,6 +366,8 @@ impl ExpressionNode {
                 // WEE WOO WEE WOO DON'T FORGET TO ASSIGN SPACE FOR THE NULL TERMINATOR
                 Type::Array(Box::new(Type::Char), (s.len() as u64) + 1)
             }
+            ExpressionWithoutType::SizeOf(_) => todo!(),
+            ExpressionWithoutType::SizeOfType(_) => todo!(),
         });
 
         Ok(())

@@ -304,6 +304,7 @@ impl CodeDisplay for Type {
             Type::Char => "rune".to_string(),
             Type::SignedChar => "signed_rune".to_string(),
             Type::UnsignedChar => "unsigned_rune".to_string(),
+            Type::Void => "void".to_string(),
         }
     }
 }
@@ -400,6 +401,8 @@ impl CodeDisplay for ExpressionWithoutType {
                 out += "\"";
                 out
             }
+            ExpressionWithoutType::SizeOf(e) => format!("sizeof({})", e.show(context)),
+            ExpressionWithoutType::SizeOfType(t) => format!("sizeof({})", t.show(context)),
         }
     }
 }

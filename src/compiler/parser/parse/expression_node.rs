@@ -64,18 +64,54 @@ trait ParseExpression {
         level: usize,
         allow_empty: bool,
     ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>>;
+    fn parse_cast(
+        &mut self,
+        context: &mut ParseContext,
+        allow_empty: bool,
+    ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>>;
 }
 
 impl ParseExpression for VecDeque<Token> {
+    fn parse_cast(
+        &mut self,
+        context: &mut ParseContext,
+        allow_empty: bool,
+    ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>> {
+        let out = match self.peek()? {
+            Token::OpenParen => {
+                // casting
+                self.expect(Token::OpenParen)?;
+                if self.peek()?.is_type(context) {
+                    let cast_type: Type = self.parse(context)?;
+                    let abstract_declarator: AbstractDeclarator = self.parse(context)?;
+                    let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
+                    self.expect(Token::CloseParen)?;
+                    let factor = self.parse_cast(context, false)?.unwrap();
+                    Some(ExpressionWithoutType::Cast(
+                        real_cast_type,
+                        Box::new(factor.into()),
+                    ))
+                } else {
+                    // baited, not actually a cast, go further down the chain...
+                    self.push_front(Token::OpenParen);
+                    let expression = self.parse_postfix(context, allow_empty)?.unwrap();
+                    Some(expression)
+                }
+            }
+            _ => self.parse_unary(context, allow_empty)?,
+        };
+        Ok(out)
+    }
+
     fn parse_with_level(
         &mut self,
         context: &mut ParseContext,
         level: usize,
         allow_empty: bool,
     ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>> {
-        let maybe_left = self.parse_unary(context, allow_empty)?;
+        let maybe_left = self.parse_cast(context, allow_empty)?;
         if maybe_left.is_none() {
-            // if allow_empty is false, parse_unary will throw the relevant error for here
+            // if allow_empty is false, parse_cast will throw the relevant error for here
             return Ok(None);
         }
         let mut left = maybe_left.unwrap();
@@ -152,31 +188,10 @@ impl ParseExpression for VecDeque<Token> {
     ) -> Result<Option<ExpressionWithoutType>, Box<dyn Error>> {
         let expression = {
             match self.peek()? {
-                Token::OpenParen => {
-                    // casting
-                    self.expect(Token::OpenParen)?;
-                    if self.peek()?.is_type(context) {
-                        let cast_type: Type = self.parse(context)?;
-                        let abstract_declarator: AbstractDeclarator = self.parse(context)?;
-                        let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
-                        self.expect(Token::CloseParen)?;
-                        let factor = self.parse_unary(context, false)?.unwrap();
-                        Some(ExpressionWithoutType::Cast(
-                            real_cast_type,
-                            Box::new(factor.into()),
-                        ))
-                    } else {
-                        // baited, not actually a cast, go further down the chain...
-                        self.push_front(Token::OpenParen);
-                        let expression = self.parse_postfix(context, allow_empty)?.unwrap();
-                        Some(expression)
-                    }
-                }
                 // address-of
                 Token::BitwiseAnd => {
                     self.expect(Token::BitwiseAnd)?;
-                    let precedence = UnaryOperatorNode::precedence();
-                    let inner_expression = self.parse_with_level(context, precedence, false)?;
+                    let inner_expression = self.parse_cast(context, false)?;
                     Some(ExpressionWithoutType::AddressOf(Box::new(
                         inner_expression.unwrap().into(),
                     )))
@@ -184,17 +199,42 @@ impl ParseExpression for VecDeque<Token> {
                 // deref
                 Token::Star => {
                     self.expect(Token::Star)?;
-                    let precedence = UnaryOperatorNode::precedence();
-                    let inner_expression = self.parse_with_level(context, precedence, false)?;
+                    let inner_expression = self.parse_cast(context, false)?;
                     Some(ExpressionWithoutType::Dereference(Box::new(
                         inner_expression.unwrap().into(),
                     )))
                 }
+                Token::KeywordSizeof => {
+                    self.expect(Token::KeywordSizeof)?;
+                    match self.peek()? {
+                        Token::OpenParen => {
+                            // casting
+                            self.expect(Token::OpenParen)?;
+                            if self.peek()?.is_type(context) {
+                                let target_type: Type = self.parse(context)?;
+                                let abstract_declarator: AbstractDeclarator =
+                                    self.parse(context)?;
+                                let real_target_type =
+                                    abstract_declarator.apply_to_type(target_type)?;
+                                self.expect(Token::CloseParen)?;
+                                Some(ExpressionWithoutType::SizeOfType(real_target_type))
+                            } else {
+                                self.push_front(Token::OpenParen);
+                                let expression = self.parse_postfix(context, allow_empty)?.unwrap();
+                                Some(ExpressionWithoutType::SizeOf(Box::new(expression.into())))
+                            }
+                        }
+                        _ => {
+                            let expression = self.parse_unary(context, allow_empty)?.unwrap();
+                            Some(ExpressionWithoutType::SizeOf(Box::new(expression.into())))
+                        }
+                    }
+                }
                 _ if self.peek()?.is_unary_operator() => {
                     let operator = self.parse(context)?;
-                    let precedence = UnaryOperatorNode::precedence(); // all unary operators have the
-                                                                      // same precedence
-                    let expression = self.parse_with_level(context, precedence, false)?;
+                    // unary expressions have a precedence of 55, second only to suffix increment
+                    // and decrement, which are handled in parse_postfix.
+                    let expression = self.parse_cast(context, false)?;
                     Some(ExpressionWithoutType::Unary(
                         operator,
                         Box::new(expression.unwrap().into()),

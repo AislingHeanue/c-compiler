@@ -28,7 +28,7 @@ impl Parse<Type> for VecDeque<Token> {
             if out.len() == 1 {
                 return ExpressionWithoutType::resolve_type_alias(s, context);
             } else {
-                return Err("Double cannot be used with other type specifiers".into());
+                return Err("Aliased type cannot be used with other type specifiers".into());
             }
         }
         if out.contains(&Token::KeywordDouble) {
@@ -36,6 +36,13 @@ impl Parse<Type> for VecDeque<Token> {
                 return Ok(Type::Double);
             } else {
                 return Err("Double cannot be used with other type specifiers".into());
+            }
+        }
+        if out.contains(&Token::KeywordVoid) {
+            if out.len() == 1 {
+                return Ok(Type::Void);
+            } else {
+                return Err("Void cannot be used with other type specifiers".into());
             }
         }
         if out.contains(&Token::KeywordSigned) && out.contains(&Token::KeywordUnsigned) {
@@ -84,6 +91,7 @@ impl Token {
                     | Token::KeywordSigned
                     | Token::KeywordDouble
                     | Token::KeywordChar
+                    | Token::KeywordVoid
             )
         }
     }

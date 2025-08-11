@@ -27,6 +27,7 @@ impl Convert<AssemblyType> for Type {
             }
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
             Type::Char | Type::SignedChar | Type::UnsignedChar => Ok(AssemblyType::Byte),
+            Type::Void => unreachable!(),
         }
     }
 }

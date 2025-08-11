@@ -15,6 +15,7 @@ impl Type {
             Type::Char => 1,
             Type::SignedChar => 1,
             Type::UnsignedChar => 1,
+            Type::Void => unreachable!(),
         }
     }
 
@@ -31,6 +32,7 @@ impl Type {
             Type::Char => true,
             Type::SignedChar => true,
             Type::UnsignedChar => false,
+            Type::Void => unreachable!(),
         }
     }
 
@@ -47,6 +49,7 @@ impl Type {
             Type::Char => true,
             Type::SignedChar => true,
             Type::UnsignedChar => true,
+            Type::Void => unreachable!(),
         }
     }
 

@@ -40,6 +40,7 @@ impl StaticInitialiser {
             Type::Function(_, _) => unreachable!(),
             Type::Pointer(_) => unreachable!(),
             Type::Array(..) => unreachable!(),
+            Type::Void => unreachable!(),
         }
     }
 
@@ -65,6 +66,7 @@ impl StaticInitialiser {
                 value
             }
             Type::Function(_, _) => unreachable!(),
+            Type::Void => unreachable!(),
         }
     }
 

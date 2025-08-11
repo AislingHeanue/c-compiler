@@ -80,7 +80,7 @@ pub enum StatementNode {
         Box<Option<StatementNode>>,
     ),
     Pass, // null statement, just a semicolon
-    Return(ExpressionNode),
+    Return(Option<ExpressionNode>),
     // name of enclosing loop (controls where this jumps to)
     Break(Option<String>),
     // name of enclosing loop (controls where this jumps to)
@@ -148,6 +148,8 @@ pub enum ExpressionWithoutType {
     Dereference(Box<ExpressionNode>),
     AddressOf(Box<ExpressionNode>),
     String(Vec<i8>),
+    SizeOf(Box<ExpressionNode>),
+    SizeOfType(Type),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
