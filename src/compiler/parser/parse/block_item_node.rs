@@ -1,4 +1,4 @@
-use super::{Parse, ParseContext};
+use super::{Identity, Parse, ParseContext};
 use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::{BlockItemNode, DeclarationNode},
@@ -9,10 +9,7 @@ use std::{
     error::Error,
 };
 
-type Scopes = (
-    HashMap<String, (String, bool)>,
-    HashMap<String, (String, bool)>,
-);
+type Scopes = (HashMap<String, Identity>, HashMap<String, Identity>);
 
 impl Parse<Vec<BlockItemNode>> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Vec<BlockItemNode>, Box<dyn Error>> {
@@ -53,7 +50,7 @@ impl Parse<BlockItemNode> for VecDeque<Token> {
             return Err("Block item has no tokens".into());
         }
 
-        if self.peek()?.is_specifier() {
+        if self.peek()?.is_start_of_declaration(context) {
             let declaration = self.parse(context)?;
             if let DeclarationNode::Function(ref f) = declaration {
                 if f.body.is_some() && !context.do_not_validate {

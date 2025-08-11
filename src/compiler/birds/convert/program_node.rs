@@ -17,6 +17,7 @@ impl Convert<BirdsProgramNode> for ProgramNode {
                 .into_iter()
                 .filter_map(|declaration| match declaration {
                     DeclarationNode::Variable(_) => None,
+                    DeclarationNode::Type(_) => None,
                     DeclarationNode::Function(f) => Some(f.convert(context)),
                 }),
             |iter| iter.flatten().collect(),

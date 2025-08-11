@@ -16,22 +16,24 @@ impl Parse<Declarator> for VecDeque<Token> {
             }
             _ => {
                 let mut simple_declarator = self.parse_simple_declarator(context)?;
-                match self.peek()? {
+                match self.peek() {
                     // function declaration type!
-                    Token::OpenParen => {
+                    Ok(Token::OpenParen) => {
                         let param_list = self.parse_param_list(context)?;
                         Ok(Declarator::Function(
                             Box::new(simple_declarator),
                             param_list,
                         ))
                     }
-                    Token::OpenSquareBracket => {
-                        while matches!(self.peek()?, Token::OpenSquareBracket) {
+                    Ok(Token::OpenSquareBracket) => {
+                        while !self.is_empty() && matches!(self.peek()?, Token::OpenSquareBracket) {
                             simple_declarator = self.parse_array(simple_declarator, context)?;
                         }
                         Ok(simple_declarator)
                     }
-                    _ => Ok(simple_declarator),
+                    Ok(_) => Ok(simple_declarator),
+                    // no further tokens found after the declarator, this is okay
+                    Err(_) => Ok(simple_declarator),
                 }
             }
         }
@@ -129,6 +131,7 @@ impl ParseDeclarator for VecDeque<Token> {
             Constant::Long(i) => i.try_into().ok(),
             Constant::UnsignedInteger(i) => Some(i.into()),
             Constant::UnsignedLong(i) => Some(i),
+            Constant::Char(i) => Some(i as u64),
             _ => None,
         };
         if let Some(i) = maybe_i {

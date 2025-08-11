@@ -68,6 +68,7 @@ impl ParseAbstractDeclarator for VecDeque<Token> {
             Constant::Long(i) => i.try_into().ok(),
             Constant::UnsignedInteger(i) => Some(i.into()),
             Constant::UnsignedLong(i) => Some(i),
+            Constant::Char(i) => Some(i as u64),
             _ => None,
         };
         if let Some(i) = maybe_i {

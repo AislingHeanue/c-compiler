@@ -25,14 +25,20 @@ where
 }
 
 pub struct ParseContext {
-    // map from string to sting-as-seen-in-assembly and is-externally-linked
-    current_scope_identifiers: HashMap<String, (String, bool)>,
-    outer_scope_identifiers: HashMap<String, (String, bool)>,
+    // map from string to sting-as-seen-in-assembly and is-externally-linked and is_type_alias
+    current_scope_identifiers: HashMap<String, Identity>,
+    outer_scope_identifiers: HashMap<String, Identity>,
     num_variables: usize,
     do_not_validate: bool,
     // this prevent creating an extra new scope entering function bodies
     current_block_is_function_body: bool,
     current_scope_is_file: bool,
+}
+
+#[derive(Clone, Debug)]
+pub enum Identity {
+    Variable(String, bool),
+    TypeAlias(Type),
 }
 
 pub fn do_parse(
@@ -62,7 +68,7 @@ impl Parse<ProgramNode> for VecDeque<Token> {
 
 impl Parse<ForInitialiserNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<ForInitialiserNode, Box<dyn Error>> {
-        if self.peek()?.is_specifier() {
+        if self.peek()?.is_specifier(context) {
             let block_item = self.parse(context)?;
             if let BlockItemNode::Declaration(DeclarationNode::Variable(v)) = block_item {
                 if !context.do_not_validate && v.storage_class.is_some() {
@@ -132,7 +138,7 @@ impl Parse<Constant> for VecDeque<Token> {
             Token::LongConstant(v) => Ok(Constant::Long(v)),
             Token::UnsignedLongConstant(v) => Ok(Constant::UnsignedLong(v)),
             Token::DoubleConstant(v) => Ok(Constant::Double(v)),
-            Token::CharacterConstant(num) => Ok(Constant::Integer(num.into())),
+            Token::CharacterConstant(num) => Ok(Constant::Char(num)),
             _ => unreachable!(),
         }
     }

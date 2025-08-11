@@ -125,8 +125,6 @@ impl ImmediateValue {
     fn can_fit_in_byte(&self) -> bool {
         match self {
             ImmediateValue::Signed(value) => *value <= i8::MAX.into() && *value >= i8::MIN.into(),
-            // the boundary for immediate values being too big is ALWAYS 2^31 - 1, not 2^32 - 1 for
-            // unsigned
             ImmediateValue::Unsigned(value) => *value <= u8::MAX as u64,
         }
     }

@@ -179,6 +179,18 @@ impl ExpressionNode {
         Ok(())
     }
 
+    // required because functions that are compiled by clang assume that the caller always pads
+    // 1-byte args to 4 bytes.
+    pub fn pad_single_byte_arg(&mut self) -> Result<(), Box<dyn Error>> {
+        let t1 = self.1.as_ref().unwrap();
+        match t1 {
+            Type::Char | Type::SignedChar => self.convert_type(&Type::Integer),
+            Type::UnsignedChar => self.convert_type(&Type::UnsignedInteger),
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         if self.1.is_some() {
             // no need to type check this expression a second time
@@ -198,6 +210,7 @@ impl ExpressionNode {
                     for (arg, param) in args.iter_mut().zip(params.iter()) {
                         arg.check_types_and_convert(context)?;
                         arg.convert_type_by_assignment(param)?;
+                        arg.pad_single_byte_arg()?;
                     }
 
                     *out.clone()

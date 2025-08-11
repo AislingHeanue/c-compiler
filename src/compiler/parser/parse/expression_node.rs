@@ -1,5 +1,5 @@
 use super::{
-    AbstractDeclarator, BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, Parse,
+    AbstractDeclarator, BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, Identity, Parse,
     ParseContext, Type, UnaryOperatorNode,
 };
 use crate::compiler::lexer::{Token, TokenVector};
@@ -155,7 +155,7 @@ impl ParseExpression for VecDeque<Token> {
                 Token::OpenParen => {
                     // casting
                     self.expect(Token::OpenParen)?;
-                    if self.peek()?.is_type() {
+                    if self.peek()?.is_type(context) {
                         let cast_type: Type = self.parse(context)?;
                         let abstract_declarator: AbstractDeclarator = self.parse(context)?;
                         let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
@@ -333,10 +333,59 @@ impl ExpressionWithoutType {
         // );
         if context.do_not_validate {
             Ok((name.to_string(), false))
-        } else if let Some(new_name) = context.current_scope_identifiers.get(name) {
-            Ok(new_name.clone())
-        } else if let Some(new_name) = context.outer_scope_identifiers.get(name) {
-            Ok(new_name.clone())
+        } else if let Some(identity) = context.current_scope_identifiers.get(name) {
+            if let Identity::Variable(new_name, link) = identity {
+                Ok((new_name.clone(), *link))
+            } else {
+                Err(format!(
+                    "Identifier '{}' is a type alias in the current scope, not a variable",
+                    name
+                )
+                .into())
+            }
+        } else if let Some(identity) = context.outer_scope_identifiers.get(name) {
+            if let Identity::Variable(new_name, link) = identity {
+                Ok((new_name.clone(), *link))
+            } else {
+                Err(format!(
+                    "Identifier '{}' is a type alias in the parent scope, not a variable",
+                    name
+                )
+                .into())
+            }
+        } else {
+            Err(format!("Identifier used before declaration: {}", name).into())
+        }
+    }
+
+    pub fn resolve_type_alias(
+        name: &str,
+        context: &mut ParseContext,
+    ) -> Result<Type, Box<dyn Error>> {
+        // println!(
+        //     "resolve {:?} {:?}",
+        //     context.outer_scope_identifiers, context.current_scope_identifiers
+        // );
+        if let Some(identity) = context.current_scope_identifiers.get(name) {
+            if let Identity::TypeAlias(t) = identity {
+                Ok(t.clone())
+            } else {
+                Err(format!(
+                    "Identifier '{}' is a variable in the current scope, not a type alias",
+                    name
+                )
+                .into())
+            }
+        } else if let Some(identity) = context.outer_scope_identifiers.get(name) {
+            if let Identity::TypeAlias(t) = identity {
+                Ok(t.clone())
+            } else {
+                Err(format!(
+                    "Identifier '{}' is a variable in the parent scope, not a type alias",
+                    name
+                )
+                .into())
+            }
         } else {
             Err(format!("Identifier used before declaration: {}", name).into())
         }

@@ -1,10 +1,11 @@
 use itertools::Itertools;
 
-use super::{Parse, ParseContext, Type};
+use super::{Identity, Parse, ParseContext, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::{
-        BlockItemNode, DeclarationNode, Declarator, FunctionDeclaration, VariableDeclaration,
+        BlockItemNode, DeclarationNode, Declarator, FunctionDeclaration, TypeDeclaration,
+        VariableDeclaration,
     },
     types::StorageClass,
 };
@@ -12,9 +13,45 @@ use std::{collections::VecDeque, error::Error};
 
 impl Parse<DeclarationNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<DeclarationNode, Box<dyn Error>> {
-        let (base_type, storage_class) = self.parse(context)?;
+        if matches!(self.peek()?, Token::KeywordTypedef) {
+            self.expect(Token::KeywordTypedef)?;
+            let (base_type, storage_class, declarator) = self.parse(context)?;
+            self.expect(Token::SemiColon)?;
+            if storage_class.is_some() {
+                return Err("Cannot use static or extern in a typedef alias".into());
+            }
+            let declarator_output = declarator.apply_to_type(base_type)?;
 
-        let declarator: Declarator = self.parse(context)?;
+            let out_type = declarator_output.out_type;
+            let name = declarator_output.name;
+            // let mut statement_tokens = VecDeque::new();
+            // // read until semicolon
+            // while !matches!(self.peek()?, Token::SemiColon) {
+            //     statement_tokens.push_back(self.read()?);
+            // }
+            // self.expect(Token::SemiColon)?;
+            //
+            // let name_token = statement_tokens
+            //     .pop_back()
+            //     .ok_or::<Box<dyn Error>>("Typedef instruction has too few variables".into())?;
+            // let name = if let Token::Identifier(s) = name_token {
+            //     s
+            // } else {
+            //     return Err("Type alias name is not an identifier".into());
+            // };
+            // let t: Type = statement_tokens.parse(context)?;
+            context
+                .current_scope_identifiers
+                .insert(name.clone(), Identity::TypeAlias(out_type.clone()));
+
+            return Ok(DeclarationNode::Type(TypeDeclaration {
+                target_type: out_type,
+                name,
+            }));
+        }
+
+        let (base_type, storage_class, declarator) = self.parse(context)?;
+
         let declarator_output = declarator.apply_to_type(base_type)?;
 
         let out_type = declarator_output.out_type;
@@ -126,7 +163,7 @@ impl DeclarationNode {
         };
 
         if !context.do_not_validate {
-            if let Some((_new_name, other_has_linkage)) =
+            if let Some(Identity::Variable(_new_name, other_has_linkage)) =
                 context.current_scope_identifiers.get(&name)
             {
                 if !(*other_has_linkage && is_linked) {
@@ -137,31 +174,40 @@ impl DeclarationNode {
                     .into());
                 }
             }
-            // not entirely sure how this is compatible with the future type-checking step, but okay
-            context
-                .current_scope_identifiers
-                .insert(name.clone(), (new_name.clone(), is_linked));
+            context.current_scope_identifiers.insert(
+                name.clone(),
+                Identity::Variable(new_name.clone(), is_linked),
+            );
         }
 
         Ok(new_name)
     }
 }
 
-impl Parse<(Type, Option<StorageClass>)> for VecDeque<Token> {
+impl Parse<(Type, Option<StorageClass>, Declarator)> for VecDeque<Token> {
     fn parse(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Type, Option<StorageClass>), Box<dyn Error>> {
+    ) -> Result<(Type, Option<StorageClass>, Declarator), Box<dyn Error>> {
         // Specifiers may be one of "static", "int" or "extern"
         // ... and there may be any non-zero amount of them
         let mut storage_classes = Vec::new();
-        let mut types = Vec::new();
-        while self.peek()?.is_specifier() {
-            if self.peek()?.is_type() {
-                types.push(self.read()?);
+        let mut types_deque = VecDeque::new();
+        while self.peek()?.is_specifier(context) {
+            if self.peek()?.is_type(context) {
+                types_deque.push_back(self.read()?);
             } else {
                 storage_classes.push(self.read()?);
             }
+        }
+        let mut declarator_deque = VecDeque::new();
+        while !self.is_empty()
+            && !matches!(
+                self.peek()?,
+                Token::OpenBrace | Token::Assignment | Token::SemiColon
+            )
+        {
+            declarator_deque.push_back(self.read()?);
         }
 
         if storage_classes.len() > 1 {
@@ -178,8 +224,31 @@ impl Parse<(Type, Option<StorageClass>)> for VecDeque<Token> {
             _ => unreachable!(),
         });
 
-        let types_deque: &mut VecDeque<Token> = &mut types.into();
-        let this_type = types_deque.parse(context)?;
-        Ok((this_type, storage))
+        while !types_deque.is_empty() {
+            // try and get a valid type and declarator for the given expression
+            let mut new_types_deque = types_deque.clone();
+            let mut new_declarator_deque = declarator_deque.clone();
+            let this_type = new_types_deque.parse(context);
+            let declarator = new_declarator_deque.parse(context);
+            if this_type.is_ok()
+                && new_types_deque.is_empty()
+                && declarator.is_ok()
+                && new_declarator_deque.is_empty()
+            {
+                return Ok((this_type?, storage, declarator?));
+            }
+            // Entering this section means that we failed to properly split the type and the
+            // declarator, so try again with a different split
+
+            // println!(
+            //     "Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?}",
+            //     types_deque,this_type,  declarator_deque, declarator
+            // );
+            let move_this_to_the_declarator = types_deque.pop_back().unwrap();
+            declarator_deque.push_front(move_this_to_the_declarator);
+        }
+
+        Err("Declaration could not be reconciled to match both a type and a declarator".into())
+        // Ok((this_type, storage, declarator))
     }
 }

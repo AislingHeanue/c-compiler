@@ -78,6 +78,7 @@ pub enum Token {
     KeywordUnsigned,
     KeywordDouble,
     KeywordChar,
+    KeywordTypedef,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -174,6 +175,7 @@ lazy_static! {
                 Token::KeywordUnsigned =>r"unsigned\b",
                 Token::KeywordDouble =>r"double\b",
                 Token::KeywordChar =>r"char\b",
+                Token::KeywordTypedef =>r"typedef\b",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -217,7 +219,6 @@ impl Token {
     }
 
     fn parse_character(text: &str) -> i8 {
-        // println!("{:?}", text);
         let code: u64 = match text {
             _ if text.len() == 1 => text.chars().next().unwrap().into(),
             r"\'" => '\''.into(),
@@ -231,7 +232,7 @@ impl Token {
             r"\r" => '\r'.into(),
             r"\t" => '\t'.into(),
             r"\v" => 11, //vertical tab
-            _ => panic!("Invalid token"),
+            _ => panic!("Char must be a valid ASCII 7-bit value"),
         };
         code as i8
     }
@@ -295,22 +296,6 @@ pub fn lex(mut contents: &str) -> Result<VecDeque<Token>, Box<dyn Error>> {
 }
 
 impl Token {
-    pub fn is_specifier(&self) -> bool {
-        self.is_type() || matches!(self, Token::KeywordStatic | Token::KeywordExtern)
-    }
-
-    pub fn is_type(&self) -> bool {
-        matches!(
-            self,
-            Token::KeywordLong
-                | Token::KeywordInt
-                | Token::KeywordUnsigned
-                | Token::KeywordSigned
-                | Token::KeywordDouble
-                | Token::KeywordChar
-        )
-    }
-
     pub fn is_unary_operator(&self) -> bool {
         matches!(
             self,

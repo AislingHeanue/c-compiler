@@ -3,7 +3,7 @@ use itertools::Itertools;
 use super::{
     BinaryOperatorNode, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
     ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
-    InitialiserWithoutType, ProgramNode, StatementNode, Type, UnaryOperatorNode,
+    InitialiserWithoutType, ProgramNode, StatementNode, Type, TypeDeclaration, UnaryOperatorNode,
     VariableDeclaration,
 };
 use std::{borrow::Borrow, fmt::Display};
@@ -207,6 +207,12 @@ impl CodeDisplay for VariableDeclaration {
     }
 }
 
+impl CodeDisplay for TypeDeclaration {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        format!("type {} {}", self.name, self.target_type.show(context))
+    }
+}
+
 impl CodeDisplay for InitialiserNode {
     fn show(&self, context: &mut DisplayContext) -> String {
         if let Some(t) = &self.1 {
@@ -277,6 +283,7 @@ impl CodeDisplay for DeclarationNode {
         match self {
             DeclarationNode::Variable(v) => v.show(context),
             DeclarationNode::Function(f) => f.show(context),
+            DeclarationNode::Type(t) => t.show(context),
         }
     }
 }

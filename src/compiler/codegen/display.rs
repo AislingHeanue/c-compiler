@@ -558,7 +558,7 @@ impl CodeDisplay for Instruction {
                 format!("{:indent$}cqo", "", indent = context.indent)
             }
             Instruction::Cdq(AssemblyType::ByteArray(_size, _alignment)) => {
-                todo!()
+                panic!("Cdq cannot apply to bytes")
             }
             Instruction::Cmp(t, left, right) => {
                 if *t == AssemblyType::Double {

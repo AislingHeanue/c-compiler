@@ -124,6 +124,7 @@ impl Validate for DeclarationNode {
         match self {
             DeclarationNode::Variable(v) => v.validate(context)?,
             DeclarationNode::Function(f) => f.validate(context)?,
+            DeclarationNode::Type(_) => {}
         };
         Ok(())
     }

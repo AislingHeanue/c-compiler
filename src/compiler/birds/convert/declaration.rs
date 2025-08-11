@@ -26,6 +26,7 @@ impl Convert<Vec<BirdsInstructionNode>> for DeclarationNode {
             // function declarations without a body do not emit instructions, so this branch is
             // ignored entirely.
             DeclarationNode::Function(_f) => Ok(Vec::new()),
+            DeclarationNode::Type(_t) => Ok(Vec::new()),
         }
     }
 }
@@ -155,7 +156,6 @@ impl InitialiserNode {
                     let difference_in_size =
                         size as i32 - (context.current_initialiser_offset - first_offset);
                     for _ in 0..difference_in_size {
-                        println!("{:?} {}", instructions, difference_in_size);
                         instructions.push(BirdsInstructionNode::CopyToOffset(
                             BirdsValueNode::Constant(Constant::get_typed(0, &Type::Char)),
                             dst.clone(),

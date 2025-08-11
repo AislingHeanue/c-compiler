@@ -37,6 +37,12 @@ pub struct VariableDeclaration {
     pub storage_class: Option<StorageClass>,
 }
 
+#[derive(Debug)]
+pub struct TypeDeclaration {
+    pub target_type: Type,
+    pub name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct InitialiserNode(pub InitialiserWithoutType, pub Option<Type>);
 
@@ -54,6 +60,7 @@ pub enum BlockItemNode {
 
 #[derive(Debug)]
 pub enum DeclarationNode {
+    Type(TypeDeclaration),
     Variable(VariableDeclaration),
     Function(FunctionDeclaration),
 }
