@@ -3,6 +3,7 @@ use itertools::process_results;
 use super::{Declarator, Parse, ParseContext, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
+    parser::StructDeclaration,
     types::Constant,
 };
 use std::{collections::VecDeque, error::Error};
@@ -45,7 +46,10 @@ pub struct DeclaratorApplicationOutput {
     pub name: String,
     pub out_type: Type,
     pub param_names: Option<Vec<String>>,
+    pub struct_declarations: Vec<StructDeclaration>,
 }
+
+pub type OutputWithStruct = (Type, Declarator, Option<StructDeclaration>);
 
 trait ParseDeclarator {
     fn parse_simple_declarator(
@@ -56,11 +60,11 @@ trait ParseDeclarator {
     fn parse_param_list(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<Vec<(Type, Declarator)>, Box<dyn Error>>;
+    ) -> Result<Vec<OutputWithStruct>, Box<dyn Error>>;
     fn parse_param(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Type, Declarator), Box<dyn Error>>;
+    ) -> Result<OutputWithStruct, Box<dyn Error>>;
     fn parse_array(
         &mut self,
         declarator: Declarator,
@@ -90,7 +94,7 @@ impl ParseDeclarator for VecDeque<Token> {
     fn parse_param_list(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<Vec<(Type, Declarator)>, Box<dyn Error>> {
+    ) -> Result<Vec<OutputWithStruct>, Box<dyn Error>> {
         self.expect(Token::OpenParen)?;
         let mut param_list = Vec::new();
 
@@ -117,11 +121,10 @@ impl ParseDeclarator for VecDeque<Token> {
     fn parse_param(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Type, Declarator), Box<dyn Error>> {
-        let out_type = self.parse(context)?;
+    ) -> Result<OutputWithStruct, Box<dyn Error>> {
+        let (base_type, declarator, struct_declaration) = self.parse(context)?;
         // function params never have static or extern storage
-        let declarator = self.parse(context)?;
-        Ok((out_type, declarator))
+        Ok((base_type, declarator, struct_declaration))
     }
 
     fn parse_array(
@@ -164,6 +167,7 @@ impl Declarator {
                 out_type: base_type,
                 name,
                 param_names: None,
+                struct_declarations: Vec::new(),
             }),
             Declarator::Pointer(declarator) => {
                 // discard param names, function pointers aren't real
@@ -175,10 +179,14 @@ impl Declarator {
                 } else {
                     return Err("Cannot apply additional declarators to a function type (function pointers aren't real)".into());
                 };
+                let struct_declarations: Vec<StructDeclaration> = params
+                    .iter()
+                    .filter_map(|(_, _, struct_declaration)| struct_declaration.clone())
+                    .collect();
                 let (param_types, param_names): (Vec<Type>, Vec<String>) = process_results(
                     params
                         .into_iter()
-                        .map(|(t, declarator)| declarator.apply_to_type(t)),
+                        .map(|(t, declarator, _struct_declaration)| declarator.apply_to_type(t)),
                     |iter| iter.map(|o| (o.out_type, o.name)).unzip(),
                 )?;
 
@@ -186,6 +194,7 @@ impl Declarator {
                     out_type: Type::Function(Box::new(base_type), param_types),
                     name,
                     param_names: Some(param_names),
+                    struct_declarations,
                 })
             }
             Declarator::Array(declarator, size) => {

@@ -4,7 +4,7 @@ use std::error::Error;
 use itertools::process_results;
 
 use crate::compiler::{
-    parser::{BinaryOperatorNode, BlockItemNode, ProgramNode},
+    parser::{BinaryOperatorNode, BlockItemNode, ProgramNode, StructInfo},
     types::{StorageInfo, SymbolInfo, Type},
 };
 
@@ -20,6 +20,7 @@ mod statement_node;
 pub fn do_birds(
     parsed: ProgramNode,
     symbols: HashMap<String, SymbolInfo>,
+    structs: HashMap<String, StructInfo>,
 ) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
     let mut context = ConvertContext {
         last_end_label_number: 0,
@@ -30,6 +31,7 @@ pub fn do_birds(
         current_initialiser_offset: 0,
         num_block_strings: 0,
         symbols,
+        structs,
     };
 
     let result = parsed.convert(&mut context)?;
@@ -52,6 +54,7 @@ pub struct ConvertContext {
     current_initialiser_offset: i32,
     num_block_strings: i32,
     symbols: HashMap<String, SymbolInfo>,
+    structs: HashMap<String, StructInfo>,
 }
 
 impl<U, V> Convert<Option<U>> for Option<V>

@@ -24,6 +24,7 @@ pub struct FunctionDeclaration {
     pub params: Vec<String>,
     pub body: Option<Vec<BlockItemNode>>,
     pub storage_class: Option<StorageClass>,
+    pub struct_declarations: Vec<StructDeclaration>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -35,12 +36,29 @@ pub struct VariableDeclaration {
     pub name: String,
     pub init: Option<InitialiserNode>,
     pub storage_class: Option<StorageClass>,
+    // variable declarations may also include an inline struct declaration, make sure to include
+    // them here
+    pub struct_declaration: Option<StructDeclaration>,
 }
 
 #[derive(Debug)]
 pub struct TypeDeclaration {
     pub target_type: Type,
     pub name: String,
+    pub struct_declaration: Option<StructDeclaration>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructDeclaration {
+    pub name: String,
+    pub members: Option<Vec<StructMember>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructMember {
+    pub member_type: Type,
+    pub name: String,
+    pub struct_declaration: Option<StructDeclaration>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +81,7 @@ pub enum DeclarationNode {
     Type(TypeDeclaration),
     Variable(VariableDeclaration),
     Function(FunctionDeclaration),
+    Struct(StructDeclaration),
 }
 
 #[derive(Debug)]
@@ -155,6 +174,10 @@ pub enum ExpressionWithoutType {
     String(Vec<i8>),
     SizeOf(Box<ExpressionNode>),
     SizeOfType(Type),
+    // operates only on structs
+    Dot(Box<ExpressionNode>, String),
+    // operates only on pointers (to structs)
+    Arrow(Box<ExpressionNode>, String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -190,12 +213,29 @@ pub enum BinaryOperatorNode {
     ShiftRight,
 }
 
+#[derive(Debug, Clone)]
+pub struct StructInfo {
+    pub alignment: u64,
+    pub size: u64,
+    pub members: Vec<MemberEntry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MemberEntry {
+    pub member_type: Type,
+    pub name: String,
+    pub offset: u64,
+}
+
 #[derive(Debug)]
 pub enum Declarator {
     Name(String),
     Pointer(Box<Declarator>),
     // params info and any further declarator to apply to the parent type
-    Function(Box<Declarator>, Vec<(Type, Declarator)>),
+    Function(
+        Box<Declarator>,
+        Vec<(Type, Declarator, Option<StructDeclaration>)>,
+    ),
     // containing type and size
     Array(Box<Declarator>, u64),
 }

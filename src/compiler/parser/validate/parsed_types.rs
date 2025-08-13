@@ -5,21 +5,21 @@ use crate::compiler::types::Type;
 use super::{CheckTypes, ValidateContext};
 
 impl CheckTypes for Type {
-    fn check_types(&mut self, _context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         match self {
             Type::Function(out, params) => {
-                out.check_types(_context)?;
+                out.check_types(context)?;
                 for param in params {
-                    param.check_types(_context)?
+                    param.check_types(context)?
                 }
             }
             Type::Array(inner, _) => {
-                if !inner.is_complete() {
+                if !inner.is_complete(&mut context.structs) {
                     return Err("Array can only be composed of complete types".into());
                 }
-                inner.check_types(_context)?
+                inner.check_types(context)?
             }
-            Type::Pointer(inner) => inner.check_types(_context)?,
+            Type::Pointer(inner) => inner.check_types(context)?,
             _ => {}
         }
         Ok(())

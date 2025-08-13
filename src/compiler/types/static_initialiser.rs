@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use conv::{ApproxInto, ConvUtil, RoundToZero, Wrapping};
 
 use super::{ComparableStatic, Constant, InitialValue, StaticInitialiser, Type};
@@ -41,6 +43,7 @@ impl StaticInitialiser {
             Type::Pointer(_) => unreachable!(),
             Type::Array(..) => unreachable!(),
             Type::Void => unreachable!(),
+            Type::Struct(_) => unreachable!(),
         }
     }
 
@@ -67,13 +70,16 @@ impl StaticInitialiser {
             }
             Type::Function(_, _) => unreachable!(),
             Type::Void => unreachable!(),
+            Type::Struct(_) => unreachable!(),
         }
     }
 
     fn char<T: ApproxInto<i8, Wrapping>>(i: T) -> StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
-            return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(Type::Char.get_size()));
+            return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
+                Type::Char.get_size(&mut HashMap::new()),
+            ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::Char(real_i))
     }
@@ -82,7 +88,7 @@ impl StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
             return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                Type::Integer.get_size(),
+                Type::Integer.get_size(&mut HashMap::new()),
             ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::Integer(real_i))
@@ -91,7 +97,9 @@ impl StaticInitialiser {
     fn long<T: ApproxInto<i64, Wrapping>>(i: T) -> StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
-            return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(Type::Long.get_size()));
+            return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
+                Type::Long.get_size(&mut HashMap::new()),
+            ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::Long(real_i))
     }
@@ -100,7 +108,7 @@ impl StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
             return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                Type::UnsignedChar.get_size(),
+                Type::UnsignedChar.get_size(&mut HashMap::new()),
             ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::UnsignedChar(real_i))
@@ -110,7 +118,7 @@ impl StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
             return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                Type::UnsignedInteger.get_size(),
+                Type::UnsignedInteger.get_size(&mut HashMap::new()),
             ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::UnsignedInteger(real_i))
@@ -120,7 +128,7 @@ impl StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
             return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                Type::UnsignedLong.get_size(),
+                Type::UnsignedLong.get_size(&mut HashMap::new()),
             ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::UnsignedLong(real_i))
@@ -130,7 +138,7 @@ impl StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0. {
             return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                Type::Double.get_size(),
+                Type::Double.get_size(&mut HashMap::new()),
             ));
         }
         StaticInitialiser::Double(ConvUtil::approx_as(real_i).unwrap())
@@ -139,7 +147,9 @@ impl StaticInitialiser {
     fn char_from_double<T: ApproxInto<i8, RoundToZero>>(i: T) -> StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
-            return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(Type::Char.get_size()));
+            return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
+                Type::Char.get_size(&mut HashMap::new()),
+            ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::Char(real_i))
     }
@@ -147,7 +157,7 @@ impl StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
             return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                Type::Integer.get_size(),
+                Type::Integer.get_size(&mut HashMap::new()),
             ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::Integer(real_i))
@@ -156,7 +166,9 @@ impl StaticInitialiser {
     fn long_from_double<T: ApproxInto<i64, RoundToZero>>(i: T) -> StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
-            return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(Type::Long.get_size()));
+            return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
+                Type::Long.get_size(&mut HashMap::new()),
+            ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::Long(real_i))
     }
@@ -165,7 +177,7 @@ impl StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
             return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                Type::UnsignedInteger.get_size(),
+                Type::UnsignedInteger.get_size(&mut HashMap::new()),
             ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::UnsignedChar(real_i))
@@ -175,7 +187,7 @@ impl StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
             return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                Type::UnsignedInteger.get_size(),
+                Type::UnsignedInteger.get_size(&mut HashMap::new()),
             ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::UnsignedInteger(real_i))
@@ -185,7 +197,7 @@ impl StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
             return StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                Type::UnsignedLong.get_size(),
+                Type::UnsignedLong.get_size(&mut HashMap::new()),
             ));
         }
         StaticInitialiser::Ordinal(ComparableStatic::UnsignedLong(real_i))

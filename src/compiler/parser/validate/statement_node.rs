@@ -28,7 +28,15 @@ impl Validate for StatementNode {
             ValidationPass::TypeChecking => {}
         }
         match self {
-            StatementNode::Expression(ref mut e) => e.validate(context)?,
+            StatementNode::Expression(ref mut e) => {
+                e.validate(context)?;
+                if matches!(context.pass, ValidationPass::TypeChecking)
+                    && !e.1.clone().unwrap().is_complete(&mut context.structs)
+                    && e.1.clone().unwrap() != Type::Void
+                {
+                    return Err("An expression statement cannot return an incomplete type".into());
+                }
+            }
             StatementNode::Pass => {}
             StatementNode::Return(ref mut e) => e.validate(context)?,
             StatementNode::If(ref mut condition, ref mut then, ref mut otherwise) => {
@@ -118,13 +126,16 @@ impl Validate for StatementNode {
                 } else {
                     init.validate(context)?;
                     cond.validate(context)?;
-                    if matches!(context.pass, ValidationPass::TypeChecking) && cond.is_some() {
-                        let cond = cond.as_mut().unwrap();
-                        cond.check_types(context)?;
-                        if !cond.1.as_ref().unwrap().is_scalar() {
-                            return Err(
-                                "Can't construct a for loop with a non-scalar condition".into()
-                            );
+                    if matches!(context.pass, ValidationPass::TypeChecking) {
+                        init.check_types(context)?;
+                        if cond.is_some() {
+                            let cond = cond.as_mut().unwrap();
+                            cond.check_types(context)?;
+                            if !cond.1.as_ref().unwrap().is_scalar() {
+                                return Err(
+                                    "Can't construct a for loop with a non-scalar condition".into(),
+                                );
+                            }
                         }
                     }
                     post.validate(context)?;
@@ -191,7 +202,7 @@ impl CheckTypes for StatementNode {
 
                 if let Some(e) = exp {
                     e.check_types_and_convert(context)?;
-                    e.convert_type_by_assignment(&out_type)?;
+                    e.convert_type_by_assignment(&out_type, context)?;
                 } else if *out_type != Type::Void {
                     return Err("Return in non-void function must have a value".into());
                 }

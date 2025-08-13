@@ -1,12 +1,16 @@
-use super::{Parse, ParseContext, Type};
+use super::{declarator::OutputWithStruct, Parse, ParseContext, StructMember, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::ExpressionWithoutType,
+    parser::{Declarator, ExpressionWithoutType, StructDeclaration},
 };
 use std::{collections::VecDeque, error::Error};
 
 impl Parse<Type> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Type, Box<dyn Error>> {
+        if matches!(self.peek()?, Token::KeywordStruct) {
+            let declaration: StructDeclaration = self.parse_implicit(context)?;
+            return Ok(Type::Struct(declaration.name));
+        }
         let mut out = Vec::new();
         while !self.is_empty() && self.peek()?.is_type(context) {
             out.push(self.read()?)
@@ -78,6 +82,243 @@ impl Parse<Type> for VecDeque<Token> {
     }
 }
 
+impl Parse<(Type, Option<StructDeclaration>)> for VecDeque<Token> {
+    fn parse(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<(Type, Option<StructDeclaration>), Box<dyn Error>> {
+        if matches!(self.peek()?, Token::KeywordStruct) {
+            let declaration: StructDeclaration = self.parse_implicit(context)?;
+            Ok((Type::Struct(declaration.name.clone()), Some(declaration)))
+        } else {
+            let t: Type = self.parse(context)?;
+            Ok((t, None))
+        }
+    }
+}
+
+impl Parse<StructDeclaration> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<StructDeclaration, Box<dyn Error>> {
+        self.expect(Token::KeywordStruct)?;
+        let name = if let Token::Identifier(name) = self.read()? {
+            name
+        } else {
+            return Err("Struct type is missing name identifier".into());
+        };
+
+        // NOTE: DURING PARSING this step here, we resolve the struct name from the current scope,
+        // or declare that this is a new struct. Then, we evaluate its members with the context
+        // that this struct now exists.
+        let new_name = ExpressionWithoutType::new_struct_name(&name, context)?;
+        let members = if !self.is_empty() && self.peek()? == Token::OpenBrace {
+            self.expect(Token::OpenBrace)?;
+            let mut members: Vec<StructMember> = Vec::new();
+            while self.peek()? != Token::CloseBrace {
+                members.push(self.parse(context)?)
+            }
+            self.expect(Token::CloseBrace)?;
+
+            if members.is_empty() {
+                return Err(
+                    "Struct definition (eg. with '{}') must have at least one member".into(),
+                );
+            } else {
+                Some(members)
+            }
+        } else {
+            None
+        };
+
+        Ok(StructDeclaration {
+            name: new_name,
+            members,
+        })
+    }
+}
+
+pub trait ParseImplicitStructDeclaration {
+    fn parse_implicit(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<StructDeclaration, Box<dyn Error>>;
+}
+
+impl ParseImplicitStructDeclaration for VecDeque<Token> {
+    fn parse_implicit(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<StructDeclaration, Box<dyn Error>> {
+        self.expect(Token::KeywordStruct)?;
+        let name = if let Token::Identifier(name) = self.read()? {
+            name
+        } else {
+            return Err("Struct type is missing name identifier".into());
+        };
+
+        let new_name = ExpressionWithoutType::resolve_struct_name(&name, context)?;
+        let members = if !self.is_empty() && self.peek()? == Token::OpenBrace {
+            self.expect(Token::OpenBrace)?;
+            let mut members: Vec<StructMember> = Vec::new();
+            while self.peek()? != Token::CloseBrace {
+                members.push(self.parse(context)?)
+            }
+            self.expect(Token::CloseBrace)?;
+
+            if members.is_empty() {
+                return Err(
+                    "Struct definition (eg. with '{}') must have at least one member".into(),
+                );
+            } else {
+                Some(members)
+            }
+        } else {
+            None
+        };
+
+        Ok(StructDeclaration {
+            name: new_name,
+            members,
+        })
+    }
+}
+
+impl Parse<StructMember> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<StructMember, Box<dyn Error>> {
+        let (base_type, declarator, struct_declaration): (
+            Type,
+            Declarator,
+            Option<StructDeclaration>,
+        ) = self.parse(context)?;
+        self.expect(Token::SemiColon)?;
+        let declarator_output = declarator.apply_to_type(base_type)?;
+
+        if let Type::Function(_, _) = declarator_output.out_type {
+            return Err("A struct member may not have a function type".into());
+        }
+
+        Ok(StructMember {
+            member_type: declarator_output.out_type,
+            name: declarator_output.name,
+            struct_declaration,
+        })
+    }
+}
+
+impl Parse<OutputWithStruct> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<OutputWithStruct, Box<dyn Error>> {
+        let (mut types_deque, storage) = self.pop_tokens_for_type(context)?;
+
+        // DeclarationNode should already filter out any instances of static and extern from this
+        // list. Otherwise thrown an error here since that means there are either too many
+        // specifiers, or a specifier is used in a bad place.
+        if storage.is_some() {
+            return Err("Illegal use of storage specifiers in this type".into());
+        }
+
+        let mut declarator_deque = VecDeque::new();
+        let mut paren_nesting = 0;
+        while !(self.is_empty()
+            || matches!(
+                self.peek()?,
+                Token::OpenBrace | Token::Assignment | Token::SemiColon
+            )
+            || (paren_nesting == 0 && matches!(self.peek()?, Token::CloseParen | Token::Comma)))
+        {
+            match self.peek()? {
+                Token::OpenParen => paren_nesting += 1,
+                Token::CloseParen => paren_nesting -= 1,
+                _ => {}
+            }
+            declarator_deque.push_back(self.read()?);
+        }
+
+        while !types_deque.is_empty() {
+            // try and get a valid type and declarator for the given expression
+            let mut new_types_deque = types_deque.clone();
+            let mut new_declarator_deque = declarator_deque.clone();
+            let type_result: Result<(Type, Option<StructDeclaration>), Box<dyn Error>> =
+                new_types_deque.parse(context);
+            let declarator = new_declarator_deque.parse(context);
+            if let Ok((ref t, ref struct_declaration)) = type_result {
+                if new_types_deque.is_empty()
+                    && declarator.is_ok()
+                    && new_declarator_deque.is_empty()
+                {
+                    return Ok((t.clone(), declarator?, struct_declaration.clone()));
+                }
+            }
+            // Entering this section means that we failed to properly split the type and the
+            // declarator, so try again with a different split
+
+            // println!(
+            //     "Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?}",
+            //     types_deque,type_result, declarator_deque, declarator
+            // );
+            let move_this_to_the_declarator = types_deque.pop_back().unwrap();
+            declarator_deque.push_front(move_this_to_the_declarator);
+        }
+
+        Err("Declaration could not be reconciled to match both a type and a declarator".into())
+        // Ok((this_type, storage, declarator))
+    }
+}
+
+pub trait PopForType {
+    fn pop_tokens_for_type(
+        &mut self,
+        context: &mut ParseContext,
+        // type tokens and storage class tokens
+    ) -> Result<(VecDeque<Token>, Option<usize>), Box<dyn Error>>;
+}
+
+impl PopForType for VecDeque<Token> {
+    fn pop_tokens_for_type(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<(VecDeque<Token>, Option<usize>), Box<dyn Error>> {
+        let mut types_deque = VecDeque::new();
+        let mut storage_loc = None;
+        while self.peek()?.is_start_of_declaration(context) {
+            match self.peek()? {
+                Token::KeywordStruct => {
+                    // READING A STRUCT TYPE //
+                    types_deque.push_back(self.read()?); // read the keyword
+                    if !matches!(self.peek()?, Token::Identifier(_)) {
+                        return Err("Malformed struct type".into());
+                    }
+                    types_deque.push_back(self.read()?); // read the name
+                    if self.peek()? == Token::OpenBrace {
+                        types_deque.push_back(self.read()?);
+                        let mut nesting_count = 1;
+                        while nesting_count != 0 {
+                            match self.peek()? {
+                                Token::OpenBrace => nesting_count += 1,
+                                Token::CloseBrace => nesting_count -= 1,
+                                _ => {}
+                            }
+                            // read everything contained in the curly braces
+                            types_deque.push_back(self.read()?);
+                        }
+                    }
+                    // DONE READING A STRUCT TYPE //
+                }
+                Token::KeywordStatic | Token::KeywordExtern => {
+                    if storage_loc.is_some() {
+                        return Err("Encountered more than one storage specifier in a type".into());
+                    } else {
+                        storage_loc = Some(types_deque.len());
+                    }
+                    types_deque.push_back(self.read()?);
+                }
+                _ => {
+                    types_deque.push_back(self.read()?);
+                }
+            }
+        }
+        Ok((types_deque, storage_loc))
+    }
+}
+
 impl Token {
     pub fn is_type(&self, context: &mut ParseContext) -> bool {
         if let Token::Identifier(s) = self {
@@ -101,6 +342,6 @@ impl Token {
     }
 
     pub fn is_start_of_declaration(&self, context: &mut ParseContext) -> bool {
-        self.is_specifier(context) || matches!(self, Token::KeywordTypedef)
+        self.is_specifier(context) || matches!(self, Token::KeywordTypedef | Token::KeywordStruct)
     }
 }

@@ -71,7 +71,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             constant,
                             &Type::Pointer(t.clone()),
                         )),
-                        t.get_size(),
+                        t.get_size(&mut context.structs),
                         new_dst.clone(),
                     ));
                 } else {
@@ -134,7 +134,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             constant,
                             &Type::Pointer(t.clone()),
                         )),
-                        t.get_size(),
+                        t.get_size(&mut context.structs),
                         evaluated_src.clone(),
                     ));
                 } else {
@@ -228,7 +228,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         instructions.push(BirdsInstructionNode::AddPointer(
                             evaluated_left,
                             new_right,
-                            left_t.get_size(),
+                            left_t.get_size(&mut context.structs),
                             new_dst.clone(),
                         ));
 
@@ -252,7 +252,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         instructions.push(BirdsInstructionNode::AddPointer(
                             evaluated_left,
                             negate_right,
-                            left_t.get_size(),
+                            left_t.get_size(&mut context.structs),
                             new_dst.clone(),
                         ));
 
@@ -288,6 +288,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             casted_left.clone(),
                             &left_type,
                             &common_type,
+                            context,
                         )?;
                         instructions.append(&mut instructions_from_first_cast);
 
@@ -304,6 +305,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             casted_result.clone(),
                             &common_type,
                             &left_type,
+                            context,
                         )?;
                         instructions.append(&mut instructions_from_second_cast);
 
@@ -399,7 +401,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         instructions.push(BirdsInstructionNode::AddPointer(
                             new_left,
                             new_right,
-                            left_t.get_size(),
+                            left_t.get_size(&mut context.structs),
                             new_dst.clone(),
                         ));
 
@@ -413,7 +415,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         instructions.push(BirdsInstructionNode::AddPointer(
                             new_right,
                             new_left,
-                            right_t.get_size(),
+                            right_t.get_size(&mut context.structs),
                             new_dst.clone(),
                         ));
 
@@ -434,7 +436,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         instructions.push(BirdsInstructionNode::AddPointer(
                             new_left,
                             negate_right,
-                            left_t.get_size(),
+                            left_t.get_size(&mut context.structs),
                             new_dst.clone(),
                         ));
 
@@ -458,7 +460,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             BirdsBinaryOperatorNode::Divide,
                             diff,
                             BirdsValueNode::Constant(Constant::get_typed(
-                                (*left_t).get_size() as i64,
+                                (*left_t).get_size(&mut context.structs) as i64,
                                 &Type::Long,
                             )),
                             new_dst.clone(),
@@ -566,6 +568,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     new_dst.clone(),
                     &this_type,
                     &target_type,
+                    context,
                 )?;
                 instructions.append(&mut instructions_from_cast);
 
@@ -607,14 +610,14 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     instructions.push(BirdsInstructionNode::AddPointer(
                         new_left,
                         new_right,
-                        inner_type.get_size(),
+                        inner_type.get_size(&mut context.structs),
                         new_dst.clone(),
                     ));
                 } else {
                     instructions.push(BirdsInstructionNode::AddPointer(
                         new_right,
                         new_left,
-                        inner_type.get_size(),
+                        inner_type.get_size(&mut context.structs),
                         new_dst.clone(),
                     ));
                 }
@@ -646,17 +649,19 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 let t = e.1.as_ref().unwrap();
                 Ok((
                     Vec::new(),
-                    BirdsValueNode::Constant(Constant::UnsignedLong(t.get_size() as u64)).into(),
+                    BirdsValueNode::Constant(Constant::UnsignedLong(
+                        t.get_size(&mut context.structs),
+                    ))
+                    .into(),
                 ))
             }
-            ExpressionWithoutType::SizeOfType(t) => {
-                println!("{:?}", t);
-                println!("{:?}", t.get_size());
-                Ok((
-                    Vec::new(),
-                    BirdsValueNode::Constant(Constant::UnsignedLong(t.get_size() as u64)).into(),
-                ))
-            }
+            ExpressionWithoutType::SizeOfType(t) => Ok((
+                Vec::new(),
+                BirdsValueNode::Constant(Constant::UnsignedLong(t.get_size(&mut context.structs)))
+                    .into(),
+            )),
+            ExpressionWithoutType::Dot(_, _) => todo!(),
+            ExpressionWithoutType::Arrow(_, _) => todo!(),
         }
     }
 }
@@ -667,6 +672,7 @@ impl ExpressionWithoutType {
         dst: BirdsValueNode,
         this_type: &Type,
         target_type: &Type,
+        context: &mut ConvertContext,
     ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
         let mut instructions = Vec::new();
         if target_type == &Type::Double {
@@ -682,6 +688,7 @@ impl ExpressionWithoutType {
                 Type::Double => unreachable!(),
                 Type::Function(_, _) => unreachable!(),
                 Type::Void => unreachable!(),
+                Type::Struct(_) => unreachable!(),
             }
         } else if this_type == &Type::Double {
             match target_type {
@@ -696,13 +703,18 @@ impl ExpressionWithoutType {
                 Type::Double => unreachable!(),
                 Type::Function(_, _) => unreachable!(),
                 Type::Void => unreachable!(),
+                Type::Struct(_) => unreachable!(),
             }
-        } else if target_type.get_size() == this_type.get_size() {
+        } else if target_type.get_size(&mut context.structs)
+            == this_type.get_size(&mut context.structs)
+        {
             // mov the old type into the new type directly
             // C casting behaviour basically ends up saying "never alter the
             // underlying binary unless to extend or truncate it", indirectly
             instructions.push(BirdsInstructionNode::Copy(src, dst.clone()));
-        } else if target_type.get_size() < this_type.get_size() {
+        } else if target_type.get_size(&mut context.structs)
+            < this_type.get_size(&mut context.structs)
+        {
             instructions.push(BirdsInstructionNode::Truncate(src, dst.clone()));
         } else if this_type.is_signed() {
             instructions.push(BirdsInstructionNode::SignedExtend(src, dst.clone()));

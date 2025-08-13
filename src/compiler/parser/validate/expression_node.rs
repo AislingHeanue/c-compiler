@@ -1,7 +1,9 @@
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
 
 use crate::compiler::{
-    parser::{BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, UnaryOperatorNode},
+    parser::{
+        BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, StructInfo, UnaryOperatorNode,
+    },
     types::{Constant, Type},
 };
 
@@ -60,6 +62,12 @@ impl Validate for ExpressionNode {
                 e.validate(context)?;
             }
             ExpressionWithoutType::SizeOfType(ref _t) => {}
+            ExpressionWithoutType::Dot(ref mut e, _) => {
+                e.validate(context)?;
+            }
+            ExpressionWithoutType::Arrow(ref mut e, _) => {
+                e.validate(context)?;
+            }
         };
         Ok(())
     }
@@ -78,12 +86,15 @@ impl CheckTypes for ExpressionNode {
                     .expect("Function should have been defined")
                     .clone();
                 if let Type::Function(out, params) = &type_info.symbol_type {
+                    if **out != Type::Void && !out.is_complete(&mut context.structs) {
+                        return Err("Can't call a function with an incomplete return type".into());
+                    }
                     if params.len() != args.len() {
                         return Err("Function call has the wrong number of arguments".into());
                     }
                     for (arg, param) in args.iter_mut().zip(params.iter()) {
                         arg.check_types_and_convert(context)?;
-                        arg.convert_type_by_assignment(param)?;
+                        arg.convert_type_by_assignment(param, context)?;
                         arg.pad_single_byte_arg()?;
                     }
 
@@ -155,10 +166,11 @@ impl CheckTypes for ExpressionNode {
                 right.promote(context)?;
                 // undo type conversion on Left, it will be done manually in the birds generation
                 // stage
-                let common = ExpressionNode::check_types_binary(op, &mut left_clone, right)?;
+                let common =
+                    ExpressionNode::check_types_binary(op, &mut left_clone, right, context)?;
                 // verify that it is possible to assign from the common type to left, without
                 // actually doing the conversion yet.
-                left_clone.convert_type_by_assignment(&common)?;
+                left_clone.convert_type_by_assignment(&common, context)?;
 
                 *common_type = Some(common);
                 left.1.clone().unwrap()
@@ -168,12 +180,12 @@ impl CheckTypes for ExpressionNode {
                 right.check_types_and_convert(context)?;
                 left.promote(context)?;
                 right.promote(context)?;
-                ExpressionNode::check_types_binary(op, left, right)?
+                ExpressionNode::check_types_binary(op, left, right, context)?
             }
             ExpressionWithoutType::Assignment(ref mut dst, ref mut src) => {
                 dst.check_types_and_convert(context)?;
                 src.check_types_and_convert(context)?;
-                src.convert_type_by_assignment(dst.1.as_ref().unwrap())?;
+                src.convert_type_by_assignment(dst.1.as_ref().unwrap(), context)?;
                 dst.1.clone().unwrap()
             }
             ExpressionWithoutType::Ternary(ref mut cond, ref mut then, ref mut other) => {
@@ -190,11 +202,22 @@ impl CheckTypes for ExpressionNode {
                 let common_type = if then_type == &Type::Void && other_type == &Type::Void {
                     Type::Void
                 } else if then_type.is_arithmetic() && other_type.is_arithmetic() {
-                    ExpressionNode::get_common_type(then, other)
+                    ExpressionNode::get_common_type(then, other, &mut context.structs)
                 } else if matches!(then_type, Type::Pointer(_))
                     || matches!(other_type, Type::Pointer(_))
                 {
                     ExpressionNode::get_common_pointer_type(then, other)?
+                } else if matches!(then_type, Type::Struct(_))
+                    || matches!(other_type, Type::Struct(_))
+                {
+                    if then_type == other_type {
+                        then_type.clone()
+                    } else {
+                        return Err(
+                            "Can't construct a ternary expression with different struct types"
+                                .into(),
+                        );
+                    }
                 } else {
                     return Err("Invalid types for ternary expression".into());
                 };
@@ -227,9 +250,9 @@ impl CheckTypes for ExpressionNode {
             ExpressionWithoutType::Dereference(ref mut e) => {
                 e.check_types_and_convert(context)?;
                 if let Type::Pointer(t) = e.1.as_ref().unwrap() {
-                    if **t == Type::Void {
-                        return Err("Cannot dereference a pointer to void".into());
-                    }
+                    // if !t.is_complete(&mut context.structs) {
+                    //     return Err("Cannot dereference a pointer to an incomplete type".into());
+                    // }
                     *t.clone()
                 } else {
                     return Err("Dereference can only operate on pointer types".into());
@@ -250,13 +273,13 @@ impl CheckTypes for ExpressionNode {
                 let inner_type = inner.1.as_ref().unwrap();
 
                 if let Type::Pointer(left) = src_type {
-                    if !inner_type.is_integer() || !left.is_complete() {
+                    if !inner_type.is_integer() || !left.is_complete(&mut context.structs) {
                         return Err("Invalid subscript expression".into());
                     }
                     inner.convert_type(&Type::Long);
                     *left.clone()
                 } else if let Type::Pointer(right) = inner_type {
-                    if !src_type.is_integer() || !right.is_complete() {
+                    if !src_type.is_integer() || !right.is_complete(&mut context.structs) {
                         return Err("Invalid subscript expression".into());
                     }
                     src.convert_type(&Type::Long);
@@ -271,7 +294,7 @@ impl CheckTypes for ExpressionNode {
             }
             ExpressionWithoutType::SizeOf(ref mut e) => {
                 e.check_types(context)?;
-                if !e.1.as_ref().unwrap().is_complete() {
+                if !e.1.as_ref().unwrap().is_complete(&mut context.structs) {
                     return Err(
                         "Can't get the size of an expression returning an incomplete type".into(),
                     );
@@ -281,11 +304,49 @@ impl CheckTypes for ExpressionNode {
             }
             ExpressionWithoutType::SizeOfType(ref mut t) => {
                 t.check_types(context)?;
-                if !t.is_complete() {
+                if !t.is_complete(&mut context.structs) {
                     return Err("Can't get the size of an incomplete type".into());
                 }
                 // size_t
                 Type::UnsignedLong
+            }
+            ExpressionWithoutType::Dot(ref mut e, ref mut name) => {
+                e.check_types(context)?;
+                if let Type::Struct(s_name) = e.1.as_ref().unwrap() {
+                    let info = context.structs.get(s_name).unwrap();
+                    let member = info.members.iter().find(|m| m.name == *name);
+                    if let Some(found_member) = member {
+                        found_member.member_type.clone()
+                    } else {
+                        return Err(
+                            format!("Could not find entry {} in struct {}", name, s_name).into(),
+                        );
+                    }
+                } else {
+                    return Err("'.' can only operate on a struct".into());
+                }
+            }
+            ExpressionWithoutType::Arrow(ref mut p, ref mut name) => {
+                p.check_types_and_convert(context)?;
+                if let Type::Pointer(p_type) = p.1.as_ref().unwrap() {
+                    if let Type::Struct(ref s_name) = **p_type {
+                        let info = context.structs.get(s_name).unwrap();
+                        let member = info.members.iter().find(|m| m.name == *name);
+                        if let Some(found_member) = member {
+                            found_member.member_type.clone()
+                        } else {
+                            return Err(format!(
+                                "Could not find entry {} in struct {}",
+                                name, s_name
+                            )
+                            .into());
+                        }
+                    } else {
+                        return Err("'->' can only operate on a pointer to a struct".into());
+                    }
+                } else {
+                    return Err("'->' can only operate on a pointer to a struct".into());
+                }
             }
         });
 
@@ -303,13 +364,27 @@ impl ExpressionNode {
                 | UnaryOperatorNode::SuffixDecrement,
                 src,
             ) => {
+                if let ExpressionWithoutType::Unary(
+                    UnaryOperatorNode::PrefixIncrement | UnaryOperatorNode::PrefixDecrement,
+                    _,
+                ) = &self.0
+                {
+                    if src.1.as_ref().unwrap() == &Type::Void {
+                        return Err(format!(
+                            "Can't perform increment/decrement operation on void variable: {:?}",
+                            src,
+                        )
+                        .into());
+                    }
+                }
                 // VALIDATION: Make sure ++ and -- only operate on variables, not constants or
                 // other expressions, and not pointers to void
                 if !src.0.is_lvalue()
                     || src.1.as_ref().unwrap() == &Type::Pointer(Box::new(Type::Void))
+                    || matches!(src.1.as_ref().unwrap(), Type::Struct(_))
                 {
                     return Err(format!(
-                        "Can't perform increment/decrement operation on non-variable: {:?}",
+                        "Can't perform increment/decrement operation on non-arithmetic variable: {:?}",
                         src,
                     )
                     .into());
@@ -332,7 +407,11 @@ impl ExpressionNode {
 
     // See System V ABI list of rules for how to reconcile types of various sizes
     // C Spec 6.3.1.8, Paragraph 1
-    fn get_common_type(e1: &ExpressionNode, e2: &ExpressionNode) -> Type {
+    fn get_common_type(
+        e1: &ExpressionNode,
+        e2: &ExpressionNode,
+        structs: &mut HashMap<String, StructInfo>,
+    ) -> Type {
         let t1 = e1.1.as_ref().unwrap();
         let t2 = e2.1.as_ref().unwrap();
 
@@ -340,13 +419,13 @@ impl ExpressionNode {
             t1.clone()
         } else if t1 == &Type::Double || t2 == &Type::Double {
             Type::Double
-        } else if t1.get_size() == t2.get_size() {
+        } else if t1.get_size(structs) == t2.get_size(structs) {
             if t1.is_signed() {
                 t2.clone()
             } else {
                 t1.clone()
             }
-        } else if t1.get_size() > t2.get_size() {
+        } else if t1.get_size(structs) > t2.get_size(structs) {
             t1.clone()
         } else {
             t2.clone()
@@ -403,9 +482,16 @@ impl ExpressionNode {
         }
     }
 
-    pub fn convert_type_by_assignment(&mut self, target: &Type) -> Result<(), Box<dyn Error>> {
+    pub fn convert_type_by_assignment(
+        &mut self,
+        target: &Type,
+        context: &mut ValidateContext,
+    ) -> Result<(), Box<dyn Error>> {
         if matches!(target, Type::Array(_, _)) {
             return Err("Can't assign to an array type".into());
+        }
+        if !target.is_complete(&mut context.structs) {
+            return Err("Can't assign to an incomplete type".into());
         }
         let t1 = self.1.as_ref().unwrap();
         if t1 != target {
@@ -451,14 +537,22 @@ impl ExpressionNode {
 
     fn post_type_check_convert(
         &mut self,
-        _context: &mut ValidateContext,
+        context: &mut ValidateContext,
     ) -> Result<(), Box<dyn Error>> {
         // Extra expression inserted here to convert arrays to pointers
-        if let Some(Type::Array(t, _)) = &self.1 {
-            *self = ExpressionNode(
-                ExpressionWithoutType::AddressOf(Box::new(self.clone())),
-                Some(Type::Pointer(t.clone())),
-            )
+        match &self.1 {
+            Some(Type::Array(t, _)) => {
+                *self = ExpressionNode(
+                    ExpressionWithoutType::AddressOf(Box::new(self.clone())),
+                    Some(Type::Pointer(t.clone())),
+                )
+            }
+            Some(Type::Struct(name)) => {
+                if !Type::Struct(name.clone()).is_complete(&mut context.structs) {
+                    return Err("Invalid use of incomplete struct".into());
+                }
+            }
+            _ => (),
         }
         Ok(())
     }
@@ -475,6 +569,7 @@ impl ExpressionNode {
         op: &BinaryOperatorNode,
         left: &mut ExpressionNode,
         right: &mut ExpressionNode,
+        context: &mut ValidateContext,
     ) -> Result<Type, Box<dyn Error>> {
         let left_type = left.1.as_ref().unwrap().clone();
         let right_type = right.1.as_ref().unwrap().clone();
@@ -485,10 +580,14 @@ impl ExpressionNode {
             if (matches!(left_type, Type::Pointer(_)) || matches!(right_type, Type::Pointer(_))) {
                 match op {
                     BinaryOperatorNode::Add => {
-                        if left_type.is_complete_pointer() && right_type.is_integer() {
+                        if left_type.is_complete_pointer(&mut context.structs)
+                            && right_type.is_integer()
+                        {
                             right.convert_type(&Type::Long);
                             (left_type.clone(), true)
-                        } else if right_type.is_complete_pointer() && left_type.is_integer() {
+                        } else if right_type.is_complete_pointer(&mut context.structs)
+                            && left_type.is_integer()
+                        {
                             left.convert_type(&Type::Long);
                             (right_type.clone(), true)
                         } else {
@@ -496,10 +595,14 @@ impl ExpressionNode {
                         }
                     }
                     BinaryOperatorNode::Subtract => {
-                        if left_type.is_complete_pointer() && right_type.is_integer() {
+                        if left_type.is_complete_pointer(&mut context.structs)
+                            && right_type.is_integer()
+                        {
                             right.convert_type(&Type::Long);
                             (left_type.clone(), true)
-                        } else if left_type == right_type && left_type.is_complete_pointer() {
+                        } else if left_type == right_type
+                            && left_type.is_complete_pointer(&mut context.structs)
+                        {
                             // typedef stuff: for <stddef.h>, this type should be annotated as ptrdiff_t
                             (Type::Long, true)
                         } else {
@@ -523,7 +626,10 @@ impl ExpressionNode {
                     o => return Err(format!("Invalid pointer operation: {:?}", o).into()),
                 }
             } else if left_type.is_arithmetic() && right_type.is_arithmetic() {
-                (ExpressionNode::get_common_type(left, right), false)
+                (
+                    ExpressionNode::get_common_type(left, right, &mut context.structs),
+                    false,
+                )
             } else {
                 return Err(format!(
                     "Cannot perform binary operation on non-arithmetic types {:?} and {:?}",

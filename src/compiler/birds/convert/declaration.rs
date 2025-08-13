@@ -27,6 +27,7 @@ impl Convert<Vec<BirdsInstructionNode>> for DeclarationNode {
             // ignored entirely.
             DeclarationNode::Function(_f) => Ok(Vec::new()),
             DeclarationNode::Type(_t) => Ok(Vec::new()),
+            DeclarationNode::Struct(_s) => Ok(Vec::new()),
         }
     }
 }
@@ -177,7 +178,7 @@ impl InitialiserNode {
                 Ok(instructions)
             }
             (InitialiserWithoutType::Single(e), _) => {
-                let offset = e.1.as_ref().unwrap().get_size();
+                let offset = e.1.as_ref().unwrap().get_size(&mut context.structs);
                 let (mut instructions, new_src): E = e.convert(context)?;
                 if context.current_initialiser_offset == 0 {
                     instructions.push(BirdsInstructionNode::Copy(

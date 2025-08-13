@@ -13,6 +13,10 @@ mod convert;
 mod display;
 mod validate;
 
+pub fn align_stack_size(initial: u64, alignment: u64) -> u64 {
+    initial + (alignment as i64 - initial as i64).rem_euclid(alignment as i64) as u64
+}
+
 #[derive(Debug)]
 pub struct Program {
     body: Vec<TopLevel>,

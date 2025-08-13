@@ -18,6 +18,9 @@ impl Validate for VariableDeclaration {
             if self.variable_type == Type::Void {
                 return Err("Cannot declare a variable with a void type".into());
             }
+            if let Some(ref mut struct_declaration) = self.struct_declaration {
+                struct_declaration.check_types(context)?;
+            }
 
             if context.current_function_name.is_none() {
                 self.validate_file_scope(context)?;
@@ -40,6 +43,12 @@ impl VariableDeclaration {
         } else {
             InitialValue::Tentative
         };
+
+        if initial_value != InitialValue::None
+            && !self.variable_type.is_complete(&mut context.structs)
+        {
+            return Err("Cannot initialise a variable with an incomplete type".into());
+        }
 
         let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
         if let Some(old_symbol_info) = context.symbols.get(&self.name) {
@@ -113,6 +122,9 @@ impl VariableDeclaration {
                 }
             }
             Some(StorageClass::Static) => {
+                if !self.variable_type.is_complete(&mut context.structs) {
+                    return Err("Cannot initialise a variable with an incomplete type".into());
+                }
                 // don't call check_types here, since we don't want to pollute constant expressions
                 // with more complex expressions, which we may end up doing with other expressions
                 let initial_value = match &mut self.init {
@@ -123,7 +135,7 @@ impl VariableDeclaration {
                         )
                     }
                     None => {
-                        let len = self.variable_type.get_size();
+                        let len = self.variable_type.get_size(&mut context.structs);
                         InitialValue::initial(StaticInitialiser::Ordinal(
                             ComparableStatic::ZeroBytes(len),
                         ))
@@ -138,6 +150,9 @@ impl VariableDeclaration {
                 );
             }
             None => {
+                if !self.variable_type.is_complete(&mut context.structs) {
+                    return Err("Cannot initialise a variable with an incomplete type".into());
+                }
                 context.symbols.insert(
                     self.name.clone(),
                     SymbolInfo {

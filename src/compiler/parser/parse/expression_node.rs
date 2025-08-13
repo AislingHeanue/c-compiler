@@ -81,7 +81,7 @@ impl ParseExpression for VecDeque<Token> {
             Token::OpenParen => {
                 // casting
                 self.expect(Token::OpenParen)?;
-                if self.peek()?.is_type(context) {
+                if self.peek()?.is_start_of_declaration(context) {
                     let cast_type: Type = self.parse(context)?;
                     let abstract_declarator: AbstractDeclarator = self.parse(context)?;
                     let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
@@ -211,7 +211,7 @@ impl ParseExpression for VecDeque<Token> {
                         Token::OpenParen => {
                             // casting
                             self.expect(Token::OpenParen)?;
-                            if self.peek()?.is_type(context) {
+                            if self.peek()?.is_start_of_declaration(context) {
                                 let target_type: Type = self.parse(context)?;
                                 let abstract_declarator: AbstractDeclarator =
                                     self.parse(context)?;
@@ -272,6 +272,30 @@ impl ParseExpression for VecDeque<Token> {
                         Box::new(left.unwrap().into()),
                         Box::new(inner.into()),
                     ))
+                }
+                Token::Dot => {
+                    self.expect(Token::Dot)?;
+                    let loc = if let Token::Identifier(s) = self.read()? {
+                        s.clone()
+                    } else {
+                        return Err("'.' must be followed by an identifier".into());
+                    };
+                    left = Some(ExpressionWithoutType::Dot(
+                        Box::new(left.unwrap().into()),
+                        loc,
+                    ));
+                }
+                Token::Arrow => {
+                    self.expect(Token::Arrow)?;
+                    let loc = if let Token::Identifier(s) = self.read()? {
+                        s.clone()
+                    } else {
+                        return Err("'->' must be followed by an identifier".into());
+                    };
+                    left = Some(ExpressionWithoutType::Arrow(
+                        Box::new(left.unwrap().into()),
+                        loc,
+                    ));
                 }
                 _ => unreachable!(),
             }
@@ -355,13 +379,18 @@ impl ParseExpression for VecDeque<Token> {
 
 impl ExpressionWithoutType {
     pub fn is_lvalue(&self) -> bool {
-        matches!(
-            self,
-            ExpressionWithoutType::Var(_)
+        if let ExpressionWithoutType::Dot(left, _right) = self {
+            left.0.is_lvalue()
+        } else {
+            matches!(
+                self,
+                ExpressionWithoutType::Var(_)
                 | ExpressionWithoutType::Dereference(_)
                 | ExpressionWithoutType::Subscript(_, _)
                 | ExpressionWithoutType::String(_) // this allows dereferencing a string
-        )
+                | ExpressionWithoutType::Arrow(_, _)
+            )
+        }
     }
 
     fn resolve_identifier(
@@ -431,4 +460,105 @@ impl ExpressionWithoutType {
             Err(format!("Identifier used before declaration: {}", name).into())
         }
     }
+
+    pub fn resolve_struct_name(
+        name: &str,
+        context: &mut ParseContext,
+    ) -> Result<String, Box<dyn Error>> {
+        // println!(
+        //     "resolve {:?} {:?}",
+        //     context.outer_struct_names, context.current_struct_names
+        // );
+        if let Some(info) = context.current_struct_names.get(name) {
+            Ok(info.clone())
+        } else if let Some(info) = context.outer_struct_names.get(name) {
+            Ok(info.clone())
+        } else {
+            context.num_structs += 1;
+            let new_name = format!("{}.{}", name, context.num_structs);
+
+            context
+                .current_struct_names
+                .insert(name.to_string(), new_name.clone());
+
+            Ok(new_name)
+        }
+    }
+
+    pub fn new_struct_name(
+        name: &str,
+        context: &mut ParseContext,
+    ) -> Result<String, Box<dyn Error>> {
+        // println!(
+        //     "resolve for new {:?} {:?}",
+        //     context.outer_struct_names, context.current_struct_names
+        // );
+        if let Some(info) = context.current_struct_names.get(name) {
+            Ok(info.clone())
+        } else {
+            // ignore the outer scope, this is an EXPLICIT declaration of a new struct type
+            context.num_structs += 1;
+            let new_name = format!("{}.{}", name, context.num_structs);
+
+            context
+                .current_struct_names
+                .insert(name.to_string(), new_name.clone());
+
+            Ok(new_name)
+        }
+    }
+
+    // pub fn resolve_type(t: &mut Type, context: &mut ParseContext) -> Result<(), Box<dyn Error>> {
+    //     match t {
+    //         Type::Function(out, params) => {
+    //             Self::resolve_type(out, context)?;
+    //             for p in params.iter_mut() {
+    //                 Self::resolve_type(p, context)?;
+    //             }
+    //         }
+    //         Type::Array(inner, _) => {
+    //             Self::resolve_type(inner, context)?;
+    //         }
+    //         Type::Pointer(inner) => {
+    //             Self::resolve_type(inner, context)?;
+    //         }
+    //         Type::Struct(name) => {
+    //             Self::resolve_struct_name(name, context)?;
+    //         }
+    //         _ => {}
+    //     }
+    //     Ok(())
+    // }
+
+    // pub fn update_struct_members(
+    //     name: String,
+    //     members: Vec<StructMember>,
+    //     context: &mut ParseContext,
+    // ) -> Result<String, Box<dyn Error>> {
+    //     // println!(
+    //     //     "update struct {} {:?} {:?}",
+    //     //     name, context.outer_struct_types, context.current_struct_types
+    //     // );
+    //     if let Some(d) = context.current_struct_names.get(&name) {
+    //         if d.members.is_some() && !context.do_not_validate {
+    //             return Err(format!("Struct name {} redefined in the same scope", name).into());
+    //         }
+    //     }
+    //     let new_name = if let Some(d) = context.current_struct_names.get(&name) {
+    //         d.name.clone()
+    //     } else {
+    //         context.num_structs += 1;
+    //         format!("{}.{}", name, context.num_structs)
+    //     };
+    //
+    //     context.current_struct_names.insert(
+    //         name,
+    //         StructDeclaration {
+    //             name: new_name.clone(),
+    //             members: Some(members),
+    //         },
+    //     );
+    //
+    //     Ok(new_name)
+    // }
 }

@@ -19,6 +19,7 @@ impl Convert<BirdsProgramNode> for ProgramNode {
                     DeclarationNode::Variable(_) => None,
                     DeclarationNode::Type(_) => None,
                     DeclarationNode::Function(f) => Some(f.convert(context)),
+                    DeclarationNode::Struct(_) => None,
                 }),
             |iter| iter.flatten().collect(),
         )?;
@@ -29,7 +30,9 @@ impl Convert<BirdsProgramNode> for ProgramNode {
                 .filter_map(|(name, info)| match &info.storage {
                     StorageInfo::Static(init_value, global) => {
                         let initial = match init_value {
-                            InitialValue::Tentative => vec![Constant::zero(&info.symbol_type)],
+                            InitialValue::Tentative => {
+                                vec![Constant::zero(&info.symbol_type, &mut context.structs)]
+                            }
                             InitialValue::Initial(i) => i.clone(),
                             InitialValue::None => return None,
                         };

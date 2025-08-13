@@ -18,6 +18,7 @@ pub enum Type {
     SignedChar,
     UnsignedChar,
     Void,
+    Struct(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -31,7 +32,7 @@ pub enum Constant {
     UnsignedChar(u8),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InitialValue {
     Tentative,
     Initial(Vec<StaticInitialiser>),

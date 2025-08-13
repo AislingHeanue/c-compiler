@@ -1,7 +1,20 @@
+use std::collections::HashMap;
+
+use crate::compiler::{codegen::align_stack_size, parser::StructInfo};
+
 use super::Type;
 
 impl Type {
-    pub fn get_size(&self) -> u64 {
+    pub fn get_alignment(&self, structs: &mut HashMap<String, StructInfo>) -> u64 {
+        // bytes
+        match self {
+            Type::Struct(name) => structs.get(name).unwrap().alignment,
+            Type::Array(inner, _) => inner.get_alignment(structs),
+            _ => self.get_size(structs),
+        }
+    }
+
+    pub fn get_size(&self, structs: &mut HashMap<String, StructInfo>) -> u64 {
         // bytes
         match self {
             Type::Integer => 4,
@@ -10,12 +23,15 @@ impl Type {
             Type::UnsignedInteger => 4,
             Type::UnsignedLong => 8,
             Type::Pointer(_) => 8, // pointer is stored like u64
-            Type::Array(t, size) => t.get_size() * (*size), // arrays are like pointers except that they aren't
-            Type::Function(_, _) => unreachable!(),
             Type::Char => 1,
             Type::SignedChar => 1,
             Type::UnsignedChar => 1,
+            Type::Function(_, _) => unreachable!(),
             Type::Void => unreachable!(),
+            Type::Array(t, size) => {
+                align_stack_size(t.get_size(structs), t.get_alignment(structs)) * (*size)
+            } // arrays are like pointers except that they aren't
+            Type::Struct(name) => structs.get(name).unwrap().size,
         }
     }
 
@@ -33,6 +49,7 @@ impl Type {
             Type::SignedChar => true,
             Type::UnsignedChar => false,
             Type::Void => unreachable!(),
+            Type::Struct(_) => todo!(),
         }
     }
 
@@ -50,6 +67,7 @@ impl Type {
             Type::SignedChar => true,
             Type::UnsignedChar => true,
             Type::Void => false,
+            Type::Struct(_) => false,
         }
     }
 
@@ -61,16 +79,23 @@ impl Type {
     }
 
     pub fn is_scalar(&self) -> bool {
-        !matches!(self, Type::Array(..) | Type::Void | Type::Function(_, _))
+        !matches!(
+            self,
+            Type::Array(..) | Type::Void | Type::Function(_, _) | Type::Struct(_)
+        )
     }
 
-    pub fn is_complete(&self) -> bool {
-        !matches!(self, Type::Void)
+    pub fn is_complete(&self, structs: &mut HashMap<String, StructInfo>) -> bool {
+        match self {
+            Type::Struct(name) => structs.contains_key(name),
+            Type::Void => false,
+            _ => true,
+        }
     }
 
-    pub fn is_complete_pointer(&self) -> bool {
+    pub fn is_complete_pointer(&self, structs: &mut HashMap<String, StructInfo>) -> bool {
         if let Type::Pointer(p1) = self {
-            p1.is_complete()
+            p1.is_complete(structs)
         } else {
             false
         }

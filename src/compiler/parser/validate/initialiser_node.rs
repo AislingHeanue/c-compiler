@@ -31,7 +31,7 @@ impl InitialiserNode {
         target_type: &Type,
         context: &mut ValidateContext,
     ) -> Result<Vec<StaticInitialiser>, Box<dyn Error>> {
-        let init_list: Vec<StaticInitialiser> = match (target_type, &mut self.0) {
+        let init_list: Vec<StaticInitialiser> = match (target_type, self.0.clone()) {
             (Type::Pointer(t), InitialiserWithoutType::Single(init_e))
                 if init_e.is_string_literal() =>
             {
@@ -82,6 +82,9 @@ impl InitialiserNode {
                     return Err("Cannot initialise a static array with a scalar type".into());
                 }
             }
+            (Type::Struct(_), InitialiserWithoutType::Single(_)) => {
+                return Err("Structs must be initialised with a compound expression".into());
+            }
             (_, InitialiserWithoutType::Single(ref i)) => {
                 if matches!(target_type, Type::Pointer(_)) && !i.equals_null_pointer() {
                     return Err("Cannot initialise a static pointer with a non-pointer type".into());
@@ -109,13 +112,47 @@ impl InitialiserNode {
                 if initialisers.len() < (*size).try_into().unwrap() {
                     let offset = *size - initialisers.len() as u64;
                     statics.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
-                        t.get_size() * offset,
+                        t.get_size(&mut context.structs) * offset,
+                    )));
+                }
+                statics
+            }
+            (Type::Struct(name), InitialiserWithoutType::Compound(ref mut initialisers)) => {
+                let info = context
+                    .structs
+                    .get(name)
+                    .ok_or::<Box<dyn Error>>("Can't initialise an incomplete struct".into())?
+                    .clone();
+
+                if initialisers.len() > info.members.len() {
+                    return Err("Too many initialisers in static declaration of struct".into());
+                }
+
+                let mut offset = 0;
+                let mut statics = Vec::new();
+                for (i, init) in initialisers.iter_mut().enumerate() {
+                    let member = info.members.get(i).unwrap();
+                    if member.offset != offset {
+                        statics.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
+                            member.offset - offset,
+                        )));
+                    }
+                    statics
+                        .append(&mut init.create_static_init_list(&member.member_type, context)?);
+                    offset = member.offset + member.member_type.get_size(&mut context.structs);
+                }
+
+                if info.size > offset {
+                    statics.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
+                        info.size - offset,
                     )));
                 }
                 statics
             }
             (_, InitialiserWithoutType::Compound(_)) => {
-                return Err("Only arrays can be initialised with a compound initialiser".into())
+                return Err(
+                    "Only arrays and structs can be initialised with a compound initialiser".into(),
+                )
             }
         };
         Ok(init_list)
@@ -147,7 +184,7 @@ impl InitialiserNode {
 
             (_, InitialiserWithoutType::Single(ref mut init_e)) => {
                 init_e.check_types_and_convert(context)?;
-                init_e.convert_type_by_assignment(target_type)?;
+                init_e.convert_type_by_assignment(target_type, context)?;
             }
             (Type::Array(t, size), InitialiserWithoutType::Compound(ref mut c_init)) => {
                 if c_init.len() > (*size).try_into().unwrap() {
@@ -157,17 +194,39 @@ impl InitialiserNode {
                     init.check_types(t, context)?;
                 }
                 while c_init.len() < (*size).try_into().unwrap() {
-                    c_init.push(InitialiserNode::zero(t));
+                    c_init.push(InitialiserNode::zero(t, context));
                 }
             }
-            (_, InitialiserWithoutType::Compound(_)) => {
-                return Err("Compound initialiser can only be used for arrays".into());
+            (Type::Struct(name), InitialiserWithoutType::Compound(ref mut c_init)) => {
+                let info = context
+                    .structs
+                    .get(name)
+                    .ok_or::<Box<dyn Error>>("Can't initialise an incomplete struct".into())?
+                    .clone();
+
+                if c_init.len() > info.members.len() {
+                    return Err("Too many initialisers in declaration of struct".into());
+                }
+
+                for (init, member) in c_init.iter_mut().zip(info.members.iter()) {
+                    init.check_types(&member.member_type, context)?;
+                }
+                for i in c_init.clone().len()..info.members.len() {
+                    c_init.push(InitialiserNode::zero(
+                        &info.members.get(i).unwrap().member_type,
+                        context,
+                    ));
+                }
+            }
+            (t, InitialiserWithoutType::Compound(_)) => {
+                println!("{:?}", t);
+                return Err("Compound initialiser can only be used for arrays and structs".into());
             }
         }
         Ok(())
     }
 
-    pub fn zero(target_type: &Type) -> InitialiserNode {
+    pub fn zero(target_type: &Type, context: &mut ValidateContext) -> InitialiserNode {
         match target_type {
             Type::Integer => InitialiserNode(
                 InitialiserWithoutType::Single(ExpressionNode(
@@ -206,7 +265,9 @@ impl InitialiserNode {
             ),
             Type::Array(t, size) => InitialiserNode(
                 InitialiserWithoutType::Compound(
-                    (0..*size).map(|_| InitialiserNode::zero(t)).collect(),
+                    (0..*size)
+                        .map(|_| InitialiserNode::zero(t, context))
+                        .collect(),
                 ),
                 Some(target_type.clone()),
             ),
@@ -239,6 +300,14 @@ impl InitialiserNode {
                 )),
                 Some(target_type.clone()),
             ),
+            Type::Struct(name) => {
+                let members = context.structs.get(name).unwrap().members.clone();
+                let mut c_init = Vec::new();
+                for m in members {
+                    c_init.push(InitialiserNode::zero(&m.member_type, context));
+                }
+                InitialiserWithoutType::Compound(c_init).into()
+            }
             Type::Void => {
                 unreachable!()
             }

@@ -1,4 +1,6 @@
-use super::{align_stack_size, AssemblySymbolInfo, Operand, Register, ValidateContext};
+use crate::compiler::codegen::align_stack_size;
+
+use super::{AssemblySymbolInfo, Operand, Register, ValidateContext};
 
 impl Operand {
     pub fn is_in_memory(&self) -> bool {

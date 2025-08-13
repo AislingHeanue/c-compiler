@@ -5,10 +5,12 @@ mod function_declaration;
 mod initialiser_node;
 mod parsed_types;
 mod statement_node;
+mod struct_declaration;
 mod variable_declaration;
 
 use super::{
-    BlockItemNode, DeclarationNode, ForInitialiserNode, ProgramNode, SwitchMapKey, SymbolInfo, Type,
+    BlockItemNode, DeclarationNode, ForInitialiserNode, ProgramNode, StructInfo, SwitchMapKey,
+    SymbolInfo, Type,
 };
 // initialiser representing n * 0x00 bytes
 
@@ -58,6 +60,7 @@ pub struct ValidateContext {
     current_switch_labels: Option<HashMap<SwitchMapKey, String>>,
     current_switch_type: Option<Type>,
     symbols: HashMap<String, SymbolInfo>,
+    structs: HashMap<String, StructInfo>,
 }
 
 pub fn do_validate(
@@ -85,6 +88,7 @@ pub fn do_validate(
         current_switch_labels: None,
         current_switch_type: None,
         symbols: HashMap::new(),
+        structs: HashMap::new(),
     };
     for pass in passes {
         validate_context.pass = pass;
@@ -134,7 +138,15 @@ impl Validate for DeclarationNode {
             DeclarationNode::Function(f) => f.validate(context)?,
             DeclarationNode::Type(t) => {
                 if matches!(context.pass, ValidationPass::TypeChecking) {
+                    if let Some(ref mut s) = t.struct_declaration {
+                        s.check_types(context)?;
+                    }
                     t.target_type.check_types(context)?;
+                }
+            }
+            DeclarationNode::Struct(s) => {
+                if matches!(context.pass, ValidationPass::TypeChecking) {
+                    s.check_types(context)?;
                 }
             }
         };
@@ -159,6 +171,16 @@ impl Validate for ForInitialiserNode {
         match self {
             ForInitialiserNode::Declaration(v) => v.validate(context)?,
             ForInitialiserNode::Expression(e) => e.validate(context)?,
+        }
+        Ok(())
+    }
+}
+impl CheckTypes for ForInitialiserNode {
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        match self {
+            ForInitialiserNode::Declaration(_v) => {}
+            ForInitialiserNode::Expression(None) => {}
+            ForInitialiserNode::Expression(Some(e)) => e.check_types_and_convert(context)?,
         }
         Ok(())
     }

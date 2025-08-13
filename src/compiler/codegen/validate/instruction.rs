@@ -2,9 +2,11 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 
+use crate::compiler::codegen::align_stack_size;
+
 use super::{
-    align_stack_size, AssemblyType, BinaryOperator, ConditionCode, ImmediateValue, Instruction,
-    Operand, Register, Validate, ValidateContext, ValidationPass,
+    AssemblyType, BinaryOperator, ConditionCode, ImmediateValue, Instruction, Operand, Register,
+    Validate, ValidateContext, ValidationPass,
 };
 
 impl Validate for Vec<Instruction> {
@@ -52,9 +54,10 @@ impl Validate for Vec<Instruction> {
                     Instruction::Binary(
                         BinaryOperator::Sub,
                         AssemblyType::Quadword,
-                        Operand::Imm(ImmediateValue::Unsigned(
-                            align_stack_size((*stack_size).into(), 16).into(),
-                        )),
+                        Operand::Imm(ImmediateValue::Unsigned(align_stack_size(
+                            (*stack_size).into(),
+                            16,
+                        ))),
                         Operand::Reg(Register::SP),
                     ),
                 ]

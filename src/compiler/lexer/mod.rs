@@ -49,6 +49,8 @@ pub enum Token {
     Comma,
     OpenSquareBracket,
     CloseSquareBracket,
+    Dot,
+    Arrow,
     Identifier(String),
     IntegerConstant(i64),
     LongConstant(i64),
@@ -80,6 +82,7 @@ pub enum Token {
     KeywordChar,
     KeywordTypedef,
     KeywordSizeof,
+    KeywordStruct,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -138,6 +141,8 @@ lazy_static! {
                 Token::Question => r"\?",
                 Token::Colon => r":",
                 Token::Comma => r",",
+                Token::Dot => r"(\.)[^0-9.]",
+                Token::Arrow => r"->",
                 Token::OpenSquareBracket => r"\[",
                 Token::CloseSquareBracket => r"\]",
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
@@ -177,7 +182,8 @@ lazy_static! {
                 Token::KeywordDouble =>r"double\b",
                 Token::KeywordChar =>r"char\b",
                 Token::KeywordTypedef =>r"typedef\b",
-                Token::KeywordSizeof => r"sizeof\b"
+                Token::KeywordSizeof => r"sizeof\b",
+                Token::KeywordStruct => r"struct\b"
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -308,7 +314,11 @@ impl Token {
     pub fn is_suffix_operator(&self) -> bool {
         matches!(
             self,
-            Token::Increment | Token::Decrement | Token::OpenSquareBracket
+            Token::Increment
+                | Token::Decrement
+                | Token::OpenSquareBracket
+                | Token::Dot
+                | Token::Arrow
         )
     }
 
@@ -362,7 +372,7 @@ impl TokenVector for VecDeque<Token> {
     }
 
     fn read(&mut self) -> Result<Token, Box<dyn Error>> {
-        // println!("popping {:?}", tokens.front());
+        // println!("popping {:?}", self.front());
         self.pop_front()
             .ok_or::<Box<dyn Error>>("Unexpected end of tokens".into())
     }

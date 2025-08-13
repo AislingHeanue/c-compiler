@@ -1,4 +1,9 @@
-use crate::compiler::types::{ComparableStatic, Constant, StaticInitialiser, Type};
+use std::collections::HashMap;
+
+use crate::compiler::{
+    parser::StructInfo,
+    types::{ComparableStatic, Constant, StaticInitialiser, Type},
+};
 
 impl Constant {
     pub fn convert_to(&self, target: &Type) -> StaticInitialiser {
@@ -65,6 +70,7 @@ impl Constant {
             Type::Array(..) => unreachable!(),
             Type::Double => panic!("Can't use get_typed_constant to generate a double"),
             Type::Void => unreachable!(),
+            Type::Struct(_) => unreachable!(),
         }
     }
 
@@ -72,7 +78,7 @@ impl Constant {
         Constant::Double(value)
     }
 
-    pub fn zero(target: &Type) -> StaticInitialiser {
-        StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(target.get_size()))
+    pub fn zero(target: &Type, structs: &mut HashMap<String, StructInfo>) -> StaticInitialiser {
+        StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(target.get_size(structs)))
     }
 }

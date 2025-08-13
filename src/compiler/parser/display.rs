@@ -3,8 +3,8 @@ use itertools::Itertools;
 use super::{
     BinaryOperatorNode, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
     ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
-    InitialiserWithoutType, ProgramNode, StatementNode, Type, TypeDeclaration, UnaryOperatorNode,
-    VariableDeclaration,
+    InitialiserWithoutType, ProgramNode, StatementNode, StructDeclaration, StructMember, Type,
+    TypeDeclaration, UnaryOperatorNode, VariableDeclaration,
 };
 use std::{borrow::Borrow, fmt::Display};
 
@@ -194,15 +194,26 @@ impl CodeDisplay for ForInitialiserNode {
 
 impl CodeDisplay for VariableDeclaration {
     fn show(&self, context: &mut DisplayContext) -> String {
+        let struct_part = if let Some(s) = &self.struct_declaration {
+            s.show(context) + &context.new_line_start()
+        } else {
+            "".to_string()
+        };
         if let Some(init) = &self.init {
             format!(
-                "var {} {} = {}",
+                "{}var {} {} = {}",
+                struct_part,
                 self.name,
                 self.variable_type.show(context),
                 init.show(&mut context.indent()),
             )
         } else {
-            format!("var {} {}", self.name, self.variable_type.show(context))
+            format!(
+                "{}var {} {}",
+                struct_part,
+                self.name,
+                self.variable_type.show(context)
+            )
         }
     }
 }
@@ -284,6 +295,22 @@ impl CodeDisplay for DeclarationNode {
             DeclarationNode::Variable(v) => v.show(context),
             DeclarationNode::Function(f) => f.show(context),
             DeclarationNode::Type(t) => t.show(context),
+            DeclarationNode::Struct(s) => s.show(context),
+        }
+    }
+}
+
+impl CodeDisplay for StructDeclaration {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        if let Some(m) = &self.members {
+            format!(
+                "type {} struct{{{}{}}}",
+                self.name,
+                m.show(&mut context.indent()),
+                context.new_line_start()
+            )
+        } else {
+            format!("type {} struct{{?}}", self.name)
         }
     }
 }
@@ -305,7 +332,31 @@ impl CodeDisplay for Type {
             Type::SignedChar => "signed_rune".to_string(),
             Type::UnsignedChar => "unsigned_rune".to_string(),
             Type::Void => "void".to_string(),
+            Type::Struct(name) => name.to_string(),
+            // Type::Struct(name, Some(members)) => {
+            //     format!(
+            //         "struct_{} {{{}{}}}",
+            //         name,
+            //         members.show(&mut context.indent()),
+            //         context.new_line_start()
+            //     )
+            // }
         }
+    }
+}
+
+impl CodeDisplay for Vec<StructMember> {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        self.iter()
+            .map(|member| {
+                format!(
+                    "{}{} {}",
+                    context.new_line_start(),
+                    member.name,
+                    member.member_type.show(context)
+                )
+            })
+            .join("")
     }
 }
 
@@ -403,6 +454,8 @@ impl CodeDisplay for ExpressionWithoutType {
             }
             ExpressionWithoutType::SizeOf(e) => format!("sizeof({})", e.show(context)),
             ExpressionWithoutType::SizeOfType(t) => format!("sizeof({})", t.show(context)),
+            ExpressionWithoutType::Dot(e, name) => format!("{}.{}", e.show(context), name),
+            ExpressionWithoutType::Arrow(p, name) => format!("(*{}).{}", p.show(context), name),
         }
     }
 }

@@ -1,11 +1,15 @@
 use itertools::Itertools;
 
-use super::{Identity, Parse, ParseContext, Type};
+use super::{
+    declarator::OutputWithStruct,
+    parsed_types::{ParseImplicitStructDeclaration, PopForType},
+    Identity, Parse, ParseContext, Type,
+};
 use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::{
-        BlockItemNode, DeclarationNode, Declarator, FunctionDeclaration, TypeDeclaration,
-        VariableDeclaration,
+        BlockItemNode, DeclarationNode, Declarator, FunctionDeclaration, StructDeclaration,
+        TypeDeclaration, VariableDeclaration,
     },
     types::StorageClass,
 };
@@ -13,44 +17,97 @@ use std::{collections::VecDeque, error::Error};
 
 impl Parse<DeclarationNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<DeclarationNode, Box<dyn Error>> {
-        if matches!(self.peek()?, Token::KeywordTypedef) {
-            self.expect(Token::KeywordTypedef)?;
-            let (base_type, storage_class, declarator) = self.parse(context)?;
-            self.expect(Token::SemiColon)?;
-            if storage_class.is_some() {
-                return Err("Cannot use static or extern in a typedef alias".into());
+        // take the storage class out of the type definition (assuming there is only one, since
+        // otherwise that's an error)
+        let specifier_loc = self.clone().pop_tokens_for_type(context)?.1;
+
+        let storage_class = match specifier_loc {
+            None => None,
+            Some(i) => {
+                let removed = self.remove(i);
+                match removed.unwrap() {
+                    Token::KeywordStatic => Some(StorageClass::Static),
+                    Token::KeywordExtern => Some(StorageClass::Extern),
+                    _ => unreachable!(),
+                }
             }
-            let declarator_output = declarator.apply_to_type(base_type)?;
+        };
 
-            let out_type = declarator_output.out_type;
-            let name = declarator_output.name;
-            // let mut statement_tokens = VecDeque::new();
-            // // read until semicolon
-            // while !matches!(self.peek()?, Token::SemiColon) {
-            //     statement_tokens.push_back(self.read()?);
-            // }
-            // self.expect(Token::SemiColon)?;
-            //
-            // let name_token = statement_tokens
-            //     .pop_back()
-            //     .ok_or::<Box<dyn Error>>("Typedef instruction has too few variables".into())?;
-            // let name = if let Token::Identifier(s) = name_token {
-            //     s
-            // } else {
-            //     return Err("Type alias name is not an identifier".into());
-            // };
-            // let t: Type = statement_tokens.parse(context)?;
-            context
-                .current_scope_identifiers
-                .insert(name.clone(), Identity::TypeAlias(out_type.clone()));
+        let (base_type, declarator, struct_declaration): (
+            Type,
+            Declarator,
+            Option<StructDeclaration>,
+        ) = match self.peek()? {
+            Token::KeywordTypedef => {
+                if storage_class.is_some() {
+                    return Err("Cannot use static or extern in a typedef alias".into());
+                }
+                self.expect(Token::KeywordTypedef)?;
+                let (base_type, declarator, struct_declaration): OutputWithStruct =
+                    self.parse(context)?;
+                self.expect(Token::SemiColon)?;
+                let declarator_output = declarator.apply_to_type(base_type)?;
 
-            return Ok(DeclarationNode::Type(TypeDeclaration {
-                target_type: out_type,
-                name,
-            }));
-        }
+                let out_type = declarator_output.out_type;
+                let name = declarator_output.name;
+                context
+                    .current_scope_identifiers
+                    .insert(name.clone(), Identity::TypeAlias(out_type.clone()));
 
-        let (base_type, storage_class, declarator) = self.parse(context)?;
+                return Ok(DeclarationNode::Type(TypeDeclaration {
+                    target_type: out_type,
+                    name,
+                    struct_declaration,
+                }));
+            }
+            Token::KeywordStruct => {
+                // parsing the StructDeclaration here does the following
+                // 1. Consumes the entire struct type
+                // 2. If the struct type had a definition, adds it to the scope's struct map
+                // 3. Return the uniquely-generated name corresponding to this name in this scope
+                // 4. Return the list of struct members tied to THIS SPECIFIC instance of the
+                //    declaration.
+
+                // let struct_declaration = self.parse(context)?;
+                let mut struct_declaration_tokens = self.pop_tokens_for_type(context)?.0;
+
+                match self.peek()? {
+                    Token::SemiColon => {
+                        let struct_declaration = struct_declaration_tokens.parse(context)?;
+                        if !struct_declaration_tokens.is_empty() {
+                            return Err(
+                                "Leftover tokens parsing an explicit struct declaration".into()
+                            );
+                        }
+
+                        self.expect(Token::SemiColon)?;
+                        return Ok(DeclarationNode::Struct(struct_declaration));
+                    }
+                    _ => {
+                        // this is a variable declaration, so continue to parse the declarator and
+                        // the init
+
+                        let struct_declaration =
+                            struct_declaration_tokens.parse_implicit(context)?;
+                        if !struct_declaration_tokens.is_empty() {
+                            return Err("Leftover tokens parsing a struct declaration".into());
+                        }
+
+                        let declarator: Declarator = self.parse(context)?;
+                        (
+                            Type::Struct(struct_declaration.name.clone()),
+                            declarator,
+                            Some(struct_declaration),
+                        )
+                    }
+                }
+            }
+            _ => {
+                let (out, declarator, struct_declaration): OutputWithStruct =
+                    self.parse(context)?;
+                (out, declarator, struct_declaration)
+            }
+        };
 
         let declarator_output = declarator.apply_to_type(base_type)?;
 
@@ -101,6 +158,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         params: new_params_names,
                         body: Some(body),
                         storage_class,
+                        struct_declarations: declarator_output.struct_declarations,
                     }))
                 } else {
                     self.expect(Token::SemiColon)?;
@@ -110,6 +168,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         params: param_names,
                         body: None,
                         storage_class,
+                        struct_declarations: declarator_output.struct_declarations,
                     }))
                 }
             }
@@ -131,6 +190,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                             name,
                             init: Some(initialiser),
                             storage_class,
+                            struct_declaration,
                         }))
                     }
                     Token::SemiColon => Ok(DeclarationNode::Variable(VariableDeclaration {
@@ -138,6 +198,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         name,
                         init: None,
                         storage_class,
+                        struct_declaration,
                     })),
                     _ => Err("Invalid token in variable declaration".into()),
                 }
@@ -181,74 +242,5 @@ impl DeclarationNode {
         }
 
         Ok(new_name)
-    }
-}
-
-impl Parse<(Type, Option<StorageClass>, Declarator)> for VecDeque<Token> {
-    fn parse(
-        &mut self,
-        context: &mut ParseContext,
-    ) -> Result<(Type, Option<StorageClass>, Declarator), Box<dyn Error>> {
-        // Specifiers may be one of "static", "int" or "extern"
-        // ... and there may be any non-zero amount of them
-        let mut storage_classes = Vec::new();
-        let mut types_deque = VecDeque::new();
-        while self.peek()?.is_specifier(context) {
-            if self.peek()?.is_type(context) {
-                types_deque.push_back(self.read()?);
-            } else {
-                storage_classes.push(self.read()?);
-            }
-        }
-        let mut declarator_deque = VecDeque::new();
-        while !self.is_empty()
-            && !matches!(
-                self.peek()?,
-                Token::OpenBrace | Token::Assignment | Token::SemiColon
-            )
-        {
-            declarator_deque.push_back(self.read()?);
-        }
-
-        if storage_classes.len() > 1 {
-            return Err(format!(
-                "Got multiple storage classes in declaration: {:?}",
-                storage_classes
-            )
-            .into());
-        }
-
-        let storage = storage_classes.first().map(|t| match t {
-            Token::KeywordStatic => StorageClass::Static,
-            Token::KeywordExtern => StorageClass::Extern,
-            _ => unreachable!(),
-        });
-
-        while !types_deque.is_empty() {
-            // try and get a valid type and declarator for the given expression
-            let mut new_types_deque = types_deque.clone();
-            let mut new_declarator_deque = declarator_deque.clone();
-            let this_type = new_types_deque.parse(context);
-            let declarator = new_declarator_deque.parse(context);
-            if this_type.is_ok()
-                && new_types_deque.is_empty()
-                && declarator.is_ok()
-                && new_declarator_deque.is_empty()
-            {
-                return Ok((this_type?, storage, declarator?));
-            }
-            // Entering this section means that we failed to properly split the type and the
-            // declarator, so try again with a different split
-
-            println!(
-                "Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?}",
-                types_deque,this_type,  declarator_deque, declarator
-            );
-            let move_this_to_the_declarator = types_deque.pop_back().unwrap();
-            declarator_deque.push_front(move_this_to_the_declarator);
-        }
-
-        Err("Declaration could not be reconciled to match both a type and a declarator".into())
-        // Ok((this_type, storage, declarator))
     }
 }

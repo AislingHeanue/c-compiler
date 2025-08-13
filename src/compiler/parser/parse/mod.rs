@@ -1,9 +1,12 @@
 use super::{
     AbstractDeclarator, BinaryOperatorNode, BlockItemNode, DeclarationNode, Declarator,
     ExpressionNode, ExpressionWithoutType, ForInitialiserNode, InitialiserNode,
-    InitialiserWithoutType, ProgramNode, StatementNode, Type, UnaryOperatorNode,
+    InitialiserWithoutType, ProgramNode, StatementNode, StructMember, Type, UnaryOperatorNode,
 };
-use crate::compiler::{lexer::Token, lexer::TokenVector, types::Constant};
+use crate::compiler::{
+    lexer::{Token, TokenVector},
+    types::Constant,
+};
 use std::{
     collections::{HashMap, VecDeque},
     error::Error,
@@ -25,15 +28,28 @@ where
 }
 
 pub struct ParseContext {
-    // map from string to sting-as-seen-in-assembly and is-externally-linked and is_type_alias
+    // map from string to sting-as-seen-in-assembly and is-externally-linked
     current_scope_identifiers: HashMap<String, Identity>,
     outer_scope_identifiers: HashMap<String, Identity>,
+    current_struct_names: HashMap<String, String>,
+    outer_struct_names: HashMap<String, String>,
+    // all_struct_types: HashMap<String, StructTypeEntry>,
     num_variables: usize,
+    num_structs: usize,
     do_not_validate: bool,
     // this prevent creating an extra new scope entering function bodies
     current_block_is_function_body: bool,
     current_scope_is_file: bool,
 }
+
+// pub struct StructTypeEntry {
+//     alignment: u32,
+//     size: u64,
+//     members: Vec<StructMemberEntry>,
+// }
+
+// struct member with offset within the struct
+// type StructMemberEntry = (StructMember, u32);
 
 #[derive(Clone, Debug)]
 pub enum Identity {
@@ -48,7 +64,11 @@ pub fn do_parse(
     lexed.parse(&mut ParseContext {
         current_scope_identifiers: HashMap::new(),
         outer_scope_identifiers: HashMap::new(),
+        current_struct_names: HashMap::new(),
+        outer_struct_names: HashMap::new(),
+        // all_struct_types: HashMap::new(),
         num_variables: 0,
+        num_structs: 0,
         do_not_validate,
         current_block_is_function_body: false,
         current_scope_is_file: true,
@@ -68,7 +88,7 @@ impl Parse<ProgramNode> for VecDeque<Token> {
 
 impl Parse<ForInitialiserNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<ForInitialiserNode, Box<dyn Error>> {
-        if self.peek()?.is_specifier(context) {
+        if self.peek()?.is_start_of_declaration(context) {
             let block_item = self.parse(context)?;
             if let BlockItemNode::Declaration(DeclarationNode::Variable(v)) = block_item {
                 if !context.do_not_validate && v.storage_class.is_some() {

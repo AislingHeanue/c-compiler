@@ -31,6 +31,9 @@ impl Validate for FunctionDeclaration {
 impl CheckTypes for FunctionDeclaration {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         self.function_type.check_types(context)?;
+        let mut is_defined = self.body.is_some();
+        let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
+
         let (return_type, arg_types) =
             if let Type::Function(ref return_type, ref mut arg_types) = &mut self.function_type {
                 (return_type, arg_types)
@@ -41,10 +44,26 @@ impl CheckTypes for FunctionDeclaration {
             return Err("Function cannot return an array".into());
         }
 
+        // bring any used structs into existence
+        for s in self.struct_declarations.iter_mut() {
+            s.check_types(context)?;
+        }
+        if is_defined
+            && **return_type != Type::Void
+            && !return_type.is_complete(&mut context.structs)
+        {
+            return Err("Function with body cannot return incomplete types".into());
+        }
+
         // replace all array arg types in the function type with pointer types
         for arg in arg_types.iter_mut() {
             if arg == &Type::Void {
                 return Err("Function cannot have void parameters".into());
+            }
+            if is_defined && !arg.is_complete(&mut context.structs) {
+                return Err(
+                    "Function with body cannot have parameters with incomplete types".into(),
+                );
             }
             if let Type::Array(t, _size) = arg {
                 *arg = Type::Pointer(t.clone())
@@ -58,9 +77,6 @@ impl CheckTypes for FunctionDeclaration {
         } else {
             unreachable!()
         };
-
-        let mut is_defined = self.body.is_some();
-        let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
 
         if let Some(old_symbol_info) = context.symbols.get(&self.name) {
             if *this_type != old_symbol_info.symbol_type {

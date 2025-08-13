@@ -9,7 +9,12 @@ use std::{
     error::Error,
 };
 
-type Scopes = (HashMap<String, Identity>, HashMap<String, Identity>);
+pub struct Scopes {
+    current_vars: HashMap<String, Identity>,
+    outer_vars: HashMap<String, Identity>,
+    current_structs: HashMap<String, String>,
+    outer_structs: HashMap<String, String>,
+}
 
 impl Parse<Vec<BlockItemNode>> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Vec<BlockItemNode>, Box<dyn Error>> {
@@ -76,20 +81,31 @@ impl BlockItemNode {
         // );
         let original_current_scope_variables = context.current_scope_identifiers.clone();
         let original_outer_scope_variables = context.outer_scope_identifiers.clone();
+        let original_current_struct_types = context.current_struct_names.clone();
+        let original_outer_struct_types = context.outer_struct_names.clone();
+
         context
             .outer_scope_identifiers
             .extend(context.current_scope_identifiers.clone());
         context.current_scope_identifiers = HashMap::new();
+        context
+            .outer_struct_names
+            .extend(context.current_struct_names.clone());
+        context.current_struct_names = HashMap::new();
 
-        (
-            original_current_scope_variables,
-            original_outer_scope_variables,
-        )
+        Scopes {
+            current_vars: original_current_scope_variables,
+            outer_vars: original_outer_scope_variables,
+            current_structs: original_current_struct_types,
+            outer_structs: original_outer_struct_types,
+        }
     }
 
     pub fn leave_scope(previous_scopes: Scopes, context: &mut ParseContext) {
-        context.current_scope_identifiers = previous_scopes.0;
-        context.outer_scope_identifiers = previous_scopes.1;
+        context.current_scope_identifiers = previous_scopes.current_vars;
+        context.outer_scope_identifiers = previous_scopes.outer_vars;
+        context.current_struct_names = previous_scopes.current_structs;
+        context.outer_struct_names = previous_scopes.outer_structs;
         // println!(
         //     "leave {:?} {:?}",
         //     context.outer_scope_identifiers, context.current_scope_identifiers

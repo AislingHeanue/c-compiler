@@ -122,5 +122,6 @@ pub fn birds(
     parsed: ProgramNode,
     symbols: HashMap<String, SymbolInfo>,
 ) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
-    do_birds(parsed, symbols)
+    //FIXME: structs
+    do_birds(parsed, symbols, HashMap::new())
 }
