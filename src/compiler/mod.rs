@@ -34,13 +34,13 @@ pub fn compile(
         return Ok(());
     }
 
-    let symbols = validate(&mut parsed)?;
+    let (symbols, structs) = validate(&mut parsed)?;
     if config.only_validate {
         println!("{}", parsed);
         return Ok(());
     }
 
-    let (birds_output, symbols) = birds(parsed, symbols)?;
+    let (birds_output, symbols) = birds(parsed, symbols, structs)?;
     if config.only_birds {
         println!("{:#?}", birds_output);
         return Ok(());

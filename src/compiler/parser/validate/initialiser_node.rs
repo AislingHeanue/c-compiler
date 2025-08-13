@@ -306,7 +306,10 @@ impl InitialiserNode {
                 for m in members {
                     c_init.push(InitialiserNode::zero(&m.member_type, context));
                 }
-                InitialiserWithoutType::Compound(c_init).into()
+                InitialiserNode(
+                    InitialiserWithoutType::Compound(c_init),
+                    Some(target_type.clone()),
+                )
             }
             Type::Void => {
                 unreachable!()

@@ -163,14 +163,13 @@ impl InitialiserNode {
                     // for every space left in the array, add null bytes
                     let difference_in_size =
                         size as i32 - (context.current_initialiser_offset - first_offset);
-                    for _ in 0..difference_in_size {
-                        instructions.push(BirdsInstructionNode::CopyToOffset(
-                            BirdsValueNode::Constant(Constant::get_typed(0, &Type::Char)),
-                            dst.clone(),
-                            context.current_initialiser_offset,
-                        ));
-                        context.current_initialiser_offset += 1;
-                    }
+                    InitialiserNode::pad_bytes(
+                        difference_in_size,
+                        &mut instructions,
+                        dst.clone(),
+                        context,
+                    );
+                    context.current_initialiser_offset += difference_in_size;
                 } else {
                     unreachable!()
                 }
@@ -196,6 +195,31 @@ impl InitialiserNode {
 
                 Ok(instructions)
             }
+            (InitialiserWithoutType::Compound(initialisers), Type::Struct(name)) => {
+                let info = context.structs.get(&name).unwrap().clone();
+                let mut instructions = Vec::new();
+                let original_offset = context.current_initialiser_offset;
+                for (init, member) in initialisers.into_iter().zip(info.members.iter()) {
+                    let difference_in_size = member.offset as i32
+                        - (context.current_initialiser_offset - original_offset);
+                    // optional addition: initialise all the in-between bytes of the struct to zero
+                    // println!(
+                    //     "Padding {} bytes, member offset = {}, member type = {:?}, name = {}",
+                    //     difference_in_size, member.offset, member.member_type, name
+                    // );
+                    InitialiserNode::pad_bytes(
+                        difference_in_size,
+                        &mut instructions,
+                        dst.clone(),
+                        context,
+                    );
+
+                    context.current_initialiser_offset = original_offset + member.offset as i32;
+                    println!("init is {:?} and member is {:?}", init, member);
+                    instructions.append(&mut init.convert(dst.clone(), context)?);
+                }
+                Ok(instructions)
+            }
             (InitialiserWithoutType::Compound(initialisers), _) => {
                 let instructions: Vec<BirdsInstructionNode> = process_results(
                     initialisers
@@ -204,6 +228,39 @@ impl InitialiserNode {
                     |iter| iter.flatten().collect(),
                 )?;
                 Ok(instructions)
+            }
+        }
+    }
+
+    fn pad_bytes(
+        num: i32,
+        instructions: &mut Vec<BirdsInstructionNode>,
+        dst: String,
+        context: &mut ConvertContext,
+    ) {
+        let mut i = 0;
+        while i < num {
+            if i + 8 <= num {
+                instructions.push(BirdsInstructionNode::CopyToOffset(
+                    BirdsValueNode::Constant(Constant::get_typed(0, &Type::Long)),
+                    dst.clone(),
+                    context.current_initialiser_offset + i,
+                ));
+                i += 8;
+            } else if i + 4 <= num {
+                instructions.push(BirdsInstructionNode::CopyToOffset(
+                    BirdsValueNode::Constant(Constant::get_typed(0, &Type::Integer)),
+                    dst.clone(),
+                    context.current_initialiser_offset + i,
+                ));
+                i += 4;
+            } else {
+                instructions.push(BirdsInstructionNode::CopyToOffset(
+                    BirdsValueNode::Constant(Constant::get_typed(0, &Type::Char)),
+                    dst.clone(),
+                    context.current_initialiser_offset + i,
+                ));
+                i += 1;
             }
         }
     }

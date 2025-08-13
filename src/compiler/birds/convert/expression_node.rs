@@ -7,7 +7,9 @@ use crate::compiler::{
         BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsUnaryOperatorNode, BirdsValueNode,
         Destination,
     },
-    parser::{BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, UnaryOperatorNode},
+    parser::{
+        BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, MemberEntry, UnaryOperatorNode,
+    },
     types::{
         ComparableStatic, Constant, InitialValue, StaticInitialiser, StorageInfo, SymbolInfo, Type,
     },
@@ -50,7 +52,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     UnaryOperatorNode::PrefixIncrement | UnaryOperatorNode::PrefixDecrement
                 ) =>
             {
-                let new_dst_type = src.1.clone().unwrap();
+                let new_dst_type = self.1.clone().unwrap();
 
                 // How to convert and evaluate an expression which may contain a dereference
                 let (mut instructions, new_src): D = src.convert(context)?;
@@ -58,7 +60,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     new_src.clone().evaluate(&new_dst_type, context);
                 instructions.append(&mut instructions_from_evaluate);
 
-                let new_dst = new_temp_variable(&new_dst_type, context);
+                let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
                 if let Type::Pointer(ref t) = new_dst_type {
                     let constant = if op == UnaryOperatorNode::PrefixIncrement {
                         1
@@ -109,14 +111,14 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     UnaryOperatorNode::SuffixIncrement | UnaryOperatorNode::SuffixDecrement
                 ) =>
             {
-                let new_dst_type = src.1.clone().unwrap();
+                let new_dst_type = self.1.clone().unwrap();
 
                 let (mut instructions, new_src): D = src.convert(context)?;
                 let (mut instructions_from_evaluate, evaluated_src) =
                     new_src.clone().evaluate(&new_dst_type, context);
                 instructions.append(&mut instructions_from_evaluate);
 
-                let new_dst = new_temp_variable(&new_dst_type, context);
+                let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
                 instructions.push(BirdsInstructionNode::Copy(
                     evaluated_src.clone(),
                     new_dst.clone(),
@@ -166,7 +168,6 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 Ok((instructions, new_dst.into()))
             }
             ExpressionWithoutType::Unary(op, src) => {
-                let src_type = src.1.clone().unwrap();
                 let (mut instructions, new_src): E = src.convert(context)?;
 
                 let bird_op = match op {
@@ -179,13 +180,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     | UnaryOperatorNode::SuffixDecrement => unreachable!(),
                 };
 
-                let new_dst_type = if bird_op == BirdsUnaryOperatorNode::Not {
-                    Type::Integer
-                } else {
-                    src_type
-                };
-
-                let new_dst = new_temp_variable(&new_dst_type, context);
+                let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
 
                 instructions.push(BirdsInstructionNode::Unary(
                     bird_op,
@@ -204,7 +199,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 //      dst = left
                 // }
                 // a += 5l => a = int(long(a) + 5l)
-                let left_type = left.1.clone().unwrap();
+                let left_type = self.1.clone().unwrap();
                 let right_type = right.1.clone().unwrap();
                 let common_type = common.unwrap();
 
@@ -219,12 +214,11 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
 
                 let bird_op = op.convert(context)?;
 
+                let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
                 match (&bird_op, &left_type, &right_type) {
                     (BirdsBinaryOperatorNode::Add, Type::Pointer(ref left_t), right_t)
                         if right_t.is_integer() =>
                     {
-                        let new_dst_type = Type::Long;
-                        let new_dst = new_temp_variable(&new_dst_type, context);
                         instructions.push(BirdsInstructionNode::AddPointer(
                             evaluated_left,
                             new_right,
@@ -247,8 +241,6 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             negate_right.clone(),
                         ));
 
-                        let new_dst_type = Type::Long;
-                        let new_dst = new_temp_variable(&new_dst_type, context);
                         instructions.push(BirdsInstructionNode::AddPointer(
                             evaluated_left,
                             negate_right,
@@ -268,7 +260,6 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                                 | BirdsBinaryOperatorNode::ShiftRight
                         ) =>
                     {
-                        let new_dst = new_temp_variable(&left_type, context);
                         instructions.push(BirdsInstructionNode::Binary(
                             bird_op,
                             evaluated_left,
@@ -292,17 +283,16 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         )?;
                         instructions.append(&mut instructions_from_first_cast);
 
-                        let new_dst = new_temp_variable(&common_type, context);
+                        let uncasted_result = new_temp_variable(&common_type, context);
                         instructions.push(BirdsInstructionNode::Binary(
                             bird_op,
                             casted_left.clone(),
                             new_right,
-                            new_dst.clone(),
+                            uncasted_result.clone(),
                         ));
-                        let casted_result = new_temp_variable(&left_type, context);
                         let mut instructions_from_second_cast = ExpressionWithoutType::cast(
+                            uncasted_result.clone(),
                             new_dst.clone(),
-                            casted_result.clone(),
                             &common_type,
                             &left_type,
                             context,
@@ -310,7 +300,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         instructions.append(&mut instructions_from_second_cast);
 
                         let (mut instructions_from_assign, returns) =
-                            ExpressionWithoutType::assign(casted_result, new_left)?;
+                            ExpressionWithoutType::assign(new_dst, new_left)?;
                         instructions.append(&mut instructions_from_assign);
                         Ok((instructions, returns))
                     }
@@ -319,7 +309,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
             ExpressionWithoutType::Binary(op, left, right)
                 if matches!(op, BinaryOperatorNode::Or | BinaryOperatorNode::And) =>
             {
-                let dst = new_temp_variable(&Type::Integer, context);
+                let dst = new_temp_variable(self.1.as_ref().unwrap(), context);
 
                 let (mut instructions, new_left): E = left.convert(context)?;
                 let (mut instructions_from_right, new_right): E = right.convert(context)?;
@@ -392,12 +382,11 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 instructions.append(&mut instructions_from_right);
                 let bird_op = op.convert(context)?;
 
+                let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
                 match (&bird_op, &left_type, &right_type) {
                     (BirdsBinaryOperatorNode::Add, Type::Pointer(ref left_t), right_t)
                         if right_t.is_integer() =>
                     {
-                        let new_dst_type = Type::Long;
-                        let new_dst = new_temp_variable(&new_dst_type, context);
                         instructions.push(BirdsInstructionNode::AddPointer(
                             new_left,
                             new_right,
@@ -410,8 +399,6 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     (BirdsBinaryOperatorNode::Add, left_t, Type::Pointer(ref right_t))
                         if left_t.is_integer() =>
                     {
-                        let new_dst_type = Type::Long;
-                        let new_dst = new_temp_variable(&new_dst_type, context);
                         instructions.push(BirdsInstructionNode::AddPointer(
                             new_right,
                             new_left,
@@ -431,8 +418,6 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             negate_right.clone(),
                         ));
 
-                        let new_dst_type = Type::Long;
-                        let new_dst = new_temp_variable(&new_dst_type, context);
                         instructions.push(BirdsInstructionNode::AddPointer(
                             new_left,
                             negate_right,
@@ -455,7 +440,6 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             diff.clone(),
                         ));
                         // ptrdiff_t
-                        let new_dst = new_temp_variable(&Type::Long, context);
                         instructions.push(BirdsInstructionNode::Binary(
                             BirdsBinaryOperatorNode::Divide,
                             diff,
@@ -470,12 +454,6 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     }
 
                     _ => {
-                        let new_dst_type = if bird_op.is_relational() {
-                            Type::Integer
-                        } else {
-                            left_type
-                        };
-                        let new_dst = new_temp_variable(&new_dst_type, context);
                         instructions.push(BirdsInstructionNode::Binary(
                             bird_op,
                             new_left,
@@ -498,7 +476,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     new_cond,
                     new_else_label_name.clone(),
                 ));
-                let new_dst_type = then.1.clone().unwrap();
+                let new_dst_type = self.1.clone().unwrap();
                 if new_dst_type == Type::Void {
                     let (mut instructions_from_then, _): D = then.convert(context)?;
                     instructions.append(&mut instructions_from_then);
@@ -514,7 +492,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     Ok((instructions, BirdsValueNode::Var("!".to_string()).into()))
                 } else {
                     let (mut instructions_from_then, new_then): E = then.convert(context)?;
-                    let new_dst = new_temp_variable(&new_dst_type, context);
+                    let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
 
                     instructions.append(&mut instructions_from_then);
                     instructions.append(&mut vec![
@@ -533,18 +511,12 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
             ExpressionWithoutType::FunctionCall(name, args) => {
                 let (mut instructions, values): Ve = args.convert(context)?;
 
-                let new_dst_type = if let Type::Function(ref ret, _) =
-                    context.symbols.get(&name).unwrap().symbol_type
-                {
-                    ret.as_ref().clone()
-                } else {
-                    unreachable!()
-                };
-                if new_dst_type == Type::Void {
+                let new_dst_type = self.1.as_ref().unwrap();
+                if *new_dst_type == Type::Void {
                     instructions.push(BirdsInstructionNode::FunctionCall(name, values, None));
                     Ok((instructions, BirdsValueNode::Var("!".to_string()).into()))
                 } else {
-                    let new_dst = new_temp_variable(&new_dst_type, context);
+                    let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
                     instructions.push(BirdsInstructionNode::FunctionCall(
                         name,
                         values,
@@ -562,7 +534,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 } else if target_type == Type::Void {
                     return Ok((instructions, BirdsValueNode::Var("!".to_string()).into()));
                 }
-                let new_dst = new_temp_variable(&target_type, context);
+                let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
                 let mut instructions_from_cast = ExpressionWithoutType::cast(
                     new_src,
                     new_dst.clone(),
@@ -587,6 +559,26 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         Ok((instructions, new_dst.into()))
                     }
                     Destination::Dereference(val) => Ok((instructions, val.into())),
+                    Destination::StructEntry(base, offset) => {
+                        let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
+                        instructions.push(BirdsInstructionNode::GetAddress(
+                            BirdsValueNode::Var(base),
+                            new_dst.clone(),
+                        ));
+                        if offset != 0 {
+                            // apparently using new_dst twice here is fine
+                            instructions.push(BirdsInstructionNode::AddPointer(
+                                new_dst.clone(),
+                                BirdsValueNode::Constant(Constant::get_typed(
+                                    offset as i64,
+                                    &Type::Long,
+                                )),
+                                1,
+                                new_dst.clone(),
+                            ));
+                        }
+                        Ok((instructions, new_dst.into()))
+                    }
                 }
             }
             ExpressionWithoutType::Subscript(src, inner) => {
@@ -660,8 +652,81 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 BirdsValueNode::Constant(Constant::UnsignedLong(t.get_size(&mut context.structs)))
                     .into(),
             )),
-            ExpressionWithoutType::Dot(_, _) => todo!(),
-            ExpressionWithoutType::Arrow(_, _) => todo!(),
+            ExpressionWithoutType::Dot(src, item) => {
+                let struct_name = ExpressionWithoutType::get_struct_name(&src);
+                let member =
+                    ExpressionWithoutType::get_member_from_struct(&struct_name, &item, context);
+                let (mut instructions, new_left): D = src.convert(context)?;
+                match new_left {
+                    Destination::Direct(BirdsValueNode::Var(v)) => Ok((
+                        instructions,
+                        Destination::StructEntry(v, member.offset as i32),
+                    )),
+                    Destination::Direct(v) => {
+                        // We can assume that Direct must be a Var, since otherwise it would be a
+                        // constant but structs are never constants.
+                        panic!("Direct destination does not contain a Var, got {:?}", v)
+                    }
+                    Destination::StructEntry(base, offset) => Ok((
+                        instructions,
+                        Destination::StructEntry(base, member.offset as i32 + offset),
+                    )),
+                    Destination::Dereference(ref p) => {
+                        let new_dst = if member.offset != 0 {
+                            let new_dst = new_temp_variable(
+                                &Type::Pointer(Box::new(self.1.clone().unwrap())),
+                                context,
+                            );
+                            instructions.push(BirdsInstructionNode::AddPointer(
+                                p.clone(),
+                                BirdsValueNode::Constant(Constant::get_typed(
+                                    member.offset as i64,
+                                    &Type::Long,
+                                )),
+                                1,
+                                new_dst.clone(),
+                            ));
+                            Destination::Dereference(new_dst)
+                        } else {
+                            new_left
+                        };
+
+                        Ok((instructions, new_dst))
+                    }
+                }
+            }
+            ExpressionWithoutType::Arrow(src, item) => {
+                let struct_name = if let Type::Pointer(p) = src.1.as_ref().unwrap() {
+                    if let Type::Struct(ref name) = **p {
+                        name.clone()
+                    } else {
+                        unreachable!()
+                    }
+                } else {
+                    unreachable!()
+                };
+                let member =
+                    ExpressionWithoutType::get_member_from_struct(&struct_name, &item, context);
+                let (mut instructions, new_left): E = src.convert(context)?;
+
+                let new_dst = if member.offset != 0 {
+                    let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
+                    instructions.push(BirdsInstructionNode::AddPointer(
+                        new_left,
+                        BirdsValueNode::Constant(Constant::get_typed(
+                            member.offset as i64,
+                            &Type::Long,
+                        )),
+                        1,
+                        new_dst.clone(),
+                    ));
+                    new_dst
+                } else {
+                    new_left
+                };
+
+                Ok((instructions, Destination::Dereference(new_dst)))
+            }
         }
     }
 }
@@ -744,6 +809,39 @@ impl ExpressionWithoutType {
                 // since it (by definition) is what *dst equals to at this instant.
                 Ok((instructions, src.into()))
             }
+            Destination::StructEntry(base, offset) => {
+                instructions.push(BirdsInstructionNode::CopyToOffset(
+                    src.clone(),
+                    base,
+                    offset,
+                ));
+                Ok((instructions, src.into()))
+            }
+        }
+    }
+
+    fn get_member_from_struct(
+        struct_name: &str,
+        item: &str,
+        context: &mut ConvertContext,
+    ) -> MemberEntry {
+        if let Some(info) = context.structs.get(struct_name) {
+            if let Some(member) = info.members.iter().find(|m| m.name == item) {
+                member.clone()
+            } else {
+                unreachable!()
+            }
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn get_struct_name(src: &ExpressionNode) -> String {
+        let left_type = src.1.clone().unwrap();
+        if let Type::Struct(name) = left_type {
+            name
+        } else {
+            unreachable!()
         }
     }
 }

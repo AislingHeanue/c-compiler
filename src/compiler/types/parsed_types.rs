@@ -49,7 +49,7 @@ impl Type {
             Type::SignedChar => true,
             Type::UnsignedChar => false,
             Type::Void => unreachable!(),
-            Type::Struct(_) => todo!(),
+            Type::Struct(_) => false,
         }
     }
 

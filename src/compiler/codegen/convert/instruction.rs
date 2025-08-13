@@ -251,6 +251,14 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     Operand::MockMemory(dst, offset),
                 )]
             }
+            BirdsInstructionNode::CopyFromOffset(src, offset, dst) => {
+                let t = AssemblyType::infer(&dst, context)?.0;
+                vec![Instruction::Mov(
+                    t,
+                    Operand::MockMemory(src, offset),
+                    dst.convert(context)?,
+                )]
+            }
             BirdsInstructionNode::Jump(s) => vec![Instruction::Jmp(s)],
             BirdsInstructionNode::JumpZero(src, s) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;

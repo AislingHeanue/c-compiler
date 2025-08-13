@@ -10,7 +10,7 @@ mod variable_declaration;
 
 use super::{
     BlockItemNode, DeclarationNode, ForInitialiserNode, ProgramNode, StructInfo, SwitchMapKey,
-    SymbolInfo, Type,
+    SymbolInfo, Type, ValidateResult,
 };
 // initialiser representing n * 0x00 bytes
 
@@ -63,9 +63,7 @@ pub struct ValidateContext {
     structs: HashMap<String, StructInfo>,
 }
 
-pub fn do_validate(
-    parsed: &mut ProgramNode,
-) -> Result<HashMap<String, SymbolInfo>, Box<dyn Error>> {
+pub fn do_validate(parsed: &mut ProgramNode) -> Result<ValidateResult, Box<dyn Error>> {
     let passes: Vec<ValidationPass> = vec![
         ValidationPass::ReadLabels,
         ValidationPass::ValidateLabels,
@@ -95,7 +93,7 @@ pub fn do_validate(
         parsed.validate(&mut validate_context)?;
     }
 
-    Ok(validate_context.symbols)
+    Ok((validate_context.symbols, validate_context.structs))
 }
 
 impl<T> Validate for Option<T>

@@ -3,7 +3,7 @@ use std::{collections::HashMap, error::Error};
 use convert::do_birds;
 
 use super::{
-    parser::ProgramNode,
+    parser::{ProgramNode, StructInfo},
     types::{Constant, StaticInitialiser, SymbolInfo, Type},
 };
 
@@ -60,6 +60,8 @@ pub enum BirdsInstructionNode {
     AddPointer(BirdsValueNode, BirdsValueNode, u64, BirdsValueNode),
     // src, name of some aggregate type variable, offset (bytes)
     CopyToOffset(BirdsValueNode, String, i32),
+    // src name, offset, dst
+    CopyFromOffset(String, i32, BirdsValueNode),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -116,12 +118,14 @@ pub enum BirdsBinaryOperatorNode {
 pub enum Destination {
     Direct(BirdsValueNode),
     Dereference(BirdsValueNode),
+    // base name, offset
+    StructEntry(String, i32),
 }
 
 pub fn birds(
     parsed: ProgramNode,
     symbols: HashMap<String, SymbolInfo>,
+    structs: HashMap<String, StructInfo>,
 ) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
-    //FIXME: structs
-    do_birds(parsed, symbols, HashMap::new())
+    do_birds(parsed, symbols, structs)
 }

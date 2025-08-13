@@ -251,6 +251,8 @@ pub fn parse(lexed: VecDeque<Token>, do_not_validate: bool) -> Result<ProgramNod
     do_parse(lexed, do_not_validate)
 }
 
-pub fn validate(parsed: &mut ProgramNode) -> Result<HashMap<String, SymbolInfo>, Box<dyn Error>> {
+type ValidateResult = (HashMap<String, SymbolInfo>, HashMap<String, StructInfo>);
+
+pub fn validate(parsed: &mut ProgramNode) -> Result<ValidateResult, Box<dyn Error>> {
     do_validate(parsed)
 }

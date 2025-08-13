@@ -113,6 +113,17 @@ impl Destination {
                     new_dst,
                 )
             }
+            Destination::StructEntry(base, offset) => {
+                let new_dst = new_temp_variable(target_type, context);
+                (
+                    vec![BirdsInstructionNode::CopyFromOffset(
+                        base,
+                        offset,
+                        new_dst.clone(),
+                    )],
+                    new_dst,
+                )
+            }
         }
     }
 }
