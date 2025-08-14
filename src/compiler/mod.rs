@@ -40,13 +40,20 @@ pub fn compile(
         return Ok(());
     }
 
-    let (birds_output, symbols) = birds(parsed, symbols, structs)?;
+    let (birds_output, symbols, structs) = birds(parsed, symbols, structs)?;
     if config.only_birds {
         println!("{:#?}", birds_output);
         return Ok(());
     }
 
-    let code = codegen(birds_output, config.add_comments, IS_LINUX, IS_MAC, symbols)?;
+    let code = codegen(
+        birds_output,
+        config.add_comments,
+        IS_LINUX,
+        IS_MAC,
+        symbols,
+        structs,
+    )?;
     if config.only_codegen {
         return Ok(());
     }

@@ -62,5 +62,6 @@ run)
 	echo "Code:"
 	# Print the generated assembly code
 	bash -c "$binary $file -S" | bat -l asm --paging=never
+	# bash -c "$binary $file -S" >a.s
 	;;
 esac

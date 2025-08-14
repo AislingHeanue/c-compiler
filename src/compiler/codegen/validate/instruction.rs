@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 
-use crate::compiler::codegen::align_stack_size;
+use crate::compiler::codegen::{align_stack_size, AssemblySymbolInfo};
 
 use super::{
     AssemblyType, BinaryOperator, ConditionCode, ImmediateValue, Instruction, Operand, Register,
@@ -24,6 +24,17 @@ impl Validate for Vec<Instruction> {
                 // a map from register names to stack locations
                 context.current_stack_locations = HashMap::new();
                 context.current_stack_size = 0;
+                if context.current_function_name.is_some() {
+                    if let AssemblySymbolInfo::Function(_, true) = context
+                        .symbols
+                        .get(context.current_function_name.as_ref().unwrap())
+                        .unwrap()
+                    {
+                        // start the stack size at 8, so that we can read the location to store the
+                        // return value from the first 8 bytes on the stack
+                        context.current_stack_size = 8;
+                    }
+                }
                 *self = Instruction::update_instructions(
                     self.drain(..).collect_vec(),
                     context,

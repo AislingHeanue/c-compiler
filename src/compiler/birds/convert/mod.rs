@@ -9,7 +9,7 @@ use crate::compiler::{
 };
 
 use super::{
-    BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsProgramNode, BirdsValueNode, Destination,
+    BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsResult, BirdsValueNode, Destination,
 };
 
 mod declaration;
@@ -21,7 +21,7 @@ pub fn do_birds(
     parsed: ProgramNode,
     symbols: HashMap<String, SymbolInfo>,
     structs: HashMap<String, StructInfo>,
-) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
+) -> Result<BirdsResult, Box<dyn Error>> {
     let mut context = ConvertContext {
         last_end_label_number: 0,
         last_else_label_number: 0,
@@ -35,7 +35,7 @@ pub fn do_birds(
     };
 
     let result = parsed.convert(&mut context)?;
-    Ok((result, context.symbols))
+    Ok((result, context.symbols, context.structs))
 }
 
 trait Convert<T>

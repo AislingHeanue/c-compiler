@@ -215,7 +215,6 @@ impl InitialiserNode {
                     );
 
                     context.current_initialiser_offset = original_offset + member.offset as i32;
-                    println!("init is {:?} and member is {:?}", init, member);
                     instructions.append(&mut init.convert(dst.clone(), context)?);
                 }
                 Ok(instructions)

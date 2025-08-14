@@ -218,8 +218,7 @@ impl InitialiserNode {
                     ));
                 }
             }
-            (t, InitialiserWithoutType::Compound(_)) => {
-                println!("{:?}", t);
+            (_t, InitialiserWithoutType::Compound(_)) => {
                 return Err("Compound initialiser can only be used for arrays and structs".into());
             }
         }

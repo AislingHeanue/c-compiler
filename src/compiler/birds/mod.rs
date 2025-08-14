@@ -122,10 +122,16 @@ pub enum Destination {
     StructEntry(String, i32),
 }
 
+type BirdsResult = (
+    BirdsProgramNode,
+    HashMap<String, SymbolInfo>,
+    HashMap<String, StructInfo>,
+);
+
 pub fn birds(
     parsed: ProgramNode,
     symbols: HashMap<String, SymbolInfo>,
     structs: HashMap<String, StructInfo>,
-) -> Result<(BirdsProgramNode, HashMap<String, SymbolInfo>), Box<dyn Error>> {
+) -> Result<BirdsResult, Box<dyn Error>> {
     do_birds(parsed, symbols, structs)
 }

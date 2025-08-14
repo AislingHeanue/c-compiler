@@ -642,7 +642,8 @@ impl CodeDisplay for Instruction {
                 let function_name = if context.is_mac {
                     "_".to_string() + s
                 } else if context.is_linux {
-                    if let AssemblySymbolInfo::Function(false) = context.symbols.get(s).unwrap() {
+                    if let AssemblySymbolInfo::Function(false, _) = context.symbols.get(s).unwrap()
+                    {
                         // if a function isn't defined in this file, call it from another file (ie
                         // externally link it)
                         s.to_string() + "@PLT"
@@ -693,11 +694,11 @@ impl CodeDisplay for Operand {
                 context.word_length_bytes = previous_word_length;
                 out
             }
-            Operand::MockMemory(reg, num) => panic!(
-                "Tried to generate assembly code with a mock memory address: {}, {}",
-                reg, num
-            ),
-            Operand::Data(name) => {
+            Operand::MockMemory(_reg, _num) => "MOCK!!!!".to_string(), //panic!(
+            //"Tried to generate assembly code with a mock memory address: {}, {}",
+            //reg, num
+            //),
+            Operand::Data(name, offset) => {
                 let label_start = if let AssemblySymbolInfo::Object(_, _, is_top_level_constant) =
                     context.symbols.get(name).unwrap()
                 {
@@ -714,7 +715,11 @@ impl CodeDisplay for Operand {
                     unreachable!()
                 };
 
-                format!("{}{}(%rip)", label_start, name)
+                if *offset == 0 {
+                    format!("{}{}(%rip)", label_start, name)
+                } else {
+                    format!("{}{}+{}(%rip)", label_start, name, offset)
+                }
             }
             Operand::Indexed(base, index, scale) => {
                 format!(

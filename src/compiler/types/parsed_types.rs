@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::compiler::{codegen::align_stack_size, parser::StructInfo};
 
-use super::Type;
+use super::{Class, Type};
 
 impl Type {
     pub fn get_alignment(&self, structs: &mut HashMap<String, StructInfo>) -> u64 {
@@ -111,6 +111,17 @@ impl Type {
             Type::SignedChar => &Type::Integer,
             Type::UnsignedChar => &Type::Integer,
             _ => self,
+        }
+    }
+
+    pub fn class(&self) -> Class {
+        match self {
+            Type::Double => Class::Sse,
+            Type::Array(..) => unreachable!(),
+            Type::Function(_, _) => unreachable!(),
+            Type::Struct(_) => unreachable!(),
+            Type::Void => unreachable!(),
+            _ => Class::Integer,
         }
     }
 }

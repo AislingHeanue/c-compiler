@@ -1,40 +1,69 @@
 use crate::compiler::{
-    birds::{BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsUnaryOperatorNode},
+    birds::{
+        BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsUnaryOperatorNode, BirdsValueNode,
+    },
     codegen::{
         convert::create_static_constant, AssemblyType, BinaryOperator, ConditionCode,
         ConvertContext, ImmediateValue, Instruction, Operand, Register, DOUBLE_PARAM_REGISTERS,
-        FUNCTION_PARAM_REGISTERS,
+        DOUBLE_RETURN_REGISTERS, FUNCTION_PARAM_REGISTERS, FUNCTION_RETURN_REGISTERS,
     },
-    types::{StaticInitialiser, Type},
+    types::StaticInitialiser,
 };
 use std::error::Error;
 
-use super::{classify_function_args, Convert};
+use super::{classify_function_args, classify_return, Convert, ReturnInfo};
 
 impl Convert<Vec<Instruction>> for BirdsInstructionNode {
     fn convert(self, context: &mut ConvertContext) -> Result<Vec<Instruction>, Box<dyn Error>> {
         Ok(match self {
             BirdsInstructionNode::Return(Some(src)) => {
+                let returns = classify_return(src.clone(), context)?;
                 let this_type = AssemblyType::infer(&src, context)?.0;
-                if this_type == AssemblyType::Double {
-                    vec![
-                        Instruction::Mov(
-                            this_type,
-                            src.convert(context)?,
-                            Operand::Reg(Register::XMM0),
-                        ),
-                        Instruction::Ret,
-                    ]
+                let mut instructions = Vec::new();
+                if returns.uses_memory {
+                    instructions.push(Instruction::Mov(
+                        AssemblyType::Quadword,
+                        // read the location of where we're meant to store the return on the stack
+                        Operand::Memory(Register::BP, -8),
+                        Operand::Reg(Register::AX),
+                    ));
+                    let place_to_put_the_stuff = Operand::Memory(Register::AX, 0);
+                    Instruction::copy_bytes(
+                        this_type.get_size() as i32,
+                        &mut instructions,
+                        &src.convert(context)?,
+                        &place_to_put_the_stuff,
+                        0,
+                        0,
+                    )
                 } else {
-                    vec![
-                        Instruction::Mov(
-                            this_type,
-                            src.convert(context)?,
-                            Operand::Reg(Register::AX),
-                        ),
-                        Instruction::Ret,
-                    ]
+                    for (i, (op, t)) in returns.integer.iter().enumerate() {
+                        if let AssemblyType::ByteArray(size, _) = t {
+                            Instruction::copy_bytes_to_register(
+                                *size as i32,
+                                &mut instructions,
+                                op,
+                                &FUNCTION_PARAM_REGISTERS[i],
+                            )
+                        } else {
+                            instructions.push(Instruction::Mov(
+                                *t,
+                                op.clone(),
+                                Operand::Reg(FUNCTION_RETURN_REGISTERS[i].clone()),
+                            ))
+                        }
+                    }
+
+                    for (i, op) in returns.double.iter().enumerate() {
+                        instructions.push(Instruction::Mov(
+                            AssemblyType::Double,
+                            op.clone(),
+                            Operand::Reg(DOUBLE_RETURN_REGISTERS[i].clone()),
+                        ))
+                    }
                 }
+                instructions.push(Instruction::Ret);
+                instructions
             }
             BirdsInstructionNode::Return(None) => vec![Instruction::Ret],
             BirdsInstructionNode::Unary(BirdsUnaryOperatorNode::Not, src, dst) => {
@@ -97,7 +126,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
             BirdsInstructionNode::Binary(BirdsBinaryOperatorNode::Divide, left, right, dst)
                 if AssemblyType::infer(&left, context)?.0 != AssemblyType::Double =>
             {
-                let (left_type, is_signed) = AssemblyType::infer(&left, context)?;
+                let (left_type, is_signed, _) = AssemblyType::infer(&left, context)?;
                 if is_signed {
                     vec![
                         Instruction::Mov(
@@ -136,7 +165,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 }
             }
             BirdsInstructionNode::Binary(BirdsBinaryOperatorNode::Mod, left, right, dst) => {
-                let (left_type, is_signed) = AssemblyType::infer(&left, context)?;
+                let (left_type, is_signed, _) = AssemblyType::infer(&left, context)?;
                 if is_signed {
                     vec![
                         Instruction::Mov(
@@ -175,7 +204,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 }
             }
             BirdsInstructionNode::Binary(op, left, right, dst) if op.is_relational() => {
-                let (left_type, is_signed) = AssemblyType::infer(&left, context)?;
+                let (left_type, is_signed, _) = AssemblyType::infer(&left, context)?;
                 // use different condition codes if the expression type is unsigned
                 let instruction = if is_signed && left_type != AssemblyType::Double {
                     Instruction::SetCondition(op.convert(context)?, dst.clone().convert(context)?)
@@ -199,7 +228,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 ]
             }
             BirdsInstructionNode::Binary(op, left, right, dst) => {
-                let (left_type, is_signed) = AssemblyType::infer(&left, context)?;
+                let (left_type, is_signed, _) = AssemblyType::infer(&left, context)?;
                 // NOTE: right and left operands implicitly swap places here.
                 // This is 100% expected because the 'left' operand in a binary
                 // gets put into dst. Eg 1 - 2 turns into Sub(2, 1) and the result is
@@ -235,6 +264,28 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     ]
                 }
             }
+            BirdsInstructionNode::Copy(
+                BirdsValueNode::Var(src_name),
+                BirdsValueNode::Var(dst_name),
+            ) => {
+                let src_size = context
+                    .symbols
+                    .get(&src_name)
+                    .unwrap()
+                    .symbol_type
+                    .clone()
+                    .get_size(&mut context.structs) as i32;
+                let mut instructions = Vec::new();
+                Instruction::copy_bytes(
+                    src_size,
+                    &mut instructions,
+                    &Operand::MockReg(src_name),
+                    &Operand::MockReg(dst_name),
+                    0,
+                    0,
+                );
+                instructions
+            }
             BirdsInstructionNode::Copy(src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
                 vec![Instruction::Mov(
@@ -243,6 +294,25 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     dst.convert(context)?,
                 )]
             }
+            BirdsInstructionNode::CopyToOffset(BirdsValueNode::Var(src_name), dst, offset) => {
+                let src_size = context
+                    .symbols
+                    .get(&src_name)
+                    .unwrap()
+                    .symbol_type
+                    .clone()
+                    .get_size(&mut context.structs) as i32;
+                let mut instructions = Vec::new();
+                Instruction::copy_bytes(
+                    src_size,
+                    &mut instructions,
+                    &Operand::MockReg(src_name),
+                    &Operand::MockReg(dst),
+                    0,
+                    offset,
+                );
+                instructions
+            }
             BirdsInstructionNode::CopyToOffset(src, dst, offset) => {
                 let t = AssemblyType::infer(&src, context)?.0;
                 vec![Instruction::Mov(
@@ -250,6 +320,25 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     src.convert(context)?,
                     Operand::MockMemory(dst, offset),
                 )]
+            }
+            BirdsInstructionNode::CopyFromOffset(src, offset, BirdsValueNode::Var(dst_name)) => {
+                let dst_size = context
+                    .symbols
+                    .get(&dst_name)
+                    .unwrap()
+                    .symbol_type
+                    .clone()
+                    .get_size(&mut context.structs) as i32;
+                let mut instructions = Vec::new();
+                Instruction::copy_bytes(
+                    dst_size,
+                    &mut instructions,
+                    &Operand::MockReg(src),
+                    &Operand::MockReg(dst_name),
+                    offset,
+                    0,
+                );
+                instructions
             }
             BirdsInstructionNode::CopyFromOffset(src, offset, dst) => {
                 let t = AssemblyType::infer(&dst, context)?.0;
@@ -321,15 +410,35 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
             BirdsInstructionNode::Label(s) => vec![Instruction::Label(s)],
             BirdsInstructionNode::FunctionCall(name, args, dst) => {
                 let mut instructions = Vec::new();
-                let args = classify_function_args(args, context)?;
 
-                let return_type = if let Type::Function(ref ret, _) =
-                    context.symbols.get(&name).unwrap().symbol_type
-                {
-                    ret.clone()
+                let returns = if let Some(ref d) = dst {
+                    classify_return(d.clone(), context)?
                 } else {
-                    return Err("Function is not listed as a function type".into());
+                    ReturnInfo {
+                        integer: Vec::new(),
+                        double: Vec::new(),
+                        uses_memory: false,
+                    }
                 };
+                if returns.uses_memory {
+                    //  we have called this function and it put it's return value in memory. Write
+                    //  that down.
+                    context
+                        .functions_which_return_using_memory
+                        .insert(name.clone(), true);
+                }
+
+                let int_register_start = if returns.uses_memory {
+                    instructions.push(Instruction::Lea(
+                        dst.clone().unwrap().convert(context)?,
+                        Operand::Reg(FUNCTION_PARAM_REGISTERS[0].clone()),
+                    ));
+                    1
+                } else {
+                    0
+                };
+
+                let args = classify_function_args(args, returns.uses_memory, context)?;
 
                 let len_stack_args = args.stack.len();
                 let stack_padding: i64 = if len_stack_args % 2 == 1 { 8 } else { 0 };
@@ -343,11 +452,23 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 }
 
                 for (i, (arg, arg_type)) in args.integer.into_iter().enumerate() {
-                    instructions.push(Instruction::Mov(
-                        arg_type,
-                        arg,
-                        Operand::Reg(FUNCTION_PARAM_REGISTERS[i].clone()),
-                    ));
+                    match arg_type {
+                        AssemblyType::ByteArray(size, _) => Instruction::copy_bytes_to_register(
+                            size as i32,
+                            &mut instructions,
+                            &arg,
+                            &FUNCTION_PARAM_REGISTERS[i + int_register_start],
+                        ),
+                        _ => {
+                            instructions.push(Instruction::Mov(
+                                arg_type,
+                                arg,
+                                Operand::Reg(
+                                    FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
+                                ),
+                            ));
+                        }
+                    }
                 }
 
                 for (i, arg) in args.double.into_iter().enumerate() {
@@ -359,7 +480,22 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 }
 
                 for (arg, arg_type) in args.stack.into_iter().rev() {
-                    if matches!(arg, Operand::Imm(_) | Operand::Reg(_))
+                    if let AssemblyType::ByteArray(size, _) = arg_type {
+                        instructions.push(Instruction::Binary(
+                            BinaryOperator::Sub,
+                            AssemblyType::Quadword,
+                            Operand::Imm(ImmediateValue::Signed(8)),
+                            Operand::Reg(Register::SP),
+                        ));
+                        Instruction::copy_bytes(
+                            size as i32,
+                            &mut instructions,
+                            &arg,
+                            &Operand::Memory(Register::SP, 0),
+                            0,
+                            0,
+                        )
+                    } else if matches!(arg, Operand::Imm(_) | Operand::Reg(_))
                         || matches!(arg_type, AssemblyType::Quadword | AssemblyType::Double)
                     {
                         instructions.push(Instruction::Push(arg));
@@ -385,19 +521,34 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     ));
                 }
 
-                // read returned value from XMM0 if the return type is a double
-                if *return_type == Type::Double {
-                    instructions.push(Instruction::Mov(
-                        AssemblyType::Double,
-                        Operand::Reg(Register::XMM0),
-                        dst.clone().unwrap().convert(context)?,
-                    ));
-                } else if *return_type != Type::Void {
-                    instructions.push(Instruction::Mov(
-                        (*return_type).convert(context)?,
-                        Operand::Reg(Register::AX),
-                        dst.clone().unwrap().convert(context)?,
-                    ));
+                // the callee stuck its return values in an assortment of locations, collect them
+                // into the locations listed in the returns struct (which corresponds to the real
+                // dst).
+                if dst.is_some() && !returns.uses_memory {
+                    for (i, (op, t)) in returns.integer.iter().enumerate() {
+                        if let AssemblyType::ByteArray(size, _) = t {
+                            Instruction::copy_bytes_from_register(
+                                *size as i32,
+                                &mut instructions,
+                                &FUNCTION_RETURN_REGISTERS[i],
+                                op,
+                            );
+                        } else {
+                            instructions.push(Instruction::Mov(
+                                *t,
+                                Operand::Reg(FUNCTION_RETURN_REGISTERS[i].clone()),
+                                op.clone(),
+                            ))
+                        }
+                    }
+                    for (i, op) in returns.double.iter().enumerate() {
+                        let this_src = Operand::Reg(DOUBLE_RETURN_REGISTERS[i].clone());
+                        instructions.push(Instruction::Mov(
+                            AssemblyType::Quadword,
+                            this_src,
+                            op.clone(),
+                        ))
+                    }
                 }
 
                 instructions
@@ -666,6 +817,34 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     dst.convert(context)?,
                 )]
             }
+            BirdsInstructionNode::LoadFromPointer(
+                BirdsValueNode::Var(src_name),
+                BirdsValueNode::Var(dst_name),
+            ) => {
+                let dst_size = context
+                    .symbols
+                    .get(&dst_name)
+                    .unwrap()
+                    .symbol_type
+                    .clone()
+                    .get_size(&mut context.structs) as i32;
+
+                let mut instructions = vec![Instruction::Mov(
+                    AssemblyType::Quadword,
+                    // pointer types are scalars, no need to check
+                    Operand::MockReg(src_name.clone()),
+                    Operand::Reg(Register::AX),
+                )];
+                Instruction::copy_bytes(
+                    dst_size,
+                    &mut instructions,
+                    &Operand::Memory(Register::AX, 0),
+                    &Operand::MockReg(dst_name),
+                    0,
+                    0,
+                );
+                instructions
+            }
             BirdsInstructionNode::LoadFromPointer(src, dst) => {
                 let t = AssemblyType::infer(&dst, context)?.0;
                 vec![
@@ -676,6 +855,34 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     ),
                     Instruction::Mov(t, Operand::Memory(Register::AX, 0), dst.convert(context)?),
                 ]
+            }
+            BirdsInstructionNode::StoreInPointer(
+                BirdsValueNode::Var(src_name),
+                BirdsValueNode::Var(dst_name),
+            ) => {
+                let src_size = context
+                    .symbols
+                    .get(&src_name)
+                    .unwrap()
+                    .symbol_type
+                    .clone()
+                    .get_size(&mut context.structs) as i32;
+
+                let mut instructions = vec![Instruction::Mov(
+                    AssemblyType::Quadword,
+                    // pointer types are scalars, no need to check
+                    Operand::MockReg(dst_name.clone()),
+                    Operand::Reg(Register::AX),
+                )];
+                Instruction::copy_bytes(
+                    src_size,
+                    &mut instructions,
+                    &Operand::MockReg(src_name),
+                    &Operand::Memory(Register::AX, 0),
+                    0,
+                    0,
+                );
+                instructions
             }
             BirdsInstructionNode::StoreInPointer(src, dst) => {
                 let t = AssemblyType::infer(&src, context)?.0;
@@ -749,5 +956,104 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 }
             }
         })
+    }
+}
+
+impl Instruction {
+    pub fn copy_bytes(
+        size: i32,
+        instructions: &mut Vec<Instruction>,
+        src: &Operand,
+        dst: &Operand,
+        offset_src: i32,
+        offset_dst: i32,
+    ) {
+        let mut i = 0;
+        while i < size {
+            if i + 8 <= size {
+                instructions.push(Instruction::Mov(
+                    AssemblyType::Quadword,
+                    src.offset(i + offset_src),
+                    dst.offset(i + offset_dst),
+                ));
+                i += 8;
+            } else if i + 4 <= size {
+                instructions.push(Instruction::Mov(
+                    AssemblyType::Longword,
+                    src.offset(i + offset_src),
+                    dst.offset(i + offset_dst),
+                ));
+                i += 4;
+            } else {
+                instructions.push(Instruction::Mov(
+                    AssemblyType::Byte,
+                    src.offset(i + offset_src),
+                    dst.offset(i + offset_dst),
+                ));
+                i += 1;
+            }
+        }
+    }
+
+    pub fn copy_bytes_to_register(
+        size: i32,
+        instructions: &mut Vec<Instruction>,
+        src: &Operand,
+        dst: &Register,
+    ) {
+        for i in (0..size).rev() {
+            instructions.push(Instruction::Mov(
+                AssemblyType::Byte,
+                src.offset(i),
+                Operand::Reg(dst.clone()),
+            ));
+            if i > 0 {
+                instructions.push(Instruction::Binary(
+                    BinaryOperator::UnsignedShiftLeft,
+                    AssemblyType::Quadword,
+                    Operand::Imm(ImmediateValue::Signed(8)),
+                    Operand::Reg(dst.clone()),
+                ));
+            }
+        }
+    }
+    pub fn copy_bytes_from_register(
+        size: i32,
+        instructions: &mut Vec<Instruction>,
+        src: &Register,
+        dst: &Operand,
+    ) {
+        for i in 0..size {
+            instructions.push(Instruction::Mov(
+                AssemblyType::Byte,
+                Operand::Reg(src.clone()),
+                dst.offset(i),
+            ));
+            if i < size - 1 {
+                instructions.push(Instruction::Binary(
+                    BinaryOperator::UnsignedShiftRight,
+                    AssemblyType::Quadword,
+                    Operand::Imm(ImmediateValue::Signed(8)),
+                    Operand::Reg(src.clone()),
+                ));
+            }
+        }
+    }
+}
+
+impl Operand {
+    fn offset(&self, offset: i32) -> Operand {
+        match self {
+            Operand::MockReg(s) => Operand::MockMemory(s.to_string(), offset),
+            Operand::MockMemory(s, other_offset) => {
+                Operand::MockMemory(s.to_string(), offset + other_offset)
+            }
+            Operand::Data(s, other_offset) => Operand::Data(s.to_string(), offset + other_offset),
+            Operand::Memory(r, other_offset) => Operand::Memory(r.clone(), offset + other_offset),
+
+            Operand::Reg(_) => unreachable!(),
+            Operand::Imm(_) => unreachable!(),
+            Operand::Indexed(..) => unreachable!(),
+        }
     }
 }

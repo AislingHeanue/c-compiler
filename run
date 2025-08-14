@@ -1,4 +1,4 @@
-cargo run --quiet -- --tacky c/${1}.c >a.s
+cargo run --quiet -- c/${1}.c -S >a.s
 bat c/${1}.c -l c --paging=never
 bat a.s -l asm --paging=never
 bash -c "./c/${1}"

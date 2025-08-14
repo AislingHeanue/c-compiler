@@ -80,3 +80,10 @@ pub struct SymbolInfo {
     pub symbol_type: Type,
     pub storage: StorageInfo,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Class {
+    Memory,
+    Sse,
+    Integer,
+}

@@ -710,7 +710,10 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 let (mut instructions, new_left): E = src.convert(context)?;
 
                 let new_dst = if member.offset != 0 {
-                    let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
+                    let new_dst = new_temp_variable(
+                        &Type::Pointer(Box::new(self.1.clone().unwrap())),
+                        context,
+                    );
                     instructions.push(BirdsInstructionNode::AddPointer(
                         new_left,
                         BirdsValueNode::Constant(Constant::get_typed(

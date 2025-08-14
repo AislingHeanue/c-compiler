@@ -6,7 +6,7 @@ impl Operand {
     pub fn is_in_memory(&self) -> bool {
         matches!(
             self,
-            &Operand::Memory(_, _) | &Operand::Data(_) | &Operand::Indexed(..)
+            &Operand::Memory(_, _) | &Operand::Data(_, _) | &Operand::Indexed(..)
         )
     }
 
@@ -32,23 +32,20 @@ impl Operand {
 
     pub fn replace_mock_register(&mut self, context: &mut ValidateContext) {
         let (name, index) = match self {
-            Operand::MockReg(name) => (name, &mut 0),
-            Operand::MockMemory(name, index) => (name, index),
+            Operand::MockReg(name) => (name.clone(), &mut 0),
+            Operand::MockMemory(name, index) => (name.clone(), index),
             _ => return,
         };
-        let existing_location = context.current_stack_locations.get(name);
+        let existing_location = context.current_stack_locations.get(&name);
         if let Some(loc) = existing_location {
             // println!("{:?} {:?}", loc, index);
             *self = Operand::Memory(Register::BP, *loc + *index);
             return;
         }
-        match context.symbols.get(name) {
+        match context.symbols.get(&name) {
             Some(AssemblySymbolInfo::Object(_, true, _)) => {
                 // static objects go to data
-                match index {
-                    0 => *self = Operand::Data(name.clone()),
-                    _ => unreachable!(),
-                }
+                *self = Operand::Data(name.clone(), *index);
             }
             Some(AssemblySymbolInfo::Object(t, false, false)) => {
                 let size = t.get_size();
@@ -64,9 +61,11 @@ impl Operand {
                     .insert(name.clone(), new_location);
                 *self = Operand::Memory(Register::BP, new_location + *index);
             }
-            None => panic!("Could not find matching declaration for {:?}", name),
+            None => {
+                panic!("Could not find matching declaration for {:?}", name)
+            }
             Some(AssemblySymbolInfo::Object(_, false, true)) => unreachable!(),
-            Some(AssemblySymbolInfo::Function(_)) => unreachable!(),
+            Some(AssemblySymbolInfo::Function(_, _)) => unreachable!(),
         }
     }
 }

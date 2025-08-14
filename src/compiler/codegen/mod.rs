@@ -6,6 +6,7 @@ use validate::{Validate, ValidateContext, VALIDATION_PASSES};
 
 use super::{
     birds::BirdsProgramNode,
+    parser::StructInfo,
     types::{StaticInitialiser, StorageInfo, SymbolInfo, Type},
 };
 
@@ -25,7 +26,7 @@ pub struct Program {
 
 #[derive(Debug)]
 enum TopLevel {
-    // header instructions, name, body, global
+    // header instructions, name, body, global, return_value_uses_memory
     Function(String, Vec<Instruction>, bool),
     // name global alignment init
     StaticVariable(String, bool, u32, Vec<StaticInitialiser>),
@@ -50,8 +51,8 @@ pub enum AssemblyType {
 pub enum AssemblySymbolInfo {
     // type, is_static is_a_top_level_constant
     Object(AssemblyType, bool, bool),
-    // is_defined
-    Function(bool),
+    // is_defined, return_value_uses_memory
+    Function(bool, bool),
 }
 
 #[derive(Debug)]
@@ -100,12 +101,13 @@ enum Instruction {
 
 #[derive(Clone, Debug)]
 enum Operand {
-    Imm(ImmediateValue),     //constant numeric value
-    Reg(Register),           // register in assembly
-    MockReg(String),         // mocked register for temporary use.
-    Memory(Register, i32),   // entry whose value is the offset from the specified register.
+    Imm(ImmediateValue), //constant numeric value
+    Reg(Register),       // register in assembly
+    MockReg(String),     // mocked register for temporary use.
+    // corresponds to READING A MEMORY ADDRESS from reg, not offsetting from r.
+    Memory(Register, i32),
     MockMemory(String, i32), // for memory objects which may fit into a register instead.
-    Data(String),            // used for static and global variables
+    Data(String, i32),       // used for static and global variables, RIP-relative
     // used to index into compound objects during initialisation (base, index, scale)
     // computes base + index * scale in 1 cycle :)
     Indexed(Register, Register, i32),
@@ -179,6 +181,7 @@ static FUNCTION_PARAM_REGISTERS: [Register; 6] = [
     Register::R8,
     Register::R9,
 ];
+static FUNCTION_RETURN_REGISTERS: [Register; 2] = [Register::AX, Register::DX];
 
 static DOUBLE_PARAM_REGISTERS: [Register; 8] = [
     Register::XMM0,
@@ -190,6 +193,7 @@ static DOUBLE_PARAM_REGISTERS: [Register; 8] = [
     Register::XMM6,
     Register::XMM7,
 ];
+static DOUBLE_RETURN_REGISTERS: [Register; 2] = [Register::XMM0, Register::XMM1];
 
 #[derive(Clone, Debug)]
 enum UnaryOperator {
@@ -204,7 +208,7 @@ pub enum BinaryOperator {
     Mult,
     ShiftLeft,
     ShiftRight,
-    UnsignedShiftLeft,
+    UnsignedShiftLeft,  //shl
     UnsignedShiftRight, //shr
     DivDouble,
     And,
@@ -234,8 +238,9 @@ pub fn codegen(
     linux: bool,
     mac: bool,
     symbols: HashMap<String, SymbolInfo>,
+    structs: HashMap<String, StructInfo>,
 ) -> Result<Program, Box<dyn Error>> {
-    let mut context = ConvertContext::new(comments, linux, mac, symbols);
+    let mut context = ConvertContext::new(comments, linux, mac, symbols, structs);
     let mut converted = parsed.convert(&mut context)?;
 
     let mut assembly_map: HashMap<String, AssemblySymbolInfo> = HashMap::new();
@@ -246,7 +251,15 @@ pub fn codegen(
     for (k, v) in stolen_map {
         if let Type::Function(_, _) = v.symbol_type {
             if let StorageInfo::Function(defined, _) = v.storage {
-                assembly_map.insert(k.clone(), AssemblySymbolInfo::Function(defined));
+                let uses_memory = matches!(
+                    context.functions_which_return_using_memory.get(&k),
+                    Some(true)
+                );
+
+                assembly_map.insert(
+                    k.clone(),
+                    AssemblySymbolInfo::Function(defined, uses_memory),
+                );
             } else {
                 panic!("Function storage info has the wrong type")
             }
@@ -254,18 +267,21 @@ pub fn codegen(
             let is_constant = matches!(v.storage, StorageInfo::Constant(_));
             let is_static = is_constant || matches!(v.storage, StorageInfo::Static(_, _));
 
-            let assembly_type = v.symbol_type.convert(&mut context).unwrap();
+            // do not try and convert incomplete types to assembly types, it will break everything
+            // since the storage size of an incomplete type is indeterminate
+            if v.symbol_type.is_complete(&mut context.structs) {
+                let assembly_type = v.symbol_type.convert(&mut context).unwrap();
 
-            assembly_map.insert(
-                k.clone(),
-                AssemblySymbolInfo::Object(assembly_type, is_static, is_constant),
-            );
+                assembly_map.insert(
+                    k.clone(),
+                    AssemblySymbolInfo::Object(assembly_type, is_static, is_constant),
+                );
+            }
         }
     }
     for top_level in &converted.body {
         // there are some Constant doubles left over after the conversion, so we add them to the
         // symbols map.
-        // FIXME: This should also apply to strings but I'm not sure how
         if let TopLevel::StaticConstant(name, _, _) = top_level {
             assembly_map.insert(
                 name.clone(),
