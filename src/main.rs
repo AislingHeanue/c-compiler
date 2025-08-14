@@ -15,7 +15,9 @@ struct CompileConfig {
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut filenames = Vec::new();
+    let mut asm_input_names = Vec::new();
     let mut linker_args = Vec::new();
+    let mut preprocessor_args = Vec::new();
     let mut only_lex = false;
     let mut only_parse = false;
     let mut only_validate = false;
@@ -34,7 +36,11 @@ fn main() {
             "-S" => assembly_out = true,
             "--comments" => add_comments = true,
             "-c" => to_object_file = true,
-            t if t.len() > 1 && t[..2] == *"-l" => linker_args.push(arg.clone()),
+            t if t.len() > 1 && matches!(&t[..2], "-l" | "-L") => linker_args.push(arg.clone()),
+            t if t.len() > 1 && matches!(&t[..2], "-i" | "-I") => {
+                preprocessor_args.push(arg.clone())
+            }
+            t if t.len() > 1 && t.ends_with(".s") => asm_input_names.push(arg.clone()),
             _ => filenames.push(arg.clone()),
         }
     }
@@ -54,10 +60,9 @@ fn main() {
         let asm_filename = stripped_filename.clone() + ".s";
         asm_filenames.push(asm_filename.clone());
         // println!("Preprocessing...");
-        let res = Command::new("gcc")
-            .args(["-E", "-P", &filename, "-o", &preprocessed_filename])
-            .output()
-            .unwrap();
+        let mut args = vec!["-E", "-P", &filename, "-o", &preprocessed_filename];
+        args.append(&mut preprocessor_args.iter().map(|s| s.as_str()).collect());
+        let res = Command::new("gcc").args(args).output().unwrap();
         if res.status.code() != Some(0) {
             panic!("Preprocessor failed: {:?}", res);
         }
@@ -91,16 +96,14 @@ fn main() {
         .args(if to_object_file {
             let mut args = vec!["-c", "-o", &object_filename];
             args.append(&mut asm_filenames.iter().map(|s| s.as_str()).collect());
+            args.append(&mut asm_input_names.iter().map(|s| s.as_str()).collect());
             args.append(&mut linker_args.iter().map(|s| s.as_str()).collect());
             args
         } else {
             let mut args = vec!["-o", &stripped_filename];
-            args.push(
-                "../../nlsandler/writing-a-c-compiler-tests/tests/chapter_13/helper_libs/nan.c",
-            );
             args.append(&mut asm_filenames.iter().map(|s| s.as_str()).collect());
+            args.append(&mut asm_input_names.iter().map(|s| s.as_str()).collect());
             args.append(&mut linker_args.iter().map(|s| s.as_str()).collect());
-            // println!("{:?}", args);
             args
         })
         .output()

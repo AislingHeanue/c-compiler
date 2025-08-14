@@ -47,7 +47,7 @@ impl Constant {
             | Constant::Long(0)
             | Constant::UnsignedInteger(0)
             | Constant::UnsignedLong(0) => {
-                StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(8))
+                StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(8))
             }
             _ => unreachable!(),
         }
@@ -79,6 +79,6 @@ impl Constant {
     }
 
     pub fn zero(target: &Type, structs: &mut HashMap<String, StructInfo>) -> StaticInitialiser {
-        StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(target.get_size(structs)))
+        StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(target.get_size(structs)))
     }
 }

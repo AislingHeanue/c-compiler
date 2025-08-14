@@ -166,7 +166,7 @@ impl CodeDisplay for TopLevel {
                 let section = if initialisers.iter().any(|init| {
                     !matches!(
                         init,
-                        StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(_))
+                        StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(_))
                     )
                 }) {
                     ".data".to_string()
@@ -225,7 +225,7 @@ impl CodeDisplay for TopLevel {
                 let section = if context.is_mac {
                     if matches!(
                         init,
-                        StaticInitialiser::Ordinal(ComparableStatic::String(_, _))
+                        StaticInitialiser::Comparable(ComparableStatic::String(_, _))
                     ) {
                         ".cstring"
                     } else {
@@ -270,32 +270,37 @@ impl CodeDisplay for TopLevel {
 impl CodeDisplay for StaticInitialiser {
     fn show(&self, context: &mut DisplayContext) -> String {
         let s = match self {
-            StaticInitialiser::Ordinal(ComparableStatic::Integer(0))
-            | StaticInitialiser::Ordinal(ComparableStatic::Long(0))
-            | StaticInitialiser::Ordinal(ComparableStatic::UnsignedInteger(0))
-            | StaticInitialiser::Ordinal(ComparableStatic::UnsignedLong(0)) => unreachable!(),
-            StaticInitialiser::Ordinal(ComparableStatic::Integer(i)) => format!(".long {}", i),
-            StaticInitialiser::Ordinal(ComparableStatic::Long(l)) => format!(".quad {}", l),
-            StaticInitialiser::Ordinal(ComparableStatic::UnsignedInteger(i)) => {
+            StaticInitialiser::Comparable(ComparableStatic::Integer(0))
+            | StaticInitialiser::Comparable(ComparableStatic::Long(0))
+            | StaticInitialiser::Comparable(ComparableStatic::UnsignedInteger(0))
+            | StaticInitialiser::Comparable(ComparableStatic::UnsignedLong(0)) => unreachable!(),
+            StaticInitialiser::Comparable(ComparableStatic::Integer(i)) => format!(".long {}", i),
+            StaticInitialiser::Comparable(ComparableStatic::Long(l)) => format!(".quad {}", l),
+            StaticInitialiser::Comparable(ComparableStatic::UnsignedInteger(i)) => {
                 format!(".long {}", i)
             }
-            StaticInitialiser::Ordinal(ComparableStatic::UnsignedLong(l)) => format!(".quad {}", l),
-            StaticInitialiser::Ordinal(ComparableStatic::Char(l)) => {
+            StaticInitialiser::Comparable(ComparableStatic::UnsignedLong(l)) => {
+                format!(".quad {}", l)
+            }
+            StaticInitialiser::Comparable(ComparableStatic::Char(l)) => {
                 format!(".byte {}", *l as u8)
             }
             // converting unsigned char to signed char here (only to convert it back in a second)
-            StaticInitialiser::Ordinal(ComparableStatic::UnsignedChar(l)) => {
+            StaticInitialiser::Comparable(ComparableStatic::UnsignedChar(l)) => {
                 format!(".byte {}", l)
             }
-            StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(n)) => format!(".zero {}", n),
-            StaticInitialiser::Ordinal(ComparableStatic::String(l, term)) => {
+            StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(n)) => format!(".zero {}", n),
+            StaticInitialiser::Comparable(ComparableStatic::String(l, term)) => {
                 if *term {
                     format!(".asciz \"{}\"", l.iter().map(|f| f.show(context)).join(""))
                 } else {
                     format!(".ascii \"{}\"", l.iter().map(|f| f.show(context)).join(""))
                 }
             }
-            StaticInitialiser::Ordinal(ComparableStatic::Pointer(l)) => format!(".quad {}", l),
+            StaticInitialiser::Comparable(ComparableStatic::Pointer(l)) => {
+                let label_start = if context.is_mac { "L" } else { ".L" };
+                format!(".quad {}{}", label_start, l)
+            }
             // print 17 digits of precision so that when the linker re-converts this to a real
             // double value, this has enough precision to guarantee the original value.
             // no special case for zero values here, so that we can avoid confusion about
@@ -699,20 +704,27 @@ impl CodeDisplay for Operand {
             //reg, num
             //),
             Operand::Data(name, offset) => {
-                let label_start = if let AssemblySymbolInfo::Object(_, _, is_top_level_constant) =
-                    context.symbols.get(name).unwrap()
-                {
-                    if *is_top_level_constant && context.is_mac {
-                        "L"
-                    } else if *is_top_level_constant {
-                        ".L"
-                    } else if context.is_mac {
-                        "_"
-                    } else {
-                        ""
+                let label_start = match context.symbols.get(name) {
+                    Some(AssemblySymbolInfo::Object(_, _, is_top_level_constant)) => {
+                        if *is_top_level_constant && context.is_mac {
+                            "L"
+                        } else if *is_top_level_constant {
+                            ".L"
+                        } else if context.is_mac {
+                            "_"
+                        } else {
+                            ""
+                        }
                     }
-                } else {
-                    unreachable!()
+                    // extern variables with no definition in the current file follow this code path
+                    None => {
+                        if context.is_mac {
+                            "_"
+                        } else {
+                            ""
+                        }
+                    }
+                    _ => unreachable!(),
                 };
 
                 if *offset == 0 {

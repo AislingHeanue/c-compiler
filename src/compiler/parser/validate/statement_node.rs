@@ -220,7 +220,7 @@ impl CheckTypes for StatementNode {
                 } else {
                     return Err("Non constant expression found in case statement".into());
                 };
-                let ordinal = if let StaticInitialiser::Ordinal(ref o) = constant_value {
+                let ordinal = if let StaticInitialiser::Comparable(ref o) = constant_value {
                     o
                 } else {
                     return Err("Non ordinal (eg Double) expression found in case statement".into());

@@ -57,7 +57,7 @@ pub enum StorageClass {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StaticInitialiser {
-    Ordinal(ComparableStatic),
+    Comparable(ComparableStatic),
     Double(f64),
 }
 

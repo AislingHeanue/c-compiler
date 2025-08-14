@@ -45,12 +45,12 @@ impl InitialiserNode {
                         new_name.clone(),
                         SymbolInfo {
                             symbol_type: Type::Array(t.clone(), s.len() as u64 + 1),
-                            storage: StorageInfo::Constant(StaticInitialiser::Ordinal(
+                            storage: StorageInfo::Constant(StaticInitialiser::Comparable(
                                 ComparableStatic::String(s.to_vec(), true),
                             )),
                         },
                     );
-                    vec![StaticInitialiser::Ordinal(ComparableStatic::Pointer(
+                    vec![StaticInitialiser::Comparable(ComparableStatic::Pointer(
                         new_name,
                     ))]
                 } else {
@@ -68,12 +68,12 @@ impl InitialiserNode {
                     if !t.is_character() {
                         return Err("Can't initialise a non-character array with a string".into());
                     }
-                    let mut out = vec![StaticInitialiser::Ordinal(ComparableStatic::String(
+                    let mut out = vec![StaticInitialiser::Comparable(ComparableStatic::String(
                         s.clone(),
                         difference > 0,
                     ))];
                     if difference > 1 {
-                        out.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
+                        out.push(StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
                             (difference - 1).try_into().unwrap(),
                         )))
                     }
@@ -111,7 +111,7 @@ impl InitialiserNode {
                 )?;
                 if initialisers.len() < (*size).try_into().unwrap() {
                     let offset = *size - initialisers.len() as u64;
-                    statics.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
+                    statics.push(StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
                         t.get_size(&mut context.structs) * offset,
                     )));
                 }
@@ -133,7 +133,7 @@ impl InitialiserNode {
                 for (i, init) in initialisers.iter_mut().enumerate() {
                     let member = info.members.get(i).unwrap();
                     if member.offset != offset {
-                        statics.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
+                        statics.push(StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
                             member.offset - offset,
                         )));
                     }
@@ -143,7 +143,7 @@ impl InitialiserNode {
                 }
 
                 if info.size > offset {
-                    statics.push(StaticInitialiser::Ordinal(ComparableStatic::ZeroBytes(
+                    statics.push(StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
                         info.size - offset,
                     )));
                 }

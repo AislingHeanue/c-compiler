@@ -1,16 +1,19 @@
-use crate::compiler::birds::{BirdsTopLevel, BirdsValueNode};
+use crate::compiler::{
+    birds::{BirdsTopLevel, BirdsValueNode},
+    types::Type,
+};
 use itertools::{process_results, Itertools};
 use std::error::Error;
 
 use super::{
-    classify_function_args, AssemblyType, Convert, ConvertContext, Instruction, Operand, Register,
-    TopLevel, DOUBLE_PARAM_REGISTERS, FUNCTION_PARAM_REGISTERS,
+    classify_function_args, classify_return_type, AssemblyType, Convert, ConvertContext,
+    Instruction, Operand, Register, TopLevel, DOUBLE_PARAM_REGISTERS, FUNCTION_PARAM_REGISTERS,
 };
 
 impl Convert<TopLevel> for BirdsTopLevel {
     fn convert(self, context: &mut ConvertContext) -> Result<TopLevel, Box<dyn Error>> {
         match self {
-            BirdsTopLevel::Function(..) => self.convert_function(false, context), // FIXME: but how
+            BirdsTopLevel::Function(..) => self.convert_function(context),
             BirdsTopLevel::StaticVariable(t, name, init, global) => Ok(TopLevel::StaticVariable(
                 name,
                 global,
@@ -27,11 +30,7 @@ impl Convert<TopLevel> for BirdsTopLevel {
 }
 
 impl BirdsTopLevel {
-    fn convert_function(
-        self,
-        return_uses_memory: bool,
-        context: &mut ConvertContext,
-    ) -> Result<TopLevel, Box<dyn Error>> {
+    fn convert_function(self, context: &mut ConvertContext) -> Result<TopLevel, Box<dyn Error>> {
         let (name, params, parsed_instructions, global) = match self {
             BirdsTopLevel::Function(a, b, c, d) => (a, b, c, d),
             _ => unreachable!(),
@@ -40,6 +39,13 @@ impl BirdsTopLevel {
             .iter()
             .map(|name| BirdsValueNode::Var(name.to_string()))
             .collect_vec();
+        let return_uses_memory = if let Some(Type::Function(return_type, _)) =
+            context.symbols.get(&name).map(|a| &a.symbol_type)
+        {
+            classify_return_type(&return_type.clone(), context)?
+        } else {
+            unreachable!()
+        };
 
         let params = classify_function_args(params_vars, return_uses_memory, context)?;
 

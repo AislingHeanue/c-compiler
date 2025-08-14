@@ -28,7 +28,6 @@ pub struct ConvertContext {
     pub symbols: HashMap<String, SymbolInfo>,
     pub structs: HashMap<String, StructInfo>,
     pub struct_classes: HashMap<String, Vec<Class>>,
-    pub functions_which_return_using_memory: HashMap<String, bool>,
     pub comments: bool,
     pub is_mac: bool,
     pub is_linux: bool,
@@ -52,7 +51,6 @@ impl ConvertContext {
             structs,
             constants: HashMap::new(),
             struct_classes: HashMap::new(),
-            functions_which_return_using_memory: HashMap::new(),
             num_labels: 0,
         }
     }
@@ -64,6 +62,7 @@ struct Args {
     stack: Vec<(Operand, AssemblyType)>,
 }
 
+#[derive(Debug)]
 struct ReturnInfo {
     integer: Vec<(Operand, AssemblyType)>,
     double: Vec<Operand>,
@@ -187,6 +186,34 @@ fn classify_return(
     Ok(out)
 }
 
+pub fn classify_return_type(
+    t: &Type,
+    context: &mut ConvertContext,
+) -> Result<bool, Box<dyn Error>> {
+    if *t == Type::Void {
+        Ok(false)
+    } else {
+        let is_scalar = t.is_scalar();
+        if !t.is_complete(&mut context.structs) {
+            // otherwise, this function causes declarations of functions with incomplete return
+            // types to misbehave, even if those functions are never used.
+            return Ok(false);
+        }
+        let assembly_type = t.clone().convert(context)?;
+
+        if assembly_type == AssemblyType::Double || is_scalar {
+            Ok(false)
+        } else if let Type::Struct(name) = t {
+            let classes = classify_struct(name.to_string(), context);
+
+            Ok(*classes.first().unwrap() == Class::Memory)
+        } else {
+            // return type already can't be arrays or functions?
+            unreachable!()
+        }
+    }
+}
+
 fn get_var_name(v: &BirdsValueNode) -> String {
     if let BirdsValueNode::Var(var_name) = v {
         var_name.to_string()
@@ -210,7 +237,7 @@ fn classify_struct(name: String, context: &mut ConvertContext) -> Vec<Class> {
     }
     let info = context.structs.get(&name).unwrap().clone();
     let out = if info.size > 16 {
-        vec![Class::Memory; u64::div_ceil(info.size, 16) as usize]
+        vec![Class::Memory; u64::div_ceil(info.size, 8) as usize]
     } else {
         let member_types = flatten_struct_types(&info, context);
         // size > 8 means there are exactly 2 eightbytes we need to classify

@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, error::Error, mem::swap};
 
-use convert::{Convert, ConvertContext};
+use convert::{classify_return_type, Convert, ConvertContext};
 use display::DisplayContext;
 use validate::{Validate, ValidateContext, VALIDATION_PASSES};
 
@@ -251,10 +251,12 @@ pub fn codegen(
     for (k, v) in stolen_map {
         if let Type::Function(_, _) = v.symbol_type {
             if let StorageInfo::Function(defined, _) = v.storage {
-                let uses_memory = matches!(
-                    context.functions_which_return_using_memory.get(&k),
-                    Some(true)
-                );
+                let type_info = v.symbol_type.clone();
+                let uses_memory = if let Type::Function(returns, _) = type_info {
+                    classify_return_type(&returns, &mut context)?
+                } else {
+                    false
+                };
 
                 assembly_map.insert(
                     k.clone(),

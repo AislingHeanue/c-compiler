@@ -38,13 +38,16 @@ impl Operand {
         };
         let existing_location = context.current_stack_locations.get(&name);
         if let Some(loc) = existing_location {
-            // println!("{:?} {:?}", loc, index);
             *self = Operand::Memory(Register::BP, *loc + *index);
             return;
         }
         match context.symbols.get(&name) {
             Some(AssemblySymbolInfo::Object(_, true, _)) => {
                 // static objects go to data
+                *self = Operand::Data(name.clone(), *index);
+            }
+            None => {
+                // extern objects also go in data i suppose
                 *self = Operand::Data(name.clone(), *index);
             }
             Some(AssemblySymbolInfo::Object(t, false, false)) => {
@@ -61,9 +64,9 @@ impl Operand {
                     .insert(name.clone(), new_location);
                 *self = Operand::Memory(Register::BP, new_location + *index);
             }
-            None => {
-                panic!("Could not find matching declaration for {:?}", name)
-            }
+            // None => {
+            //     panic!("Could not find matching declaration for {:?}", name)
+            // }
             Some(AssemblySymbolInfo::Object(_, false, true)) => unreachable!(),
             Some(AssemblySymbolInfo::Function(_, _)) => unreachable!(),
         }

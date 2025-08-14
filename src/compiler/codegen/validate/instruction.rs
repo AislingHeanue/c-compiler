@@ -204,7 +204,8 @@ impl Instruction {
                         | BinaryOperator::ShiftRight
                         | BinaryOperator::UnsignedShiftLeft
                         | BinaryOperator::UnsignedShiftRight
-                ) && t != AssemblyType::Double =>
+                ) && t != AssemblyType::Double
+                    && !matches!(left, Operand::Imm(_)) =>
             {
                 vec![
                     Instruction::Mov(t, left, Operand::Reg(Register::CX)),

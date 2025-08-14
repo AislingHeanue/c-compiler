@@ -43,7 +43,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                                 *size as i32,
                                 &mut instructions,
                                 op,
-                                &FUNCTION_PARAM_REGISTERS[i],
+                                &FUNCTION_RETURN_REGISTERS[i],
                             )
                         } else {
                             instructions.push(Instruction::Mov(
@@ -420,13 +420,6 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                         uses_memory: false,
                     }
                 };
-                if returns.uses_memory {
-                    //  we have called this function and it put it's return value in memory. Write
-                    //  that down.
-                    context
-                        .functions_which_return_using_memory
-                        .insert(name.clone(), true);
-                }
 
                 let int_register_start = if returns.uses_memory {
                     instructions.push(Instruction::Lea(

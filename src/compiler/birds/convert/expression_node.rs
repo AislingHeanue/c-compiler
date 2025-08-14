@@ -626,7 +626,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         symbol_type: self.1.unwrap(),
                         // null terminator has not been appended yet, this happens later
                         storage: StorageInfo::Static(
-                            InitialValue::Initial(vec![StaticInitialiser::Ordinal(
+                            InitialValue::Initial(vec![StaticInitialiser::Comparable(
                                 ComparableStatic::String(s, true),
                             )]),
                             false,

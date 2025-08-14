@@ -136,7 +136,7 @@ impl VariableDeclaration {
                     }
                     None => {
                         let len = self.variable_type.get_size(&mut context.structs);
-                        InitialValue::initial(StaticInitialiser::Ordinal(
+                        InitialValue::initial(StaticInitialiser::Comparable(
                             ComparableStatic::ZeroBytes(len),
                         ))
                     }

@@ -2,6 +2,7 @@ use std::error::Error;
 
 use crate::compiler::{
     birds::{BirdsInstructionNode, BirdsTopLevel, BirdsValueNode},
+    codegen::align_stack_size,
     parser::{DeclarationNode, FunctionDeclaration, VariableDeclaration},
     types::{Constant, StorageInfo},
 };
@@ -198,15 +199,26 @@ impl InitialiserNode {
             (InitialiserWithoutType::Compound(initialisers), Type::Struct(name)) => {
                 let info = context.structs.get(&name).unwrap().clone();
                 let mut instructions = Vec::new();
-                let original_offset = context.current_initialiser_offset;
+
+                // if the first offset isn't zero (eg if this is in an array) then make sure we
+                // start the offset at an aligned value
+                let real_original_offset = context.current_initialiser_offset;
+                let original_offset =
+                    align_stack_size(context.current_initialiser_offset as u64, info.alignment)
+                        as i32;
+                if original_offset > real_original_offset {
+                    let difference_in_size = original_offset - real_original_offset;
+                    InitialiserNode::pad_bytes(
+                        difference_in_size,
+                        &mut instructions,
+                        dst.clone(),
+                        context,
+                    );
+                }
+                context.current_initialiser_offset = original_offset;
                 for (init, member) in initialisers.into_iter().zip(info.members.iter()) {
                     let difference_in_size = member.offset as i32
                         - (context.current_initialiser_offset - original_offset);
-                    // optional addition: initialise all the in-between bytes of the struct to zero
-                    // println!(
-                    //     "Padding {} bytes, member offset = {}, member type = {:?}, name = {}",
-                    //     difference_in_size, member.offset, member.member_type, name
-                    // );
                     InitialiserNode::pad_bytes(
                         difference_in_size,
                         &mut instructions,
