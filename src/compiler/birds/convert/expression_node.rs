@@ -7,11 +7,10 @@ use crate::compiler::{
         BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsUnaryOperatorNode, BirdsValueNode,
         Destination,
     },
-    parser::{
-        BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, MemberEntry, UnaryOperatorNode,
-    },
+    parser::{BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, UnaryOperatorNode},
     types::{
-        ComparableStatic, Constant, InitialValue, StaticInitialiser, StorageInfo, SymbolInfo, Type,
+        ComparableStatic, Constant, FindMemberName, InitialValue, StaticInitialiser, StorageInfo,
+        SymbolInfo, Type,
     },
 };
 
@@ -654,25 +653,24 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
             )),
             ExpressionWithoutType::Dot(src, item) => {
                 let struct_name = ExpressionWithoutType::get_struct_name(&src);
-                let member =
+                let offset =
                     ExpressionWithoutType::get_member_from_struct(&struct_name, &item, context);
                 let (mut instructions, new_left): D = src.convert(context)?;
                 match new_left {
-                    Destination::Direct(BirdsValueNode::Var(v)) => Ok((
-                        instructions,
-                        Destination::StructEntry(v, member.offset as i32),
-                    )),
+                    Destination::Direct(BirdsValueNode::Var(v)) => {
+                        Ok((instructions, Destination::StructEntry(v, offset as i32)))
+                    }
                     Destination::Direct(v) => {
                         // We can assume that Direct must be a Var, since otherwise it would be a
                         // constant but structs are never constants.
                         panic!("Direct destination does not contain a Var, got {:?}", v)
                     }
-                    Destination::StructEntry(base, offset) => Ok((
+                    Destination::StructEntry(base, struct_offset) => Ok((
                         instructions,
-                        Destination::StructEntry(base, member.offset as i32 + offset),
+                        Destination::StructEntry(base, offset as i32 + struct_offset),
                     )),
                     Destination::Dereference(ref p) => {
-                        let new_dst = if member.offset != 0 {
+                        let new_dst = if offset != 0 {
                             let new_dst = new_temp_variable(
                                 &Type::Pointer(Box::new(self.1.clone().unwrap())),
                                 context,
@@ -680,7 +678,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             instructions.push(BirdsInstructionNode::AddPointer(
                                 p.clone(),
                                 BirdsValueNode::Constant(Constant::get_typed(
-                                    member.offset as i64,
+                                    offset as i64,
                                     &Type::Long,
                                 )),
                                 1,
@@ -705,21 +703,18 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 } else {
                     unreachable!()
                 };
-                let member =
+                let offset =
                     ExpressionWithoutType::get_member_from_struct(&struct_name, &item, context);
                 let (mut instructions, new_left): E = src.convert(context)?;
 
-                let new_dst = if member.offset != 0 {
+                let new_dst = if offset != 0 {
                     let new_dst = new_temp_variable(
                         &Type::Pointer(Box::new(self.1.clone().unwrap())),
                         context,
                     );
                     instructions.push(BirdsInstructionNode::AddPointer(
                         new_left,
-                        BirdsValueNode::Constant(Constant::get_typed(
-                            member.offset as i64,
-                            &Type::Long,
-                        )),
+                        BirdsValueNode::Constant(Constant::get_typed(offset as i64, &Type::Long)),
                         1,
                         new_dst.clone(),
                     ));
@@ -823,20 +818,12 @@ impl ExpressionWithoutType {
         }
     }
 
-    fn get_member_from_struct(
-        struct_name: &str,
-        item: &str,
-        context: &mut ConvertContext,
-    ) -> MemberEntry {
-        if let Some(info) = context.structs.get(struct_name) {
-            if let Some(member) = info.members.iter().find(|m| m.name == item) {
-                member.clone()
-            } else {
-                unreachable!()
-            }
-        } else {
-            unreachable!()
-        }
+    fn get_member_from_struct(struct_name: &str, item: &str, context: &mut ConvertContext) -> u64 {
+        let info = context.structs.get(struct_name).unwrap().clone();
+        info.members
+            .find_name(item, &mut context.structs)
+            .unwrap()
+            .1
     }
 
     fn get_struct_name(src: &ExpressionNode) -> String {

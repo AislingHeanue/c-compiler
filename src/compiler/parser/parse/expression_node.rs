@@ -477,9 +477,12 @@ impl ExpressionWithoutType {
             context.num_structs += 1;
             let new_name = format!("{}.{}", name, context.num_structs);
 
-            context
-                .current_struct_names
-                .insert(name.to_string(), new_name.clone());
+            // anonymous structs do not get saved to the scope symbols list
+            if name != "anonymous.struct" {
+                context
+                    .current_struct_names
+                    .insert(name.to_string(), new_name.clone());
+            }
 
             Ok(new_name)
         }
@@ -500,9 +503,12 @@ impl ExpressionWithoutType {
             context.num_structs += 1;
             let new_name = format!("{}.{}", name, context.num_structs);
 
-            context
-                .current_struct_names
-                .insert(name.to_string(), new_name.clone());
+            // never store anonymous structs in the context
+            if name != "anonymous.struct" {
+                context
+                    .current_struct_names
+                    .insert(name.to_string(), new_name.clone());
+            }
 
             Ok(new_name)
         }

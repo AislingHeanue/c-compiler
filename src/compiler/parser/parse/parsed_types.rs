@@ -8,7 +8,7 @@ use std::{collections::VecDeque, error::Error};
 impl Parse<Type> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Type, Box<dyn Error>> {
         if matches!(self.peek()?, Token::KeywordStruct) {
-            let declaration: StructDeclaration = self.parse_implicit(context)?;
+            let declaration: StructDeclaration = self.parse_struct(true, context)?;
             return Ok(Type::Struct(declaration.name));
         }
         let mut out = Vec::new();
@@ -88,7 +88,7 @@ impl Parse<(Type, Option<StructDeclaration>)> for VecDeque<Token> {
         context: &mut ParseContext,
     ) -> Result<(Type, Option<StructDeclaration>), Box<dyn Error>> {
         if matches!(self.peek()?, Token::KeywordStruct) {
-            let declaration: StructDeclaration = self.parse_implicit(context)?;
+            let declaration: StructDeclaration = self.parse_struct(true, context)?;
             Ok((Type::Struct(declaration.name.clone()), Some(declaration)))
         } else {
             let t: Type = self.parse(context)?;
@@ -97,19 +97,74 @@ impl Parse<(Type, Option<StructDeclaration>)> for VecDeque<Token> {
     }
 }
 
-impl Parse<StructDeclaration> for VecDeque<Token> {
-    fn parse(&mut self, context: &mut ParseContext) -> Result<StructDeclaration, Box<dyn Error>> {
+// impl Parse<StructDeclaration> for VecDeque<Token> {
+//     fn parse(&mut self, context: &mut ParseContext) -> Result<StructDeclaration, Box<dyn Error>> {
+//         self.expect(Token::KeywordStruct)?;
+//         let name = match self.read()? {
+//             Token::Identifier(name) => name,
+//             Token::OpenBrace => "anonymous.struct".to_string(),
+//             _ => return Err("Struct type is missing name identifier".into()),
+//         };
+//
+//         let new_name = ExpressionWithoutType::new_struct_name(&name, context)?;
+//         let members = if !self.is_empty() && self.peek()? == Token::OpenBrace {
+//             self.expect(Token::OpenBrace)?;
+//             let mut members: Vec<StructMember> = Vec::new();
+//             while self.peek()? != Token::CloseBrace {
+//                 members.push(self.parse(context)?)
+//             }
+//             self.expect(Token::CloseBrace)?;
+//
+//             if members.is_empty() {
+//                 return Err(
+//                     "Struct definition (eg. with '{}') must have at least one member".into(),
+//                 );
+//             } else {
+//                 Some(members)
+//             }
+//         } else {
+//             None
+//         };
+//
+//         Ok(StructDeclaration {
+//             name: new_name,
+//             members,
+//         })
+//     }
+// }
+
+pub trait ParseStructDeclaration {
+    fn parse_struct(
+        &mut self,
+        implicit: bool,
+        context: &mut ParseContext,
+    ) -> Result<StructDeclaration, Box<dyn Error>>;
+}
+
+impl ParseStructDeclaration for VecDeque<Token> {
+    fn parse_struct(
+        &mut self,
+        implicit: bool,
+        context: &mut ParseContext,
+    ) -> Result<StructDeclaration, Box<dyn Error>> {
         self.expect(Token::KeywordStruct)?;
-        let name = if let Token::Identifier(name) = self.read()? {
-            name
-        } else {
-            return Err("Struct type is missing name identifier".into());
+        let name = match self.peek()? {
+            Token::Identifier(name) => {
+                self.read()?;
+                name
+            }
+            Token::OpenBrace => "anonymous.struct".to_string(),
+            _ => return Err("Struct type is missing name identifier".into()),
         };
 
         // NOTE: DURING PARSING this step here, we resolve the struct name from the current scope,
         // or declare that this is a new struct. Then, we evaluate its members with the context
         // that this struct now exists.
-        let new_name = ExpressionWithoutType::new_struct_name(&name, context)?;
+        let new_name = if implicit {
+            ExpressionWithoutType::resolve_struct_name(&name, context)?
+        } else {
+            ExpressionWithoutType::new_struct_name(&name, context)?
+        };
         let members = if !self.is_empty() && self.peek()? == Token::OpenBrace {
             self.expect(Token::OpenBrace)?;
             let mut members: Vec<StructMember> = Vec::new();
@@ -132,75 +187,49 @@ impl Parse<StructDeclaration> for VecDeque<Token> {
         Ok(StructDeclaration {
             name: new_name,
             members,
-        })
-    }
-}
-
-pub trait ParseImplicitStructDeclaration {
-    fn parse_implicit(
-        &mut self,
-        context: &mut ParseContext,
-    ) -> Result<StructDeclaration, Box<dyn Error>>;
-}
-
-impl ParseImplicitStructDeclaration for VecDeque<Token> {
-    fn parse_implicit(
-        &mut self,
-        context: &mut ParseContext,
-    ) -> Result<StructDeclaration, Box<dyn Error>> {
-        self.expect(Token::KeywordStruct)?;
-        let name = if let Token::Identifier(name) = self.read()? {
-            name
-        } else {
-            return Err("Struct type is missing name identifier".into());
-        };
-
-        let new_name = ExpressionWithoutType::resolve_struct_name(&name, context)?;
-        let members = if !self.is_empty() && self.peek()? == Token::OpenBrace {
-            self.expect(Token::OpenBrace)?;
-            let mut members: Vec<StructMember> = Vec::new();
-            while self.peek()? != Token::CloseBrace {
-                members.push(self.parse(context)?)
-            }
-            self.expect(Token::CloseBrace)?;
-
-            if members.is_empty() {
-                return Err(
-                    "Struct definition (eg. with '{}') must have at least one member".into(),
-                );
-            } else {
-                Some(members)
-            }
-        } else {
-            None
-        };
-
-        Ok(StructDeclaration {
-            name: new_name,
-            members,
+            // nameless,
         })
     }
 }
 
 impl Parse<StructMember> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<StructMember, Box<dyn Error>> {
-        let (base_type, declarator, struct_declaration): (
-            Type,
-            Declarator,
-            Option<StructDeclaration>,
-        ) = self.parse(context)?;
-        self.expect(Token::SemiColon)?;
-        let declarator_output = declarator.apply_to_type(base_type)?;
+        let mut type_tokens = self.pop_tokens_for_type(context)?.0;
+        match self.peek()? {
+            Token::SemiColon => {
+                let embedded_struct_declaration: StructDeclaration =
+                    type_tokens.parse_struct(true, context)?;
+                self.expect(Token::SemiColon)?;
+                Ok(StructMember {
+                    member_type: Type::Struct(embedded_struct_declaration.name.clone()),
+                    name: None,
+                    struct_declaration: Some(embedded_struct_declaration),
+                })
+            }
+            _ => {
+                // attempt to parse a declarator with the remaining tokens
+                type_tokens.append(self);
+                // put the tokens back the way they were
+                *self = type_tokens;
+                let (base_type, declarator, struct_declaration): (
+                    Type,
+                    Declarator,
+                    Option<StructDeclaration>,
+                ) = self.parse(context)?;
+                self.expect(Token::SemiColon)?;
+                let declarator_output = declarator.apply_to_type(base_type)?;
 
-        if let Type::Function(_, _) = declarator_output.out_type {
-            return Err("A struct member may not have a function type".into());
+                if let Type::Function(_, _) = declarator_output.out_type {
+                    Err("A struct member may not have a function type".into())
+                } else {
+                    Ok(StructMember {
+                        member_type: declarator_output.out_type,
+                        name: Some(declarator_output.name),
+                        struct_declaration,
+                    })
+                }
+            }
         }
-
-        Ok(StructMember {
-            member_type: declarator_output.out_type,
-            name: declarator_output.name,
-            struct_declaration,
-        })
     }
 }
 
@@ -282,11 +311,15 @@ impl PopForType for VecDeque<Token> {
             match self.peek()? {
                 Token::KeywordStruct => {
                     // READING A STRUCT TYPE //
-                    types_deque.push_back(self.read()?); // read the keyword
-                    if !matches!(self.peek()?, Token::Identifier(_)) {
+                    // red the keyword
+                    types_deque.push_back(self.read()?);
+                    // read the struct name if it exists. Anonymous structs omit this name
+                    if !matches!(self.peek()?, Token::OpenBrace | Token::Identifier(_)) {
                         return Err("Malformed struct type".into());
                     }
-                    types_deque.push_back(self.read()?); // read the name
+                    if matches!(self.peek()?, Token::Identifier(_)) {
+                        types_deque.push_back(self.read()?); // read the name
+                    }
                     if self.peek()? == Token::OpenBrace {
                         types_deque.push_back(self.read()?);
                         let mut nesting_count = 1;

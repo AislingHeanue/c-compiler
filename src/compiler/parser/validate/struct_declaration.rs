@@ -1,22 +1,23 @@
-use std::error::Error;
+use std::{collections::HashSet, error::Error};
 
 use crate::compiler::{
     codegen::align_stack_size,
-    parser::{MemberEntry, StructDeclaration, StructInfo},
+    parser::{MemberEntry, StructDeclaration, StructInfo, StructMember},
+    types::Type,
 };
 
 use super::{CheckTypes, ValidateContext};
 
 impl CheckTypes for StructDeclaration {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        let original_seen_list = context.current_struct_members.clone();
+        if !context.checking_embedded_struct {
+            context.current_struct_members = HashSet::new();
+        }
+
         let members = if let Some(ref mut members) = self.members {
             members
         } else {
-            // // assume that if we have entered this block and the corresponding struct is not in the
-            // // structs map, then this is a reference to an incomplete type (bad)
-            // if !context.structs.contains_key(&self.name) {
-            //     return Err(format!("Struct {} used before it's defined", self.name).into());
-            // }
             return Ok(());
         };
 
@@ -24,16 +25,26 @@ impl CheckTypes for StructDeclaration {
             return Err(format!("Struct {} is defined twice in the same scope", self.name).into());
         }
 
-        let mut seen = Vec::new();
         for m in members.iter_mut() {
-            if seen.contains(&m.name) {
-                return Err("Repeated name in struct definition".into());
+            if let Some(ref name) = m.name {
+                if context.current_struct_members.contains(name) {
+                    return Err("Repeated name in struct definition".into());
+                }
+                context.current_struct_members.insert(name.clone());
             }
-            seen.push(m.name.clone());
 
             if let Some(ref mut s) = m.struct_declaration {
+                let original_checking_embedded_struct = context.checking_embedded_struct;
+                if m.name.is_none() {
+                    context.checking_embedded_struct = true;
+                }
+
                 // if m is itself a struct definition, bring said definition into scope
                 s.check_types(context)?;
+
+                if m.name.is_none() {
+                    context.checking_embedded_struct = original_checking_embedded_struct;
+                }
             }
 
             m.member_type.check_types(context)?;
@@ -69,6 +80,37 @@ impl CheckTypes for StructDeclaration {
             },
         );
 
+        if !context.checking_embedded_struct {
+            context.current_struct_members = original_seen_list;
+        }
+
+        Ok(())
+    }
+}
+
+impl CheckTypes for StructMember {
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        if let Some(ref name) = self.name {
+            if context.current_struct_members.contains(name) {
+                return Err(format!("Duplicate name in struct: {:?}", name).into());
+            }
+            context.current_struct_members.insert(name.clone());
+        } else if let Type::Struct(ref name) = self.member_type {
+            // this is an anonymous struct. Treat all its members as if they're embedded in this
+            // struct
+            let mut info = context.structs.get(name).unwrap().clone();
+            for member in info.members.iter_mut() {
+                member.member_type.check_types(context)?;
+            }
+            context.structs.insert(name.clone(), info);
+        } else {
+            unreachable!()
+        }
+
+        if let Some(ref mut s) = self.struct_declaration {
+            // if m is itself a struct definition, bring said definition into scope
+            s.check_types(context)?;
+        }
         Ok(())
     }
 }

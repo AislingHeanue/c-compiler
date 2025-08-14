@@ -349,12 +349,20 @@ impl CodeDisplay for Vec<StructMember> {
     fn show(&self, context: &mut DisplayContext) -> String {
         self.iter()
             .map(|member| {
-                format!(
-                    "{}{} {}",
-                    context.new_line_start(),
-                    member.name,
-                    member.member_type.show(context)
-                )
+                if let Some(name) = &member.name {
+                    format!(
+                        "{}{} {}",
+                        context.new_line_start(),
+                        name,
+                        member.member_type.show(context)
+                    )
+                } else {
+                    format!(
+                        "{}{}",
+                        context.new_line_start(),
+                        member.member_type.show(context)
+                    )
+                }
             })
             .join("")
     }

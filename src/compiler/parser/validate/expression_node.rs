@@ -4,7 +4,7 @@ use crate::compiler::{
     parser::{
         BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, StructInfo, UnaryOperatorNode,
     },
-    types::{Constant, Type},
+    types::{Constant, FindMemberName, Type},
 };
 
 use super::{CheckTypes, Validate, ValidateContext, ValidationPass};
@@ -313,9 +313,9 @@ impl CheckTypes for ExpressionNode {
             ExpressionWithoutType::Dot(ref mut e, ref mut name) => {
                 e.check_types(context)?;
                 if let Type::Struct(s_name) = e.1.as_ref().unwrap() {
-                    let info = context.structs.get(s_name).unwrap();
-                    let member = info.members.iter().find(|m| m.name == *name);
-                    if let Some(found_member) = member {
+                    let info = context.structs.get(s_name).unwrap().clone();
+                    let maybe_member = info.members.find_name(name, &mut context.structs);
+                    if let Some((found_member, _)) = maybe_member {
                         found_member.member_type.clone()
                     } else {
                         return Err(
@@ -330,9 +330,9 @@ impl CheckTypes for ExpressionNode {
                 p.check_types_and_convert(context)?;
                 if let Type::Pointer(p_type) = p.1.as_ref().unwrap() {
                     if let Type::Struct(ref s_name) = **p_type {
-                        let info = context.structs.get(s_name).unwrap();
-                        let member = info.members.iter().find(|m| m.name == *name);
-                        if let Some(found_member) = member {
+                        let info = context.structs.get(s_name).unwrap().clone();
+                        let maybe_member = info.members.find_name(name, &mut context.structs);
+                        if let Some((found_member, _)) = maybe_member {
                             found_member.member_type.clone()
                         } else {
                             return Err(format!(

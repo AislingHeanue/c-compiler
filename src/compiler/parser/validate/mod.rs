@@ -1,4 +1,7 @@
-use std::{collections::HashMap, error::Error};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+};
 
 mod expression_node;
 mod function_declaration;
@@ -59,6 +62,8 @@ pub struct ValidateContext {
     current_enclosing_loop_name_for_continue: Option<String>,
     current_switch_labels: Option<HashMap<SwitchMapKey, String>>,
     current_switch_type: Option<Type>,
+    current_struct_members: HashSet<String>,
+    checking_embedded_struct: bool,
     symbols: HashMap<String, SymbolInfo>,
     structs: HashMap<String, StructInfo>,
 }
@@ -85,6 +90,8 @@ pub fn do_validate(parsed: &mut ProgramNode) -> Result<ValidateResult, Box<dyn E
         current_enclosing_loop_name_for_continue: None,
         current_switch_labels: None,
         current_switch_type: None,
+        current_struct_members: HashSet::new(),
+        checking_embedded_struct: false,
         symbols: HashMap::new(),
         structs: HashMap::new(),
     };

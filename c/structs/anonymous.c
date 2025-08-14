@@ -5,8 +5,9 @@ int main(void) {
         struct {
             struct {
                 int field3;
-            };
+            } nested;
         };
         char field4;
-    } x = {1, 1.0, 1, 'a'};
+    } x = {1, 1.0, {{5}}, 'a'};
+    return x.nested.field3;
 }

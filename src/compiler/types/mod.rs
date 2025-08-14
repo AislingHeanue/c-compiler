@@ -1,6 +1,11 @@
+use std::collections::HashMap;
+
+use super::parser::StructInfo;
+
 mod constant;
 mod parsed_types;
 mod static_initialiser;
+mod struct_member;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
@@ -86,4 +91,28 @@ pub enum Class {
     Memory,
     Sse,
     Integer,
+}
+
+#[derive(Debug, Clone)]
+pub struct MemberEntry {
+    pub member_type: Type,
+    pub name: Option<String>,
+    pub offset: u64,
+}
+
+pub trait FindMemberName {
+    fn find_name(
+        &self,
+        name: &str,
+        structs: &mut HashMap<String, StructInfo>,
+    ) -> Option<(MemberEntry, u64)>;
+}
+
+pub trait Count {
+    fn count(&self, structs: &mut HashMap<String, StructInfo>) -> usize;
+}
+
+pub trait Flatten {
+    type Output;
+    fn flatten(&self, structs: &mut HashMap<String, StructInfo>) -> Self::Output;
 }

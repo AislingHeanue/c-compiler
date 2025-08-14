@@ -4,7 +4,7 @@ use crate::compiler::{
     birds::{BirdsInstructionNode, BirdsTopLevel, BirdsValueNode},
     codegen::align_stack_size,
     parser::{DeclarationNode, FunctionDeclaration, VariableDeclaration},
-    types::{Constant, StorageInfo},
+    types::{Constant, Flatten, StorageInfo},
 };
 use itertools::{process_results, Itertools};
 
@@ -216,8 +216,11 @@ impl InitialiserNode {
                     );
                 }
                 context.current_initialiser_offset = original_offset;
-                for (init, member) in initialisers.into_iter().zip(info.members.iter()) {
-                    let difference_in_size = member.offset as i32
+                for (init, (_, member_offset)) in initialisers
+                    .into_iter()
+                    .zip(info.members.flatten(&mut context.structs))
+                {
+                    let difference_in_size = member_offset as i32
                         - (context.current_initialiser_offset - original_offset);
                     InitialiserNode::pad_bytes(
                         difference_in_size,
@@ -226,7 +229,7 @@ impl InitialiserNode {
                         context,
                     );
 
-                    context.current_initialiser_offset = original_offset + member.offset as i32;
+                    context.current_initialiser_offset = original_offset + member_offset as i32;
                     instructions.append(&mut init.convert(dst.clone(), context)?);
                 }
                 Ok(instructions)

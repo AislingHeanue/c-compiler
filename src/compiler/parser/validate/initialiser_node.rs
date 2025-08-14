@@ -4,7 +4,10 @@ use itertools::process_results;
 
 use crate::compiler::{
     parser::{ExpressionNode, ExpressionWithoutType, InitialiserNode, InitialiserWithoutType},
-    types::{ComparableStatic, Constant, StaticInitialiser, StorageInfo, SymbolInfo, Type},
+    types::{
+        ComparableStatic, Constant, Count, Flatten, StaticInitialiser, StorageInfo, SymbolInfo,
+        Type,
+    },
 };
 
 use super::{Validate, ValidateContext};
@@ -124,22 +127,25 @@ impl InitialiserNode {
                     .ok_or::<Box<dyn Error>>("Can't initialise an incomplete struct".into())?
                     .clone();
 
-                if initialisers.len() > info.members.len() {
+                if initialisers.len() > info.members.count(&mut context.structs) {
                     return Err("Too many initialisers in static declaration of struct".into());
                 }
 
-                let mut offset = 0;
+                let mut offset = 0_u64;
                 let mut statics = Vec::new();
-                for (i, init) in initialisers.iter_mut().enumerate() {
-                    let member = info.members.get(i).unwrap();
-                    if member.offset != offset {
+                for (init, (member, member_offset)) in initialisers
+                    .iter_mut()
+                    .zip(info.members.flatten(&mut context.structs))
+                {
+                    if member_offset as u64 != offset {
                         statics.push(StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
-                            member.offset - offset,
+                            member_offset as u64 - offset,
                         )));
                     }
                     statics
                         .append(&mut init.create_static_init_list(&member.member_type, context)?);
-                    offset = member.offset + member.member_type.get_size(&mut context.structs);
+                    offset =
+                        member_offset as u64 + member.member_type.get_size(&mut context.structs);
                 }
 
                 if info.size > offset {
@@ -204,14 +210,17 @@ impl InitialiserNode {
                     .ok_or::<Box<dyn Error>>("Can't initialise an incomplete struct".into())?
                     .clone();
 
-                if c_init.len() > info.members.len() {
+                if c_init.len() > info.members.count(&mut context.structs) {
                     return Err("Too many initialisers in declaration of struct".into());
                 }
 
-                for (init, member) in c_init.iter_mut().zip(info.members.iter()) {
+                for (init, (member, _)) in c_init
+                    .iter_mut()
+                    .zip(info.members.flatten(&mut context.structs))
+                {
                     init.check_types(&member.member_type, context)?;
                 }
-                for i in c_init.clone().len()..info.members.len() {
+                for i in c_init.clone().len()..info.members.count(&mut context.structs) {
                     c_init.push(InitialiserNode::zero(
                         &info.members.get(i).unwrap().member_type,
                         context,

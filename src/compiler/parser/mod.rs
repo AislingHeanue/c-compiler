@@ -1,7 +1,7 @@
 use parse::do_parse;
 use validate::do_validate;
 
-use super::types::{ComparableStatic, Constant, StorageClass, Type};
+use super::types::{ComparableStatic, Constant, MemberEntry, StorageClass, Type};
 
 use super::{lexer::Token, types::SymbolInfo};
 use std::{
@@ -52,12 +52,13 @@ pub struct TypeDeclaration {
 pub struct StructDeclaration {
     pub name: String,
     pub members: Option<Vec<StructMember>>,
+    // pub nameless: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct StructMember {
     pub member_type: Type,
-    pub name: String,
+    pub name: Option<String>,
     pub struct_declaration: Option<StructDeclaration>,
 }
 
@@ -218,13 +219,6 @@ pub struct StructInfo {
     pub alignment: u64,
     pub size: u64,
     pub members: Vec<MemberEntry>,
-}
-
-#[derive(Debug, Clone)]
-pub struct MemberEntry {
-    pub member_type: Type,
-    pub name: String,
-    pub offset: u64,
 }
 
 #[derive(Debug)]

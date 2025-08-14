@@ -2,7 +2,7 @@ use itertools::Itertools;
 
 use super::{
     declarator::OutputWithStruct,
-    parsed_types::{ParseImplicitStructDeclaration, PopForType},
+    parsed_types::{ParseStructDeclaration, PopForType},
     Identity, Parse, ParseContext, Type,
 };
 use crate::compiler::{
@@ -73,7 +73,8 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
 
                 match self.peek()? {
                     Token::SemiColon => {
-                        let struct_declaration = struct_declaration_tokens.parse(context)?;
+                        let struct_declaration =
+                            struct_declaration_tokens.parse_struct(false, context)?;
                         if !struct_declaration_tokens.is_empty() {
                             return Err(
                                 "Leftover tokens parsing an explicit struct declaration".into()
@@ -88,7 +89,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         // the init
 
                         let struct_declaration =
-                            struct_declaration_tokens.parse_implicit(context)?;
+                            struct_declaration_tokens.parse_struct(true, context)?;
                         if !struct_declaration_tokens.is_empty() {
                             return Err("Leftover tokens parsing a struct declaration".into());
                         }
