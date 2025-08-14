@@ -8,7 +8,7 @@ impl Type {
     pub fn get_alignment(&self, structs: &mut HashMap<String, StructInfo>) -> u64 {
         // bytes
         match self {
-            Type::Struct(name) => structs.get(name).unwrap().alignment,
+            Type::Struct(name, _) => structs.get(name).unwrap().alignment,
             Type::Array(inner, _) => inner.get_alignment(structs),
             _ => self.get_size(structs),
         }
@@ -31,7 +31,7 @@ impl Type {
             Type::Array(t, size) => {
                 align_stack_size(t.get_size(structs), t.get_alignment(structs)) * (*size)
             } // arrays are like pointers except that they aren't
-            Type::Struct(name) => structs.get(name).unwrap().size,
+            Type::Struct(name, _) => structs.get(name).unwrap().size,
         }
     }
 
@@ -49,7 +49,7 @@ impl Type {
             Type::SignedChar => true,
             Type::UnsignedChar => false,
             Type::Void => unreachable!(),
-            Type::Struct(_) => false,
+            Type::Struct(_, _) => false,
         }
     }
 
@@ -67,7 +67,7 @@ impl Type {
             Type::SignedChar => true,
             Type::UnsignedChar => true,
             Type::Void => false,
-            Type::Struct(_) => false,
+            Type::Struct(_, _) => false,
         }
     }
 
@@ -81,13 +81,13 @@ impl Type {
     pub fn is_scalar(&self) -> bool {
         !matches!(
             self,
-            Type::Array(..) | Type::Void | Type::Function(_, _) | Type::Struct(_)
+            Type::Array(..) | Type::Void | Type::Function(_, _) | Type::Struct(_, _)
         )
     }
 
     pub fn is_complete(&self, structs: &mut HashMap<String, StructInfo>) -> bool {
         match self {
-            Type::Struct(name) => structs.contains_key(name),
+            Type::Struct(name, _) => structs.contains_key(name),
             Type::Void => false,
             _ => true,
         }
@@ -119,7 +119,7 @@ impl Type {
             Type::Double => Class::Sse,
             Type::Array(..) => unreachable!(),
             Type::Function(_, _) => unreachable!(),
-            Type::Struct(_) => unreachable!(),
+            Type::Struct(_, _) => unreachable!(),
             Type::Void => unreachable!(),
             _ => Class::Integer,
         }

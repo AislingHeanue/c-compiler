@@ -28,7 +28,8 @@ impl Flatten for MemberEntry {
             }
             None => {
                 // this is an embedded entry, so check there too!
-                if let Type::Struct(ref s_name) = self.member_type {
+                // FIXME: unions
+                if let Type::Struct(ref s_name, _) = self.member_type {
                     let info = structs.get(s_name).unwrap().clone();
                     info.members
                         .flatten(structs)
@@ -69,7 +70,8 @@ impl MemberEntry {
             }
             None => {
                 // this is an embedded entry, so check there too!
-                if let Type::Struct(ref s_name) = self.member_type {
+                // FIXME: unions
+                if let Type::Struct(ref s_name, _) = self.member_type {
                     let info = structs.get(s_name).unwrap().clone();
                     info.members
                         .find_name(name, structs)
@@ -86,9 +88,14 @@ impl MemberEntry {
             Some(_) => 1,
             None => {
                 // this is an embedded entry, so count there too!
-                if let Type::Struct(ref s_name) = self.member_type {
-                    let info = structs.get(s_name).unwrap().clone();
-                    info.members.count(structs)
+                if let Type::Struct(ref s_name, is_union) = self.member_type {
+                    if is_union {
+                        // unions always store one entry at a time
+                        1
+                    } else {
+                        let info = structs.get(s_name).unwrap().clone();
+                        info.members.count(structs)
+                    }
                 } else {
                     unreachable!()
                 }

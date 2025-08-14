@@ -85,7 +85,8 @@ impl InitialiserNode {
                     return Err("Cannot initialise a static array with a scalar type".into());
                 }
             }
-            (Type::Struct(_), InitialiserWithoutType::Single(_)) => {
+            (Type::Struct(_, _), InitialiserWithoutType::Single(_)) => {
+                // FIXME: unions?
                 return Err("Structs must be initialised with a compound expression".into());
             }
             (_, InitialiserWithoutType::Single(ref i)) => {
@@ -120,7 +121,8 @@ impl InitialiserNode {
                 }
                 statics
             }
-            (Type::Struct(name), InitialiserWithoutType::Compound(ref mut initialisers)) => {
+            (Type::Struct(name, _), InitialiserWithoutType::Compound(ref mut initialisers)) => {
+                // FIXME: unions
                 let info = context
                     .structs
                     .get(name)
@@ -203,7 +205,8 @@ impl InitialiserNode {
                     c_init.push(InitialiserNode::zero(t, context));
                 }
             }
-            (Type::Struct(name), InitialiserWithoutType::Compound(ref mut c_init)) => {
+            (Type::Struct(name, _), InitialiserWithoutType::Compound(ref mut c_init)) => {
+                // FIXME: unions
                 let info = context
                     .structs
                     .get(name)
@@ -308,7 +311,8 @@ impl InitialiserNode {
                 )),
                 Some(target_type.clone()),
             ),
-            Type::Struct(name) => {
+            Type::Struct(name, _) => {
+                // FIXME: unions
                 let members = context.structs.get(name).unwrap().members.clone();
                 let mut c_init = Vec::new();
                 for m in members {

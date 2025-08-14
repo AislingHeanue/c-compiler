@@ -3,8 +3,8 @@ use itertools::Itertools;
 use super::{
     BinaryOperatorNode, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
     ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
-    InitialiserWithoutType, ProgramNode, StatementNode, StructDeclaration, StructMember, Type,
-    TypeDeclaration, UnaryOperatorNode, VariableDeclaration,
+    InitialiserWithoutType, ProgramNode, StatementNode, StructDeclaration, StructKind,
+    StructMember, Type, TypeDeclaration, UnaryOperatorNode, VariableDeclaration,
 };
 use std::{borrow::Borrow, fmt::Display};
 
@@ -302,15 +302,20 @@ impl CodeDisplay for DeclarationNode {
 
 impl CodeDisplay for StructDeclaration {
     fn show(&self, context: &mut DisplayContext) -> String {
+        let word = match self.kind {
+            StructKind::Struct => "struct",
+            StructKind::Union => "union",
+        };
         if let Some(m) = &self.members {
             format!(
-                "type {} struct{{{}{}}}",
+                "type {} {}{{{}{}}}",
                 self.name,
+                word,
                 m.show(&mut context.indent()),
                 context.new_line_start()
             )
         } else {
-            format!("type {} struct{{?}}", self.name)
+            format!("type {} {}{{?}}", self.name, word)
         }
     }
 }
@@ -332,7 +337,7 @@ impl CodeDisplay for Type {
             Type::SignedChar => "signed_rune".to_string(),
             Type::UnsignedChar => "unsigned_rune".to_string(),
             Type::Void => "void".to_string(),
-            Type::Struct(name) => name.to_string(),
+            Type::Struct(name, _) => name.to_string(),
             // Type::Struct(name, Some(members)) => {
             //     format!(
             //         "struct_{} {{{}{}}}",

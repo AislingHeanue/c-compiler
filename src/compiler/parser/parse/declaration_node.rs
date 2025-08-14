@@ -9,7 +9,7 @@ use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::{
         BlockItemNode, DeclarationNode, Declarator, FunctionDeclaration, StructDeclaration,
-        TypeDeclaration, VariableDeclaration,
+        StructKind, TypeDeclaration, VariableDeclaration,
     },
     types::StorageClass,
 };
@@ -60,7 +60,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                     struct_declaration,
                 }));
             }
-            Token::KeywordStruct => {
+            Token::KeywordStruct | Token::KeywordUnion => {
                 // parsing the StructDeclaration here does the following
                 // 1. Consumes the entire struct type
                 // 2. If the struct type had a definition, adds it to the scope's struct map
@@ -94,9 +94,13 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                             return Err("Leftover tokens parsing a struct declaration".into());
                         }
 
+                        let is_union = match struct_declaration.kind {
+                            StructKind::Struct => false,
+                            StructKind::Union => true,
+                        };
                         let declarator: Declarator = self.parse(context)?;
                         (
-                            Type::Struct(struct_declaration.name.clone()),
+                            Type::Struct(struct_declaration.name.clone(), is_union),
                             declarator,
                             Some(struct_declaration),
                         )

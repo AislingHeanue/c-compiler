@@ -207,8 +207,8 @@ impl CheckTypes for ExpressionNode {
                     || matches!(other_type, Type::Pointer(_))
                 {
                     ExpressionNode::get_common_pointer_type(then, other)?
-                } else if matches!(then_type, Type::Struct(_))
-                    || matches!(other_type, Type::Struct(_))
+                } else if matches!(then_type, Type::Struct(_, _))
+                    || matches!(other_type, Type::Struct(_, _))
                 {
                     if then_type == other_type {
                         then_type.clone()
@@ -312,7 +312,8 @@ impl CheckTypes for ExpressionNode {
             }
             ExpressionWithoutType::Dot(ref mut e, ref mut name) => {
                 e.check_types(context)?;
-                if let Type::Struct(s_name) = e.1.as_ref().unwrap() {
+                if let Type::Struct(s_name, _) = e.1.as_ref().unwrap() {
+                    // TODO: check unions
                     let info = context.structs.get(s_name).unwrap().clone();
                     let maybe_member = info.members.find_name(name, &mut context.structs);
                     if let Some((found_member, _)) = maybe_member {
@@ -329,7 +330,8 @@ impl CheckTypes for ExpressionNode {
             ExpressionWithoutType::Arrow(ref mut p, ref mut name) => {
                 p.check_types_and_convert(context)?;
                 if let Type::Pointer(p_type) = p.1.as_ref().unwrap() {
-                    if let Type::Struct(ref s_name) = **p_type {
+                    if let Type::Struct(ref s_name, _) = **p_type {
+                        // TODO: check unions
                         let info = context.structs.get(s_name).unwrap().clone();
                         let maybe_member = info.members.find_name(name, &mut context.structs);
                         if let Some((found_member, _)) = maybe_member {
@@ -381,7 +383,7 @@ impl ExpressionNode {
                 // other expressions, and not pointers to void
                 if !src.0.is_lvalue()
                     || src.1.as_ref().unwrap() == &Type::Pointer(Box::new(Type::Void))
-                    || matches!(src.1.as_ref().unwrap(), Type::Struct(_))
+                    || matches!(src.1.as_ref().unwrap(), Type::Struct(_, _))
                 {
                     return Err(format!(
                         "Can't perform increment/decrement operation on non-arithmetic variable: {:?}",
@@ -547,8 +549,8 @@ impl ExpressionNode {
                     Some(Type::Pointer(t.clone())),
                 )
             }
-            Some(Type::Struct(name)) => {
-                if !Type::Struct(name.clone()).is_complete(&mut context.structs) {
+            Some(Type::Struct(name, is_union)) => {
+                if !Type::Struct(name.clone(), *is_union).is_complete(&mut context.structs) {
                     return Err("Invalid use of incomplete struct".into());
                 }
             }

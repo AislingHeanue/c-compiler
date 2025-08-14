@@ -196,7 +196,8 @@ impl InitialiserNode {
 
                 Ok(instructions)
             }
-            (InitialiserWithoutType::Compound(initialisers), Type::Struct(name)) => {
+            (InitialiserWithoutType::Compound(initialisers), Type::Struct(name, _)) => {
+                // FIXME: union
                 let info = context.structs.get(&name).unwrap().clone();
                 let mut instructions = Vec::new();
 

@@ -1,15 +1,19 @@
 use super::{declarator::OutputWithStruct, Parse, ParseContext, StructMember, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::{Declarator, ExpressionWithoutType, StructDeclaration},
+    parser::{Declarator, ExpressionWithoutType, StructDeclaration, StructKind},
 };
 use std::{collections::VecDeque, error::Error};
 
 impl Parse<Type> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Type, Box<dyn Error>> {
-        if matches!(self.peek()?, Token::KeywordStruct) {
+        if matches!(self.peek()?, Token::KeywordStruct | Token::KeywordUnion) {
             let declaration: StructDeclaration = self.parse_struct(true, context)?;
-            return Ok(Type::Struct(declaration.name));
+            let is_union = match declaration.kind {
+                StructKind::Struct => false,
+                StructKind::Union => true,
+            };
+            return Ok(Type::Struct(declaration.name, is_union));
         }
         let mut out = Vec::new();
         while !self.is_empty() && self.peek()?.is_type(context) {
@@ -87,51 +91,22 @@ impl Parse<(Type, Option<StructDeclaration>)> for VecDeque<Token> {
         &mut self,
         context: &mut ParseContext,
     ) -> Result<(Type, Option<StructDeclaration>), Box<dyn Error>> {
-        if matches!(self.peek()?, Token::KeywordStruct) {
+        if matches!(self.peek()?, Token::KeywordStruct | Token::KeywordUnion) {
             let declaration: StructDeclaration = self.parse_struct(true, context)?;
-            Ok((Type::Struct(declaration.name.clone()), Some(declaration)))
+            let is_union = match declaration.kind {
+                StructKind::Struct => false,
+                StructKind::Union => true,
+            };
+            Ok((
+                Type::Struct(declaration.name.clone(), is_union),
+                Some(declaration),
+            ))
         } else {
             let t: Type = self.parse(context)?;
             Ok((t, None))
         }
     }
 }
-
-// impl Parse<StructDeclaration> for VecDeque<Token> {
-//     fn parse(&mut self, context: &mut ParseContext) -> Result<StructDeclaration, Box<dyn Error>> {
-//         self.expect(Token::KeywordStruct)?;
-//         let name = match self.read()? {
-//             Token::Identifier(name) => name,
-//             Token::OpenBrace => "anonymous.struct".to_string(),
-//             _ => return Err("Struct type is missing name identifier".into()),
-//         };
-//
-//         let new_name = ExpressionWithoutType::new_struct_name(&name, context)?;
-//         let members = if !self.is_empty() && self.peek()? == Token::OpenBrace {
-//             self.expect(Token::OpenBrace)?;
-//             let mut members: Vec<StructMember> = Vec::new();
-//             while self.peek()? != Token::CloseBrace {
-//                 members.push(self.parse(context)?)
-//             }
-//             self.expect(Token::CloseBrace)?;
-//
-//             if members.is_empty() {
-//                 return Err(
-//                     "Struct definition (eg. with '{}') must have at least one member".into(),
-//                 );
-//             } else {
-//                 Some(members)
-//             }
-//         } else {
-//             None
-//         };
-//
-//         Ok(StructDeclaration {
-//             name: new_name,
-//             members,
-//         })
-//     }
-// }
 
 pub trait ParseStructDeclaration {
     fn parse_struct(
@@ -147,7 +122,12 @@ impl ParseStructDeclaration for VecDeque<Token> {
         implicit: bool,
         context: &mut ParseContext,
     ) -> Result<StructDeclaration, Box<dyn Error>> {
-        self.expect(Token::KeywordStruct)?;
+        let kind = match self.read()? {
+            Token::KeywordStruct => StructKind::Struct,
+            Token::KeywordUnion => StructKind::Union,
+            _ => return Err("Invalid token, expecting 'struct' or 'union'".into()),
+        };
+
         let name = match self.peek()? {
             Token::Identifier(name) => {
                 self.read()?;
@@ -187,6 +167,7 @@ impl ParseStructDeclaration for VecDeque<Token> {
         Ok(StructDeclaration {
             name: new_name,
             members,
+            kind,
             // nameless,
         })
     }
@@ -200,8 +181,12 @@ impl Parse<StructMember> for VecDeque<Token> {
                 let embedded_struct_declaration: StructDeclaration =
                     type_tokens.parse_struct(true, context)?;
                 self.expect(Token::SemiColon)?;
+                let is_union = match embedded_struct_declaration.kind {
+                    StructKind::Struct => false,
+                    StructKind::Union => true,
+                };
                 Ok(StructMember {
-                    member_type: Type::Struct(embedded_struct_declaration.name.clone()),
+                    member_type: Type::Struct(embedded_struct_declaration.name.clone(), is_union),
                     name: None,
                     struct_declaration: Some(embedded_struct_declaration),
                 })
@@ -309,7 +294,7 @@ impl PopForType for VecDeque<Token> {
         let mut storage_loc = None;
         while self.peek()?.is_start_of_declaration(context) {
             match self.peek()? {
-                Token::KeywordStruct => {
+                Token::KeywordStruct | Token::KeywordUnion => {
                     // READING A STRUCT TYPE //
                     // red the keyword
                     types_deque.push_back(self.read()?);
@@ -375,6 +360,10 @@ impl Token {
     }
 
     pub fn is_start_of_declaration(&self, context: &mut ParseContext) -> bool {
-        self.is_specifier(context) || matches!(self, Token::KeywordTypedef | Token::KeywordStruct)
+        self.is_specifier(context)
+            || matches!(
+                self,
+                Token::KeywordTypedef | Token::KeywordStruct | Token::KeywordUnion
+            )
     }
 }

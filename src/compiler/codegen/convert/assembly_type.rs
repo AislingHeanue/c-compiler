@@ -27,7 +27,7 @@ impl Convert<AssemblyType> for Type {
             }
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
             Type::Char | Type::SignedChar | Type::UnsignedChar => Ok(AssemblyType::Byte),
-            Type::Struct(name) => {
+            Type::Struct(name, _) => {
                 let info = context.structs.get(&name).unwrap().clone();
                 Ok(AssemblyType::ByteArray(info.size, info.alignment as u32))
             }

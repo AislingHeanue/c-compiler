@@ -43,7 +43,7 @@ impl StaticInitialiser {
             Type::Pointer(_) => unreachable!(),
             Type::Array(..) => unreachable!(),
             Type::Void => unreachable!(),
-            Type::Struct(_) => unreachable!(),
+            Type::Struct(_, _) => unreachable!(),
         }
     }
 
@@ -70,7 +70,7 @@ impl StaticInitialiser {
             }
             Type::Function(_, _) => unreachable!(),
             Type::Void => unreachable!(),
-            Type::Struct(_) => unreachable!(),
+            Type::Struct(_, _) => unreachable!(),
         }
     }
 

@@ -23,7 +23,8 @@ pub enum Type {
     SignedChar,
     UnsignedChar,
     Void,
-    Struct(String),
+    // struct name, is_union
+    Struct(String, bool),
 }
 
 #[derive(Clone, Debug, PartialEq)]

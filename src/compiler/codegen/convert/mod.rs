@@ -203,7 +203,8 @@ pub fn classify_return_type(
 
         if assembly_type == AssemblyType::Double || is_scalar {
             Ok(false)
-        } else if let Type::Struct(name) = t {
+        } else if let Type::Struct(name, _) = t {
+            // FIXME: unions
             let classes = classify_struct(name.to_string(), context);
 
             Ok(*classes.first().unwrap() == Class::Memory)
@@ -224,7 +225,7 @@ fn get_var_name(v: &BirdsValueNode) -> String {
 
 fn get_struct_name(var_name: &str, context: &mut ConvertContext) -> String {
     let t = context.symbols.get(var_name).unwrap().symbol_type.clone();
-    if let Type::Struct(name) = t {
+    if let Type::Struct(name, _) = t {
         name
     } else {
         unreachable!()
@@ -268,7 +269,8 @@ fn flatten_struct_types(info: &StructInfo, context: &mut ConvertContext) -> Vec<
     info.members
         .iter()
         .flat_map(|m| match &m.member_type {
-            Type::Struct(name) => {
+            Type::Struct(name, _) => {
+                // FIXME: what does this even mean in union's case?
                 let inner_info = context.structs.get(name).unwrap().clone();
                 flatten_struct_types(&inner_info, context)
             }

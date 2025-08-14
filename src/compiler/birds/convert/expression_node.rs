@@ -695,7 +695,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
             }
             ExpressionWithoutType::Arrow(src, item) => {
                 let struct_name = if let Type::Pointer(p) = src.1.as_ref().unwrap() {
-                    if let Type::Struct(ref name) = **p {
+                    if let Type::Struct(ref name, _) = **p {
                         name.clone()
                     } else {
                         unreachable!()
@@ -751,7 +751,7 @@ impl ExpressionWithoutType {
                 Type::Double => unreachable!(),
                 Type::Function(_, _) => unreachable!(),
                 Type::Void => unreachable!(),
-                Type::Struct(_) => unreachable!(),
+                Type::Struct(_, _) => unreachable!(),
             }
         } else if this_type == &Type::Double {
             match target_type {
@@ -766,7 +766,7 @@ impl ExpressionWithoutType {
                 Type::Double => unreachable!(),
                 Type::Function(_, _) => unreachable!(),
                 Type::Void => unreachable!(),
-                Type::Struct(_) => unreachable!(),
+                Type::Struct(_, _) => unreachable!(),
             }
         } else if target_type.get_size(&mut context.structs)
             == this_type.get_size(&mut context.structs)
@@ -828,7 +828,7 @@ impl ExpressionWithoutType {
 
     fn get_struct_name(src: &ExpressionNode) -> String {
         let left_type = src.1.clone().unwrap();
-        if let Type::Struct(name) = left_type {
+        if let Type::Struct(name, _) = left_type {
             name
         } else {
             unreachable!()

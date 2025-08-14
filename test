@@ -2,7 +2,7 @@
 
 ### May change for other devices/languages being used ###
 root_test_path=../../nlsandler/writing-a-c-compiler-tests
-extra_args="--bitwise --increment --compound --goto --switch --nan"
+extra_args="--bitwise --increment --compound --goto --switch --nan --union"
 binary_path=target/release/c-compiler
 ###
 

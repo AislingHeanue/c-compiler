@@ -70,7 +70,7 @@ impl Constant {
             Type::Array(..) => unreachable!(),
             Type::Double => panic!("Can't use get_typed_constant to generate a double"),
             Type::Void => unreachable!(),
-            Type::Struct(_) => unreachable!(),
+            Type::Struct(_, _) => unreachable!(),
         }
     }
 

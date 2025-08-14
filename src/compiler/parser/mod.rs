@@ -52,7 +52,13 @@ pub struct TypeDeclaration {
 pub struct StructDeclaration {
     pub name: String,
     pub members: Option<Vec<StructMember>>,
-    // pub nameless: bool,
+    pub kind: StructKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum StructKind {
+    Struct,
+    Union,
 }
 
 #[derive(Debug, Clone)]

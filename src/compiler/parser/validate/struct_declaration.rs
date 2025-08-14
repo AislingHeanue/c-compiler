@@ -95,7 +95,9 @@ impl CheckTypes for StructMember {
                 return Err(format!("Duplicate name in struct: {:?}", name).into());
             }
             context.current_struct_members.insert(name.clone());
-        } else if let Type::Struct(ref name) = self.member_type {
+        } else if let Type::Struct(ref name, _) = self.member_type {
+            // FIXME: unions
+
             // this is an anonymous struct. Treat all its members as if they're embedded in this
             // struct
             let mut info = context.structs.get(name).unwrap().clone();
