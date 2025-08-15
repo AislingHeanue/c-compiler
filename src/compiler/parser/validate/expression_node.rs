@@ -312,10 +312,11 @@ impl CheckTypes for ExpressionNode {
             }
             ExpressionWithoutType::Dot(ref mut e, ref mut name) => {
                 e.check_types(context)?;
-                if let Type::Struct(s_name, _) = e.1.as_ref().unwrap() {
-                    // TODO: check unions
+                if let Type::Struct(s_name, is_union) = e.1.as_ref().unwrap() {
                     let info = context.structs.get(s_name).unwrap().clone();
-                    let maybe_member = info.members.find_name(name, &mut context.structs);
+                    let maybe_member =
+                        info.members
+                            .find_name(name, *is_union, &mut context.structs);
                     if let Some((found_member, _)) = maybe_member {
                         found_member.member_type.clone()
                     } else {
@@ -330,10 +331,10 @@ impl CheckTypes for ExpressionNode {
             ExpressionWithoutType::Arrow(ref mut p, ref mut name) => {
                 p.check_types_and_convert(context)?;
                 if let Type::Pointer(p_type) = p.1.as_ref().unwrap() {
-                    if let Type::Struct(ref s_name, _) = **p_type {
-                        // TODO: check unions
+                    if let Type::Struct(ref s_name, is_union) = **p_type {
                         let info = context.structs.get(s_name).unwrap().clone();
-                        let maybe_member = info.members.find_name(name, &mut context.structs);
+                        let maybe_member =
+                            info.members.find_name(name, is_union, &mut context.structs);
                         if let Some((found_member, _)) = maybe_member {
                             found_member.member_type.clone()
                         } else {
@@ -687,13 +688,14 @@ impl ExpressionNode {
             | BinaryOperatorNode::Subtract
             | BinaryOperatorNode::Multiply
             | BinaryOperatorNode::Divide
+            | BinaryOperatorNode::Mod
             | BinaryOperatorNode::BitwiseAnd
             | BinaryOperatorNode::BitwiseXor
             | BinaryOperatorNode::BitwiseOr => common_type,
-            // types which don't convert the right type (TODO: why is Mod here?)
-            BinaryOperatorNode::ShiftLeft
-            | BinaryOperatorNode::ShiftRight
-            | BinaryOperatorNode::Mod => left.1.clone().unwrap(),
+            // types which don't convert the right type
+            BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight => {
+                left.1.clone().unwrap()
+            }
             // logical
             BinaryOperatorNode::And
             | BinaryOperatorNode::Or

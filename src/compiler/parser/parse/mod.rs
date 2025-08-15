@@ -31,8 +31,9 @@ pub struct ParseContext {
     // map from string to sting-as-seen-in-assembly and is-externally-linked
     current_scope_identifiers: HashMap<String, Identity>,
     outer_scope_identifiers: HashMap<String, Identity>,
-    current_struct_names: HashMap<String, String>,
-    outer_struct_names: HashMap<String, String>,
+    // map from struct name to unique name and whether it's a union
+    current_struct_names: HashMap<String, (String, bool)>,
+    outer_struct_names: HashMap<String, (String, bool)>,
     // all_struct_types: HashMap<String, StructTypeEntry>,
     num_variables: usize,
     num_structs: usize,

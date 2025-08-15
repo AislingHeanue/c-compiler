@@ -463,6 +463,7 @@ impl ExpressionWithoutType {
 
     pub fn resolve_struct_name(
         name: &str,
+        expecting_union: bool,
         context: &mut ParseContext,
     ) -> Result<String, Box<dyn Error>> {
         // println!(
@@ -470,9 +471,23 @@ impl ExpressionWithoutType {
         //     context.outer_struct_names, context.current_struct_names
         // );
         if let Some(info) = context.current_struct_names.get(name) {
-            Ok(info.clone())
+            if info.1 != expecting_union {
+                return Err(format!(
+                    "Conflicting definitions of struct and union with tag {}",
+                    name
+                )
+                .into());
+            }
+            Ok(info.0.clone())
         } else if let Some(info) = context.outer_struct_names.get(name) {
-            Ok(info.clone())
+            if info.1 != expecting_union {
+                return Err(format!(
+                    "Conflicting definitions of struct and union with tag {}",
+                    name
+                )
+                .into());
+            }
+            Ok(info.0.clone())
         } else {
             context.num_structs += 1;
             let new_name = format!("{}.{}", name, context.num_structs);
@@ -481,7 +496,7 @@ impl ExpressionWithoutType {
             if name != "anonymous.struct" {
                 context
                     .current_struct_names
-                    .insert(name.to_string(), new_name.clone());
+                    .insert(name.to_string(), (new_name.clone(), expecting_union));
             }
 
             Ok(new_name)
@@ -490,6 +505,7 @@ impl ExpressionWithoutType {
 
     pub fn new_struct_name(
         name: &str,
+        expecting_union: bool,
         context: &mut ParseContext,
     ) -> Result<String, Box<dyn Error>> {
         // println!(
@@ -497,7 +513,14 @@ impl ExpressionWithoutType {
         //     context.outer_struct_names, context.current_struct_names
         // );
         if let Some(info) = context.current_struct_names.get(name) {
-            Ok(info.clone())
+            if info.1 != expecting_union {
+                return Err(format!(
+                    "Conflicting definitions of struct and union with tag {}",
+                    name
+                )
+                .into());
+            }
+            Ok(info.0.clone())
         } else {
             // ignore the outer scope, this is an EXPLICIT declaration of a new struct type
             context.num_structs += 1;
@@ -507,7 +530,7 @@ impl ExpressionWithoutType {
             if name != "anonymous.struct" {
                 context
                     .current_struct_names
-                    .insert(name.to_string(), new_name.clone());
+                    .insert(name.to_string(), (new_name.clone(), expecting_union));
             }
 
             Ok(new_name)

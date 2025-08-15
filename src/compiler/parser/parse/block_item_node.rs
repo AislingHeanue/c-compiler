@@ -12,8 +12,8 @@ use std::{
 pub struct Scopes {
     current_vars: HashMap<String, Identity>,
     outer_vars: HashMap<String, Identity>,
-    current_structs: HashMap<String, String>,
-    outer_structs: HashMap<String, String>,
+    current_structs: HashMap<String, (String, bool)>,
+    outer_structs: HashMap<String, (String, bool)>,
 }
 
 impl Parse<Vec<BlockItemNode>> for VecDeque<Token> {

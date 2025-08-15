@@ -652,9 +652,14 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     .into(),
             )),
             ExpressionWithoutType::Dot(src, item) => {
-                let struct_name = ExpressionWithoutType::get_struct_name(&src);
+                let left_type = src.1.clone().unwrap();
+                let struct_type_info = if let Type::Struct(ref name, ref is_union) = left_type {
+                    (name.clone(), *is_union)
+                } else {
+                    unreachable!()
+                };
                 let offset =
-                    ExpressionWithoutType::get_member_from_struct(&struct_name, &item, context);
+                    ExpressionWithoutType::get_member_from_struct(struct_type_info, &item, context);
                 let (mut instructions, new_left): D = src.convert(context)?;
                 match new_left {
                     Destination::Direct(BirdsValueNode::Var(v)) => {
@@ -694,9 +699,9 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 }
             }
             ExpressionWithoutType::Arrow(src, item) => {
-                let struct_name = if let Type::Pointer(p) = src.1.as_ref().unwrap() {
-                    if let Type::Struct(ref name, _) = **p {
-                        name.clone()
+                let type_info = if let Type::Pointer(p) = src.1.as_ref().unwrap() {
+                    if let Type::Struct(ref name, ref is_union) = **p {
+                        (name.clone(), *is_union)
                     } else {
                         unreachable!()
                     }
@@ -704,7 +709,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     unreachable!()
                 };
                 let offset =
-                    ExpressionWithoutType::get_member_from_struct(&struct_name, &item, context);
+                    ExpressionWithoutType::get_member_from_struct(type_info, &item, context);
                 let (mut instructions, new_left): E = src.convert(context)?;
 
                 let new_dst = if offset != 0 {
@@ -818,21 +823,16 @@ impl ExpressionWithoutType {
         }
     }
 
-    fn get_member_from_struct(struct_name: &str, item: &str, context: &mut ConvertContext) -> u64 {
-        let info = context.structs.get(struct_name).unwrap().clone();
+    fn get_member_from_struct(
+        (struct_name, is_union): (String, bool),
+        item: &str,
+        context: &mut ConvertContext,
+    ) -> usize {
+        let info = context.structs.get(&struct_name).unwrap().clone();
         info.members
-            .find_name(item, &mut context.structs)
+            .find_name(item, is_union, &mut context.structs)
             .unwrap()
             .1
-    }
-
-    fn get_struct_name(src: &ExpressionNode) -> String {
-        let left_type = src.1.clone().unwrap();
-        if let Type::Struct(name, _) = left_type {
-            name
-        } else {
-            unreachable!()
-        }
     }
 }
 

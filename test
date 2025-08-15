@@ -27,7 +27,7 @@ stage=$2
 if [[ -n $stage ]]; then
 	results=$($root_test_path/test_compiler ./$binary_path --chapter "$chapter" --stage "$stage" $extra_args 2>&1)
 else
-	results=$($root_test_path/test_compiler ./$binary_path --chapter "$chapter" --increment $extra_args 2>&1)
+	results=$($root_test_path/test_compiler ./$binary_path --chapter "$chapter" $extra_args 2>&1)
 fi
 
 passing=true

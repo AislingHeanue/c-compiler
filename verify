@@ -39,7 +39,7 @@ parse)
 	# Pretty print the output tree as something like C.
 	bash -c "$binary $file --parse > out && bat -l go --paging=never < out || cat out; rm out"
 	;;
-validate)
+
 	# Pretty print the output tree as something like C.
 	bash -c "$binary $file --validate > out && bat -l go --paging=never < out || cat out; rm out"
 	;;

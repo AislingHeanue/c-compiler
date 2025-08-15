@@ -52,13 +52,7 @@ pub struct TypeDeclaration {
 pub struct StructDeclaration {
     pub name: String,
     pub members: Option<Vec<StructMember>>,
-    pub kind: StructKind,
-}
-
-#[derive(Debug, Clone)]
-pub enum StructKind {
-    Struct,
-    Union,
+    pub is_union: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -225,6 +219,7 @@ pub struct StructInfo {
     pub alignment: u64,
     pub size: u64,
     pub members: Vec<MemberEntry>,
+    // pub is_union: bool,
 }
 
 #[derive(Debug)]

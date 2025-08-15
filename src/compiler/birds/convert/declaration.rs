@@ -196,8 +196,7 @@ impl InitialiserNode {
 
                 Ok(instructions)
             }
-            (InitialiserWithoutType::Compound(initialisers), Type::Struct(name, _)) => {
-                // FIXME: union
+            (InitialiserWithoutType::Compound(initialisers), Type::Struct(name, is_union)) => {
                 let info = context.structs.get(&name).unwrap().clone();
                 let mut instructions = Vec::new();
 
@@ -219,7 +218,7 @@ impl InitialiserNode {
                 context.current_initialiser_offset = original_offset;
                 for (init, (_, member_offset)) in initialisers
                     .into_iter()
-                    .zip(info.members.flatten(&mut context.structs))
+                    .zip(info.members.flatten(is_union, &mut context.structs))
                 {
                     let difference_in_size = member_offset as i32
                         - (context.current_initialiser_offset - original_offset);

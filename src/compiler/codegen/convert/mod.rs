@@ -102,8 +102,8 @@ fn classify_function_args(
             // because it would have decayed to a pointer in all cases. It also can't be void
             // because that's also crimes.
             let var_name = get_var_name(&v);
-            let struct_name = get_struct_name(&var_name, context);
-            let classes = classify_struct(struct_name, context);
+            let struct_type = context.symbols.get(&var_name).unwrap().symbol_type.clone();
+            let classes = classify_struct(&struct_type, context);
 
             let mut throw_it_onto_the_stack = true;
             let size = t.get_size();
@@ -159,8 +159,9 @@ fn classify_return(
         out.integer.push((v.convert(context)?, t));
     } else {
         let var_name = get_var_name(&v);
-        let struct_name = get_struct_name(&var_name, context);
-        let classes = classify_struct(struct_name, context);
+        let struct_type = context.symbols.get(&var_name).unwrap().symbol_type.clone();
+
+        let classes = classify_struct(&struct_type, context);
         let size = t.get_size();
 
         if *classes.first().unwrap() == Class::Memory {
@@ -203,13 +204,12 @@ pub fn classify_return_type(
 
         if assembly_type == AssemblyType::Double || is_scalar {
             Ok(false)
-        } else if let Type::Struct(name, _) = t {
-            // FIXME: unions
-            let classes = classify_struct(name.to_string(), context);
+        } else if let Type::Struct(_, _) = t {
+            let classes = classify_struct(t, context);
 
             Ok(*classes.first().unwrap() == Class::Memory)
         } else {
-            // return type already can't be arrays or functions?
+            // return type already can't be arrays or functions
             unreachable!()
         }
     }
@@ -223,24 +223,23 @@ fn get_var_name(v: &BirdsValueNode) -> String {
     }
 }
 
-fn get_struct_name(var_name: &str, context: &mut ConvertContext) -> String {
-    let t = context.symbols.get(var_name).unwrap().symbol_type.clone();
-    if let Type::Struct(name, _) = t {
-        name
+fn classify_struct(struct_type: &Type, context: &mut ConvertContext) -> Vec<Class> {
+    let (name, _is_union) = if let Type::Struct(name, is_union) = struct_type {
+        (name, is_union)
     } else {
         unreachable!()
-    }
-}
-
-fn classify_struct(name: String, context: &mut ConvertContext) -> Vec<Class> {
-    if let Some(classes) = context.struct_classes.get(&name) {
+    };
+    if let Some(classes) = context.struct_classes.get(name) {
         return classes.to_vec();
     }
-    let info = context.structs.get(&name).unwrap().clone();
+    let info = context.structs.get(name).unwrap().clone();
     let out = if info.size > 16 {
         vec![Class::Memory; u64::div_ceil(info.size, 8) as usize]
     } else {
-        let member_types = flatten_struct_types(&info, context);
+        let member_types = flatten_struct_types(struct_type, context);
+        if name.starts_with("small_struct_arr_and_dbl") {
+            println!("{} {:?} {:?}", name, info, member_types);
+        }
         // size > 8 means there are exactly 2 eightbytes we need to classify
         // (this would probably be more complicated if we supported floats)
         if info.size > 8 {
@@ -261,25 +260,69 @@ fn classify_struct(name: String, context: &mut ConvertContext) -> Vec<Class> {
             }
         }
     };
-    context.struct_classes.insert(name, out.clone());
+    context.struct_classes.insert(name.to_string(), out.clone());
     out
 }
 
-fn flatten_struct_types(info: &StructInfo, context: &mut ConvertContext) -> Vec<Type> {
-    info.members
-        .iter()
-        .flat_map(|m| match &m.member_type {
-            Type::Struct(name, _) => {
-                // FIXME: what does this even mean in union's case?
-                let inner_info = context.structs.get(name).unwrap().clone();
-                flatten_struct_types(&inner_info, context)
+fn flatten_struct_types(this_type: &Type, context: &mut ConvertContext) -> Vec<Type> {
+    match this_type {
+        Type::Struct(name, false) => {
+            let info = context.structs.get(name).unwrap().clone();
+            info.members
+                .iter()
+                .flat_map(|m| flatten_struct_types(&m.member_type, context))
+                .collect()
+        }
+        Type::Struct(name, true) => {
+            // this whole block is a hack and should probably be moved to the parent function,
+            // but for now that would involve rewriting some code I don't want to touch, at least
+            // until/if I add more types eg. float
+            let info = context.structs.get(name).unwrap().clone();
+            let mut type_possibilities = Vec::new();
+            for member in info.members {
+                type_possibilities.push(flatten_struct_types(&member.member_type, context));
             }
-            Type::Array(t, size) => {
-                vec![*t.clone(); (*size) as usize]
+            if info.size <= 8 {
+                let mut out_type = Type::Double; // so that we get [Class::Sse]
+                for possibility in type_possibilities {
+                    if possibility.iter().any(|t| t.class() != Class::Sse) {
+                        out_type = Type::Long; // so that we get [Class::Integer]
+                    }
+                }
+                vec![out_type] // so that the resulting class is [Integer]
+            } else {
+                // we can now assume we need to return 2 classes exactly since if size > 16 then we
+                // write to memory automatically
+                let mut first_out_type = Type::Double;
+                let mut second_out_type = Type::Double;
+                for possibility in type_possibilities {
+                    if possibility.first().unwrap().class() != Class::Sse {
+                        first_out_type = Type::Long;
+                    }
+                    if possibility
+                        .iter()
+                        .map(|t| t.get_size(&mut context.structs))
+                        .sum::<u64>()
+                        > 8
+                        && possibility.last().unwrap().class() != Class::Sse
+                    {
+                        second_out_type = Type::Long;
+                    }
+                }
+                vec![first_out_type, second_out_type]
             }
-            t => vec![t.clone()],
-        })
-        .collect()
+        }
+        Type::Array(inner_type, size) => {
+            let out_types = flatten_struct_types(inner_type, context);
+            // if we encounter an array of size N, then flatten the inner type and
+            // duplicate it N times
+            vec![out_types; *size as usize]
+                .into_iter()
+                .flatten()
+                .collect()
+        }
+        _ => vec![this_type.clone()],
+    }
 }
 
 fn create_static_constant(

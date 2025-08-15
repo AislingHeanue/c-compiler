@@ -9,7 +9,7 @@ use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::{
         BlockItemNode, DeclarationNode, Declarator, FunctionDeclaration, StructDeclaration,
-        StructKind, TypeDeclaration, VariableDeclaration,
+        TypeDeclaration, VariableDeclaration,
     },
     types::StorageClass,
 };
@@ -94,13 +94,12 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                             return Err("Leftover tokens parsing a struct declaration".into());
                         }
 
-                        let is_union = match struct_declaration.kind {
-                            StructKind::Struct => false,
-                            StructKind::Union => true,
-                        };
                         let declarator: Declarator = self.parse(context)?;
                         (
-                            Type::Struct(struct_declaration.name.clone(), is_union),
+                            Type::Struct(
+                                struct_declaration.name.clone(),
+                                struct_declaration.is_union,
+                            ),
                             declarator,
                             Some(struct_declaration),
                         )

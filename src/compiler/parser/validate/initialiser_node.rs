@@ -86,8 +86,9 @@ impl InitialiserNode {
                 }
             }
             (Type::Struct(_, _), InitialiserWithoutType::Single(_)) => {
-                // FIXME: unions?
-                return Err("Structs must be initialised with a compound expression".into());
+                return Err(
+                    "Structs and unions must be initialised with a compound expression".into(),
+                );
             }
             (_, InitialiserWithoutType::Single(ref i)) => {
                 if matches!(target_type, Type::Pointer(_)) && !i.equals_null_pointer() {
@@ -104,8 +105,14 @@ impl InitialiserNode {
                 vec![c.convert_to(target_type)]
             }
             (Type::Array(t, size), InitialiserWithoutType::Compound(ref mut initialisers)) => {
-                if initialisers.len() > (*size).try_into().unwrap() {
-                    return Err("Too many initialisers in static declaration".into());
+                let expected_count = (*size).try_into().unwrap();
+                if initialisers.len() > expected_count {
+                    return Err(format!(
+                        "Too many initialisers in static declaration of array, got {}, expected {}",
+                        initialisers.len(),
+                        expected_count
+                    )
+                    .into());
                 }
                 let mut statics: Vec<StaticInitialiser> = process_results(
                     initialisers
@@ -121,15 +128,21 @@ impl InitialiserNode {
                 }
                 statics
             }
-            (Type::Struct(name, _), InitialiserWithoutType::Compound(ref mut initialisers)) => {
-                // FIXME: unions
+            (
+                Type::Struct(name, is_union),
+                InitialiserWithoutType::Compound(ref mut initialisers),
+            ) => {
                 let info = context
                     .structs
                     .get(name)
                     .ok_or::<Box<dyn Error>>("Can't initialise an incomplete struct".into())?
                     .clone();
 
-                if initialisers.len() > info.members.count(&mut context.structs) {
+                if *is_union {
+                    if initialisers.len() > 1 {
+                        return Err("Too many initialisers in static declaration of union".into());
+                    }
+                } else if initialisers.len() > info.members.count(*is_union, &mut context.structs) {
                     return Err("Too many initialisers in static declaration of struct".into());
                 }
 
@@ -137,7 +150,7 @@ impl InitialiserNode {
                 let mut statics = Vec::new();
                 for (init, (member, member_offset)) in initialisers
                     .iter_mut()
-                    .zip(info.members.flatten(&mut context.structs))
+                    .zip(info.members.flatten(*is_union, &mut context.structs))
                 {
                     if member_offset as u64 != offset {
                         statics.push(StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
@@ -205,25 +218,30 @@ impl InitialiserNode {
                     c_init.push(InitialiserNode::zero(t, context));
                 }
             }
-            (Type::Struct(name, _), InitialiserWithoutType::Compound(ref mut c_init)) => {
-                // FIXME: unions
+            (Type::Struct(name, is_union), InitialiserWithoutType::Compound(ref mut c_init)) => {
                 let info = context
                     .structs
                     .get(name)
                     .ok_or::<Box<dyn Error>>("Can't initialise an incomplete struct".into())?
                     .clone();
 
-                if c_init.len() > info.members.count(&mut context.structs) {
-                    return Err("Too many initialisers in declaration of struct".into());
+                let expected_count = info.members.count(*is_union, &mut context.structs);
+                if c_init.len() > expected_count {
+                    return Err(format!(
+                        "Too many initialisers in declaration of struct, got {}, expected {}",
+                        c_init.len(),
+                        expected_count
+                    )
+                    .into());
                 }
 
                 for (init, (member, _)) in c_init
                     .iter_mut()
-                    .zip(info.members.flatten(&mut context.structs))
+                    .zip(info.members.flatten(*is_union, &mut context.structs))
                 {
                     init.check_types(&member.member_type, context)?;
                 }
-                for i in c_init.clone().len()..info.members.count(&mut context.structs) {
+                for i in c_init.clone().len()..info.members.count(*is_union, &mut context.structs) {
                     c_init.push(InitialiserNode::zero(
                         &info.members.get(i).unwrap().member_type,
                         context,
@@ -311,9 +329,13 @@ impl InitialiserNode {
                 )),
                 Some(target_type.clone()),
             ),
-            Type::Struct(name, _) => {
-                // FIXME: unions
-                let members = context.structs.get(name).unwrap().members.clone();
+            Type::Struct(name, is_union) => {
+                let mut members = context.structs.get(name).unwrap().members.clone();
+                // only zero the first value in a union
+                if *is_union {
+                    members = vec![members.first().unwrap().clone()];
+                }
+
                 let mut c_init = Vec::new();
                 for m in members {
                     c_init.push(InitialiserNode::zero(&m.member_type, context));

@@ -3,8 +3,8 @@ use itertools::Itertools;
 use super::{
     BinaryOperatorNode, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
     ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
-    InitialiserWithoutType, ProgramNode, StatementNode, StructDeclaration, StructKind,
-    StructMember, Type, TypeDeclaration, UnaryOperatorNode, VariableDeclaration,
+    InitialiserWithoutType, ProgramNode, StatementNode, StructDeclaration, StructMember, Type,
+    TypeDeclaration, UnaryOperatorNode, VariableDeclaration,
 };
 use std::{borrow::Borrow, fmt::Display};
 
@@ -302,10 +302,7 @@ impl CodeDisplay for DeclarationNode {
 
 impl CodeDisplay for StructDeclaration {
     fn show(&self, context: &mut DisplayContext) -> String {
-        let word = match self.kind {
-            StructKind::Struct => "struct",
-            StructKind::Union => "union",
-        };
+        let word = if self.is_union { "union" } else { "struct" };
         if let Some(m) = &self.members {
             format!(
                 "type {} {}{{{}{}}}",

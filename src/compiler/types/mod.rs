@@ -105,15 +105,29 @@ pub trait FindMemberName {
     fn find_name(
         &self,
         name: &str,
+        self_is_union: bool,
         structs: &mut HashMap<String, StructInfo>,
-    ) -> Option<(MemberEntry, u64)>;
+    ) -> Option<(MemberEntry, usize)>;
 }
 
 pub trait Count {
-    fn count(&self, structs: &mut HashMap<String, StructInfo>) -> usize;
+    fn count(&self, self_is_union: bool, structs: &mut HashMap<String, StructInfo>) -> usize;
 }
 
 pub trait Flatten {
     type Output;
-    fn flatten(&self, structs: &mut HashMap<String, StructInfo>) -> Self::Output;
+    fn flatten(
+        &self,
+        self_is_union: bool,
+        structs: &mut HashMap<String, StructInfo>,
+    ) -> Self::Output;
+}
+
+pub trait FlattenAndExpandUnions {
+    type Output;
+    fn flatten_and_expand_unions(
+        &self,
+        self_is_union: bool,
+        structs: &mut HashMap<String, StructInfo>,
+    ) -> Self::Output;
 }

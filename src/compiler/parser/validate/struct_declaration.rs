@@ -22,13 +22,17 @@ impl CheckTypes for StructDeclaration {
         };
 
         if context.structs.contains_key(&self.name) {
-            return Err(format!("Struct {} is defined twice in the same scope", self.name).into());
+            return Err(format!(
+                "Struct or union {} is defined twice in the same scope",
+                self.name
+            )
+            .into());
         }
 
         for m in members.iter_mut() {
             if let Some(ref name) = m.name {
                 if context.current_struct_members.contains(name) {
-                    return Err("Repeated name in struct definition".into());
+                    return Err("Repeated name in struct or union definition".into());
                 }
                 context.current_struct_members.insert(name.clone());
             }
@@ -61,16 +65,34 @@ impl CheckTypes for StructDeclaration {
         let mut alignment = 1;
         for m in members.iter_mut() {
             let this_alignment = m.member_type.get_alignment(&mut context.structs);
-            let this_offset = align_stack_size(size, this_alignment);
+
+            let this_offset = if self.is_union {
+                // union entries are all at offset zero.
+                0
+            } else {
+                // struct entries are sequential (with padding if needed)
+                align_stack_size(size, this_alignment)
+            };
+
             entries.push(MemberEntry {
                 member_type: m.member_type.clone(),
                 name: m.name.clone(),
                 offset: this_offset,
             });
+
             alignment = u64::max(alignment, this_alignment);
-            size = this_offset + m.member_type.get_size(&mut context.structs);
+
+            size = if self.is_union {
+                // sizeof union is the size of its largest member (aligned)
+                u64::max(size, m.member_type.get_size(&mut context.structs))
+            } else {
+                // sizeof struct is the sum of its member sizes and padding (aligned)
+                this_offset + m.member_type.get_size(&mut context.structs)
+            }
         }
+
         size = align_stack_size(size, alignment);
+
         context.structs.insert(
             self.name.clone(),
             StructInfo {
@@ -92,14 +114,12 @@ impl CheckTypes for StructMember {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         if let Some(ref name) = self.name {
             if context.current_struct_members.contains(name) {
-                return Err(format!("Duplicate name in struct: {:?}", name).into());
+                return Err(format!("Duplicate name in struct or union: {:?}", name).into());
             }
             context.current_struct_members.insert(name.clone());
         } else if let Type::Struct(ref name, _) = self.member_type {
-            // FIXME: unions
-
-            // this is an anonymous struct. Treat all its members as if they're embedded in this
-            // struct
+            // this is an anonymous struct. Type check it and make it a member of this struct like
+            // any other member. Field resolution is handled by Vec<MemberEntry>::flatten() etc.
             let mut info = context.structs.get(name).unwrap().clone();
             for member in info.members.iter_mut() {
                 member.member_type.check_types(context)?;

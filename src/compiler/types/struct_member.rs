@@ -2,37 +2,92 @@ use std::collections::HashMap;
 
 use crate::compiler::parser::StructInfo;
 
-use super::{Count, FindMemberName, Flatten, MemberEntry, Type};
+use super::{Count, FindMemberName, Flatten, FlattenAndExpandUnions, MemberEntry, Type};
 
 impl Count for Vec<MemberEntry> {
-    fn count(&self, structs: &mut HashMap<String, StructInfo>) -> usize {
-        self.iter().map(|m| m.count(structs)).sum()
+    // counting for initialisers, so unions only contribute one value
+    fn count(&self, self_is_union: bool, structs: &mut HashMap<String, StructInfo>) -> usize {
+        self.flatten(self_is_union, structs).len()
+    }
+}
+
+impl FindMemberName for Vec<MemberEntry> {
+    fn find_name(
+        &self,
+        name: &str,
+        self_is_union: bool,
+        structs: &mut HashMap<String, StructInfo>,
+    ) -> Option<(MemberEntry, usize)> {
+        self.flatten_and_expand_unions(self_is_union, structs)
+            .iter()
+            .find_map(|(m, offset)| {
+                if let Some(m_name) = &m.name {
+                    if m_name == name {
+                        Some((m.clone(), *offset))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
     }
 }
 
 impl Flatten for Vec<MemberEntry> {
     type Output = Vec<(MemberEntry, usize)>;
 
-    fn flatten(&self, structs: &mut HashMap<String, StructInfo>) -> Self::Output {
-        self.iter().flat_map(|m| m.flatten(structs)).collect()
+    fn flatten(
+        &self,
+        self_is_union: bool,
+        structs: &mut HashMap<String, StructInfo>,
+    ) -> Self::Output {
+        if self_is_union {
+            // only get the first entry in a given union. This is how union initialisers work.
+            self.first().unwrap().flatten(self_is_union, structs)
+        } else {
+            self.iter()
+                .flat_map(|m| m.flatten(self_is_union, structs))
+                .collect()
+        }
+    }
+}
+impl FlattenAndExpandUnions for Vec<MemberEntry> {
+    type Output = Vec<(MemberEntry, usize)>;
+
+    fn flatten_and_expand_unions(
+        &self,
+        self_is_union: bool,
+        structs: &mut HashMap<String, StructInfo>,
+    ) -> Self::Output {
+        self.iter()
+            .flat_map(|m| m.flatten_and_expand_unions(self_is_union, structs))
+            .collect()
     }
 }
 
 impl Flatten for MemberEntry {
     type Output = Vec<(MemberEntry, usize)>;
 
-    fn flatten(&self, structs: &mut HashMap<String, StructInfo>) -> Self::Output {
-        match &self.name {
-            Some(_) => {
+    fn flatten(
+        &self,
+        self_is_union: bool,
+        structs: &mut HashMap<String, StructInfo>,
+    ) -> Self::Output {
+        match (&self.name, self_is_union) {
+            (Some(_), _) => {
                 vec![(self.clone(), self.offset as usize)]
             }
-            None => {
+            (None, true) => {
+                // this is an anonymous entry within a union. Treat it as a normal sub-struct
+                vec![(self.clone(), self.offset as usize)]
+            }
+            (None, false) => {
                 // this is an embedded entry, so check there too!
-                // FIXME: unions
-                if let Type::Struct(ref s_name, _) = self.member_type {
+                if let Type::Struct(ref s_name, member_is_union) = self.member_type {
                     let info = structs.get(s_name).unwrap().clone();
                     info.members
-                        .flatten(structs)
+                        .flatten(member_is_union, structs)
                         .into_iter()
                         .map(|(member, offset)| (member, offset + self.offset as usize))
                         .collect()
@@ -43,59 +98,28 @@ impl Flatten for MemberEntry {
         }
     }
 }
+impl FlattenAndExpandUnions for MemberEntry {
+    type Output = Vec<(MemberEntry, usize)>;
 
-impl FindMemberName for Vec<MemberEntry> {
-    fn find_name(
+    fn flatten_and_expand_unions(
         &self,
-        name: &str,
+        self_is_union: bool,
         structs: &mut HashMap<String, StructInfo>,
-    ) -> Option<(MemberEntry, u64)> {
-        self.iter().find_map(|m| m.find_name(name, structs))
-    }
-}
-
-impl MemberEntry {
-    fn find_name(
-        &self,
-        name: &str,
-        structs: &mut HashMap<String, StructInfo>,
-    ) -> Option<(MemberEntry, u64)> {
-        match &self.name {
-            Some(n) => {
-                if n == name {
-                    Some((self.clone(), self.offset))
-                } else {
-                    None
-                }
+    ) -> Self::Output {
+        match (&self.name, self_is_union) {
+            (Some(_), _) => {
+                vec![(self.clone(), self.offset as usize)]
             }
-            None => {
-                // this is an embedded entry, so check there too!
-                // FIXME: unions
-                if let Type::Struct(ref s_name, _) = self.member_type {
+            (None, _) => {
+                // this is an embedded entry, so check there too! This function is used for
+                // dot and arrow operations, and therefore we need every union member as well.
+                if let Type::Struct(ref s_name, member_is_union) = self.member_type {
                     let info = structs.get(s_name).unwrap().clone();
                     info.members
-                        .find_name(name, structs)
-                        .map(|(member, offset)| (member, offset + self.offset))
-                } else {
-                    unreachable!()
-                }
-            }
-        }
-    }
-
-    fn count(&self, structs: &mut HashMap<String, StructInfo>) -> usize {
-        match &self.name {
-            Some(_) => 1,
-            None => {
-                // this is an embedded entry, so count there too!
-                if let Type::Struct(ref s_name, is_union) = self.member_type {
-                    if is_union {
-                        // unions always store one entry at a time
-                        1
-                    } else {
-                        let info = structs.get(s_name).unwrap().clone();
-                        info.members.count(structs)
-                    }
+                        .flatten_and_expand_unions(member_is_union, structs)
+                        .into_iter()
+                        .map(|(member, offset)| (member, offset + self.offset as usize))
+                        .collect()
                 } else {
                     unreachable!()
                 }

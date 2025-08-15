@@ -1,7 +1,7 @@
 use super::{declarator::OutputWithStruct, Parse, ParseContext, StructMember, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::{Declarator, ExpressionWithoutType, StructDeclaration, StructKind},
+    parser::{Declarator, ExpressionWithoutType, StructDeclaration},
 };
 use std::{collections::VecDeque, error::Error};
 
@@ -9,11 +9,7 @@ impl Parse<Type> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Type, Box<dyn Error>> {
         if matches!(self.peek()?, Token::KeywordStruct | Token::KeywordUnion) {
             let declaration: StructDeclaration = self.parse_struct(true, context)?;
-            let is_union = match declaration.kind {
-                StructKind::Struct => false,
-                StructKind::Union => true,
-            };
-            return Ok(Type::Struct(declaration.name, is_union));
+            return Ok(Type::Struct(declaration.name, declaration.is_union));
         }
         let mut out = Vec::new();
         while !self.is_empty() && self.peek()?.is_type(context) {
@@ -93,12 +89,8 @@ impl Parse<(Type, Option<StructDeclaration>)> for VecDeque<Token> {
     ) -> Result<(Type, Option<StructDeclaration>), Box<dyn Error>> {
         if matches!(self.peek()?, Token::KeywordStruct | Token::KeywordUnion) {
             let declaration: StructDeclaration = self.parse_struct(true, context)?;
-            let is_union = match declaration.kind {
-                StructKind::Struct => false,
-                StructKind::Union => true,
-            };
             Ok((
-                Type::Struct(declaration.name.clone(), is_union),
+                Type::Struct(declaration.name.clone(), declaration.is_union),
                 Some(declaration),
             ))
         } else {
@@ -122,9 +114,9 @@ impl ParseStructDeclaration for VecDeque<Token> {
         implicit: bool,
         context: &mut ParseContext,
     ) -> Result<StructDeclaration, Box<dyn Error>> {
-        let kind = match self.read()? {
-            Token::KeywordStruct => StructKind::Struct,
-            Token::KeywordUnion => StructKind::Union,
+        let is_union = match self.read()? {
+            Token::KeywordStruct => false,
+            Token::KeywordUnion => true,
             _ => return Err("Invalid token, expecting 'struct' or 'union'".into()),
         };
 
@@ -141,9 +133,9 @@ impl ParseStructDeclaration for VecDeque<Token> {
         // or declare that this is a new struct. Then, we evaluate its members with the context
         // that this struct now exists.
         let new_name = if implicit {
-            ExpressionWithoutType::resolve_struct_name(&name, context)?
+            ExpressionWithoutType::resolve_struct_name(&name, is_union, context)?
         } else {
-            ExpressionWithoutType::new_struct_name(&name, context)?
+            ExpressionWithoutType::new_struct_name(&name, is_union, context)?
         };
         let members = if !self.is_empty() && self.peek()? == Token::OpenBrace {
             self.expect(Token::OpenBrace)?;
@@ -167,7 +159,7 @@ impl ParseStructDeclaration for VecDeque<Token> {
         Ok(StructDeclaration {
             name: new_name,
             members,
-            kind,
+            is_union,
             // nameless,
         })
     }
@@ -181,12 +173,11 @@ impl Parse<StructMember> for VecDeque<Token> {
                 let embedded_struct_declaration: StructDeclaration =
                     type_tokens.parse_struct(true, context)?;
                 self.expect(Token::SemiColon)?;
-                let is_union = match embedded_struct_declaration.kind {
-                    StructKind::Struct => false,
-                    StructKind::Union => true,
-                };
                 Ok(StructMember {
-                    member_type: Type::Struct(embedded_struct_declaration.name.clone(), is_union),
+                    member_type: Type::Struct(
+                        embedded_struct_declaration.name.clone(),
+                        embedded_struct_declaration.is_union,
+                    ),
                     name: None,
                     struct_declaration: Some(embedded_struct_declaration),
                 })

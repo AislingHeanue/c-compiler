@@ -206,9 +206,7 @@ impl Token {
                 // strip first and last characters (')
                 Token::CharacterConstant(Token::parse_character(&text[1..text.len() - 1]))
             }
-            // TODO: Fix
             Token::StringLiteral(_) => {
-                // strip first and last characters (")
                 Token::StringLiteral(Token::parse_string(text[1..text.len() - 1].to_string()))
             }
             Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<i64>().unwrap()),
