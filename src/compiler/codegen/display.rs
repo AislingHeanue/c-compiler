@@ -596,7 +596,7 @@ impl CodeDisplay for Instruction {
                     indent = context.indent,
                 )
             }
-            Instruction::JmpCondition(c, s) => {
+            Instruction::JmpCondition(c, s, _) => {
                 let label_start = if context.is_mac { "L" } else { ".L" };
                 format!(
                     "{:indent$}j{} {}{}",
@@ -607,7 +607,7 @@ impl CodeDisplay for Instruction {
                     indent = context.indent,
                 )
             }
-            Instruction::SetCondition(c, dst) => {
+            Instruction::SetCondition(c, dst, _) => {
                 context.short();
                 let out = format!(
                     "{:indent$}set{} {}",

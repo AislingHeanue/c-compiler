@@ -87,10 +87,12 @@ enum Instruction {
     // expand a 32 bit number to 64 bits. EAX -> EDX+EAX.
     Cdq(AssemblyType),
     Jmp(String),
-    JmpCondition(ConditionCode, String),
+    // condition code, label name, need to check for NaN
+    JmpCondition(ConditionCode, String, bool),
     // write 0 or 1 to the first byte of dst based on Cmp output.
     // only takes 1-byte operands at dst
-    SetCondition(ConditionCode, Operand),
+    // condition code, label name, need to check for NaN
+    SetCondition(ConditionCode, Operand, bool),
     // named label to jump to. Follows different indentation rules to others.
     Label(String),
     // only takes 4-byte operands at dst

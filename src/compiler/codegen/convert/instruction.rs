@@ -91,7 +91,11 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                         Operand::Imm(ImmediateValue::Signed(0)),
                         dst.clone().convert(context)?,
                     ),
-                    Instruction::SetCondition(ConditionCode::E, dst.convert(context)?),
+                    Instruction::SetCondition(
+                        ConditionCode::E,
+                        dst.convert(context)?,
+                        src_type == AssemblyType::Double,
+                    ),
                 ]
             }
             BirdsInstructionNode::Unary(op, src, dst) => {
@@ -207,11 +211,16 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 let (left_type, is_signed, _) = AssemblyType::infer(&left, context)?;
                 // use different condition codes if the expression type is unsigned
                 let instruction = if is_signed && left_type != AssemblyType::Double {
-                    Instruction::SetCondition(op.convert(context)?, dst.clone().convert(context)?)
+                    Instruction::SetCondition(
+                        op.convert(context)?,
+                        dst.clone().convert(context)?,
+                        false,
+                    )
                 } else {
                     Instruction::SetCondition(
                         op.convert_condition_unsigned(context)?,
                         dst.clone().convert(context)?,
+                        left_type == AssemblyType::Double,
                     )
                 };
 
@@ -365,7 +374,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             Operand::Reg(Register::XMM0),
                             src.convert(context)?,
                         ),
-                        Instruction::JmpCondition(ConditionCode::E, s),
+                        Instruction::JmpCondition(ConditionCode::E, s, true),
                     ]
                 } else {
                     vec![
@@ -374,7 +383,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             Operand::Imm(ImmediateValue::Signed(0)),
                             src.convert(context)?,
                         ),
-                        Instruction::JmpCondition(ConditionCode::E, s),
+                        Instruction::JmpCondition(ConditionCode::E, s, false),
                     ]
                 }
             }
@@ -394,7 +403,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             Operand::Reg(Register::XMM0),
                             src.convert(context)?,
                         ),
-                        Instruction::JmpCondition(ConditionCode::Ne, s),
+                        Instruction::JmpCondition(ConditionCode::Ne, s, true),
                     ]
                 } else {
                     vec![
@@ -403,7 +412,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             Operand::Imm(ImmediateValue::Signed(0)),
                             src.convert(context)?,
                         ),
-                        Instruction::JmpCondition(ConditionCode::Ne, s),
+                        Instruction::JmpCondition(ConditionCode::Ne, s, false),
                     ]
                 }
             }
@@ -619,6 +628,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             Instruction::JmpCondition(
                                 ConditionCode::Ae,
                                 format!("out_of_range_{}", &instruction_label),
+                                true,
                             ),
                             Instruction::Cvttsd2si(
                                 AssemblyType::Quadword,
@@ -751,6 +761,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             Instruction::JmpCondition(
                                 ConditionCode::L,
                                 format!("out_of_range_{}", &instruction_label),
+                                false,
                             ),
                             Instruction::Cvtsi2sd(
                                 AssemblyType::Quadword,

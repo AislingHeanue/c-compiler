@@ -13,7 +13,7 @@ stage=$2
 name=$(echo "$3" | cut -d. -f1)
 
 # first_file=$(find "$root_test_path/tests/chapter_$chapter/valid/extra_credit" -mindepth 1 -maxdepth 4 -name "$name.c")
-first_file=$(find "$root_test_path/tests/chapter_$chapter" -mindepth 1 -maxdepth 5 -name "$name.c")
+first_file=$(find "$root_test_path/tests/chapter_$chapter/valid" -mindepth 1 -maxdepth 5 -name "$name.c")
 
 # Flatten results in case there's more than one
 first_file=$(echo $first_file)
@@ -39,7 +39,7 @@ parse)
 	# Pretty print the output tree as something like C.
 	bash -c "$binary $file --parse > out && bat -l go --paging=never < out || cat out; rm out"
 	;;
-
+validate)
 	# Pretty print the output tree as something like C.
 	bash -c "$binary $file --validate > out && bat -l go --paging=never < out || cat out; rm out"
 	;;
