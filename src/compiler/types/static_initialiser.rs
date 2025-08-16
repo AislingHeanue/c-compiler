@@ -48,7 +48,6 @@ impl StaticInitialiser {
     }
 
     pub fn from_number<T: ApproximableOrdinal>(i: T, target: &Type) -> StaticInitialiser {
-        // make sure this isn't -0.0, for example
         match target {
             Type::Integer => StaticInitialiser::integer(i),
             Type::Long => StaticInitialiser::long(i),

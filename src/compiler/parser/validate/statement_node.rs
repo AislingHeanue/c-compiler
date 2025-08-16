@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error};
 
 use crate::compiler::{
     parser::{ExpressionNode, ExpressionWithoutType, StatementNode, SwitchMapKey},
-    types::{StaticInitialiser, Type},
+    types::{Constant, StaticInitialiser, Type},
 };
 
 use super::{CheckTypes, Validate, ValidateContext, ValidationPass};
@@ -216,7 +216,10 @@ impl CheckTypes for StatementNode {
                     .ok_or::<Box<dyn Error>>("Case is not in a switch statement".into())?;
 
                 let constant_value = if let ExpressionWithoutType::Constant(ref mut c) = e.0 {
-                    c.convert_ordinal_to(&target_type)
+                    if matches!(c, Constant::Double(_)) {
+                        return Err("Cannot have a double value in a switch case".into());
+                    }
+                    c.static_convert_number_to(&target_type)
                 } else {
                     return Err("Non constant expression found in case statement".into());
                 };

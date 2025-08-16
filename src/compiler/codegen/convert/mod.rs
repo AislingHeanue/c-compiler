@@ -3,7 +3,7 @@ use crate::compiler::{
     parser::StructInfo,
     types::{Class, StaticInitialiser, SymbolInfo, Type},
 };
-use itertools::process_results;
+use itertools::{process_results, Itertools};
 use std::{collections::HashMap, error::Error};
 
 use super::{
@@ -363,7 +363,11 @@ impl Convert<Program> for BirdsProgramNode {
     fn convert(self, context: &mut ConvertContext) -> Result<Program, Box<dyn Error>> {
         let mut body = self.body.convert(context)?;
 
-        for (name, (align, value)) in context.constants.iter() {
+        for (name, (align, value)) in context
+            .constants
+            .iter()
+            .sorted_by(|(a, _), (b, _)| a.cmp(b))
+        {
             body.push(TopLevel::StaticConstant(
                 name.clone(),
                 *align,

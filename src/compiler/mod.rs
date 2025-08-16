@@ -1,4 +1,4 @@
-use birds::birds;
+use birds::{birds, optimize};
 use codegen::codegen;
 use lexer::lex;
 use parser::{parse, validate};
@@ -8,6 +8,7 @@ use crate::CompileConfig;
 
 pub mod birds;
 pub mod codegen;
+pub mod flow_graph;
 pub mod lexer;
 pub mod parser;
 pub mod types;
@@ -41,13 +42,20 @@ pub fn compile(
     }
 
     let (birds_output, symbols, structs) = birds(parsed, symbols, structs)?;
+    // if config.only_birds {
+    //     println!("{:#?}", birds_output);
+    //     return Ok(());
+    // }
+
+    let (optimized, symbols, structs) =
+        optimize(birds_output, symbols, structs, config.optimize_config)?;
     if config.only_birds {
-        println!("{:#?}", birds_output);
+        println!("{:#?}", optimized);
         return Ok(());
     }
 
     let code = codegen(
-        birds_output,
+        optimized,
         config.add_comments,
         IS_LINUX,
         IS_MAC,

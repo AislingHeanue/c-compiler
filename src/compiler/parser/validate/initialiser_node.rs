@@ -102,7 +102,7 @@ impl InitialiserNode {
                     );
                 };
 
-                vec![c.convert_to(target_type)]
+                vec![c.static_convert_to(target_type)]
             }
             (Type::Array(t, size), InitialiserWithoutType::Compound(ref mut initialisers)) => {
                 let expected_count = (*size).try_into().unwrap();

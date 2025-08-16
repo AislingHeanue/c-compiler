@@ -10,6 +10,14 @@ struct CompileConfig {
     only_birds: bool,
     only_codegen: bool,
     add_comments: bool,
+    optimize_config: OptimizeConfig,
+}
+
+struct OptimizeConfig {
+    fold_constants: bool,
+    propagate_copies: bool,
+    eliminate_dead_code: bool,
+    eliminate_dead_stores: bool,
 }
 
 fn main() {
@@ -26,6 +34,10 @@ fn main() {
     let mut assembly_out = false;
     let mut add_comments = false;
     let mut to_object_file = false;
+    let mut fold_constants = false;
+    let mut propagate_copies = false;
+    let mut eliminate_dead_code = false;
+    let mut eliminate_dead_stores = false;
     for arg in &args[1..] {
         match arg.as_str() {
             "--lex" => only_lex = true,
@@ -34,13 +46,26 @@ fn main() {
             "--tacky" => only_birds = true,
             "--codegen" => only_codegen = true,
             "-S" => assembly_out = true,
+            "-s" => assembly_out = true,
             "--comments" => add_comments = true,
             "-c" => to_object_file = true,
+            "--fold-constants" => fold_constants = true,
+            "--propagate-copies" => propagate_copies = true,
+            "--eliminate-unreachable-code" => eliminate_dead_code = true,
+            "--eliminate-dead-stores" => eliminate_dead_stores = true,
+            "--optimize" => {
+                fold_constants = true;
+                propagate_copies = true;
+                eliminate_dead_code = true;
+                eliminate_dead_stores = true;
+            }
+
             t if t.len() > 1 && matches!(&t[..2], "-l" | "-L") => linker_args.push(arg.clone()),
             t if t.len() > 1 && matches!(&t[..2], "-i" | "-I") => {
                 preprocessor_args.push(arg.clone())
             }
             t if t.len() > 1 && t.ends_with(".s") => asm_input_names.push(arg.clone()),
+            t if t.starts_with("-") => panic!("unrecognised flag: {}", t),
             _ => filenames.push(arg.clone()),
         }
     }
@@ -62,9 +87,9 @@ fn main() {
         // println!("Preprocessing...");
         let mut args = vec!["-E", "-P", &filename, "-o", &preprocessed_filename];
         args.append(&mut preprocessor_args.iter().map(|s| s.as_str()).collect());
-        let res = Command::new("gcc").args(args).output().unwrap();
+        let res = Command::new("gcc").args(args.clone()).output().unwrap();
         if res.status.code() != Some(0) {
-            panic!("Preprocessor failed: {:?}", res);
+            panic!("Preprocessor failed: with args: '{:?}': {:?}", args, res);
         }
 
         // println!("Compiling...");
@@ -78,6 +103,12 @@ fn main() {
                 only_birds,
                 only_codegen,
                 add_comments,
+                optimize_config: OptimizeConfig {
+                    fold_constants,
+                    propagate_copies,
+                    eliminate_dead_code,
+                    eliminate_dead_stores,
+                },
             },
         );
         if res.is_err() {
@@ -88,6 +119,13 @@ fn main() {
     }
     if only_lex || only_parse || only_validate || only_birds || only_codegen {
         // a flag signalling an early exit was passed, so exit here without an error
+        return;
+    }
+
+    if assembly_out {
+        for asm_filename in asm_filenames.iter() {
+            println!("{}", fs::read_to_string(asm_filename).unwrap());
+        }
         return;
     }
 
@@ -110,11 +148,11 @@ fn main() {
         .unwrap();
 
     for asm_filename in asm_filenames {
-        if assembly_out || res.status.code() != Some(0) {
+        if res.status.code() != Some(0) {
             // println!("{}", asm_filename);
             println!("{}", fs::read_to_string(&asm_filename).unwrap());
+            let _ = fs::remove_file(&asm_filename);
         }
-        let _ = fs::remove_file(&asm_filename);
     }
 
     if res.status.code() != Some(0) {

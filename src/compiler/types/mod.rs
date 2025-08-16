@@ -27,7 +27,7 @@ pub enum Type {
     Struct(String, bool),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Constant {
     Integer(i32),
     Long(i64),
@@ -61,10 +61,35 @@ pub enum StorageClass {
     Extern,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum StaticInitialiser {
     Comparable(ComparableStatic),
     Double(f64),
+}
+
+fn one_double_is_negative_zero(a: f64, b: f64) -> bool {
+    let a_n0 = a.to_bits() == (-0.0_f64).to_bits();
+    let b_n0 = b.to_bits() == (-0.0_f64).to_bits();
+    (a_n0 && !b_n0) || (b_n0 && !a_n0)
+}
+
+impl PartialEq for StaticInitialiser {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Comparable(a), Self::Comparable(b)) => a == b,
+            (Self::Double(a), Self::Double(b)) => {
+                // 0.0 does not equal -0.0 !!!
+                if one_double_is_negative_zero(*a, *b) {
+                    false
+                } else if a.is_nan() && b.is_nan() {
+                    true
+                } else {
+                    a == b
+                }
+            }
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

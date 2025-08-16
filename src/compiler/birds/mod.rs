@@ -1,6 +1,9 @@
 use std::{collections::HashMap, error::Error};
 
 use convert::do_birds;
+use optimize::do_optimize;
+
+use crate::OptimizeConfig;
 
 use super::{
     parser::{ProgramNode, StructInfo},
@@ -9,6 +12,7 @@ use super::{
 
 mod convert;
 mod display;
+mod optimize;
 
 // BIRDS: Bodacious Intermediate Representation Design Spec
 #[derive(Debug)]
@@ -24,7 +28,7 @@ pub enum BirdsTopLevel {
     StaticConstant(Type, String, StaticInitialiser),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BirdsInstructionNode {
     Return(Option<BirdsValueNode>),
     // op, src, dst
@@ -87,14 +91,14 @@ impl BirdsValueNode {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum BirdsUnaryOperatorNode {
     Complement,
     Negate,
     Not,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum BirdsBinaryOperatorNode {
     Add,
     Subtract,
@@ -134,4 +138,19 @@ pub fn birds(
     structs: HashMap<String, StructInfo>,
 ) -> Result<BirdsResult, Box<dyn Error>> {
     do_birds(parsed, symbols, structs)
+}
+
+type OptimizeResult = (
+    BirdsProgramNode,
+    HashMap<String, SymbolInfo>,
+    HashMap<String, StructInfo>,
+);
+
+pub fn optimize(
+    birds: BirdsProgramNode,
+    symbols: HashMap<String, SymbolInfo>,
+    structs: HashMap<String, StructInfo>,
+    optimize_config: OptimizeConfig,
+) -> Result<OptimizeResult, Box<dyn Error>> {
+    do_optimize(birds, symbols, structs, optimize_config)
 }

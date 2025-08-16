@@ -2,7 +2,7 @@
 
 ### May change for other devices/languages being used ###
 root_test_path=../../nlsandler/writing-a-c-compiler-tests
-extra_args="--bitwise --increment --compound --goto --switch --nan --union"
+extra_args="--bitwise --increment --compound --goto --switch --nan --union --eliminate-unreachable-code"
 binary_path=target/release/c-compiler
 ###
 
@@ -64,8 +64,8 @@ for chapter_num in $(seq 1 $chapter); do
 		fi
 	done
 done
-echo "$results"
 if $passing; then
+	echo "$results"
 	exit 0
 else
 	exit 1

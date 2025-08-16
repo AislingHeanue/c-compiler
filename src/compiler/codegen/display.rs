@@ -303,8 +303,6 @@ impl CodeDisplay for StaticInitialiser {
             }
             // print 17 digits of precision so that when the linker re-converts this to a real
             // double value, this has enough precision to guarantee the original value.
-            // no special case for zero values here, so that we can avoid confusion about
-            // 0.0 vs -0.0
             StaticInitialiser::Double(d) => {
                 // use the actual bits of the f64 value in the assembly
                 // more precise (if needed), but less nice to look at/debug

@@ -660,6 +660,12 @@ impl ExpressionNode {
             left.convert_type(&common_type);
             right.convert_type(&common_type);
         }
+        // if matches!(
+        //     op,
+        //     BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight
+        // ) {
+        //     right.convert_type(&Type::Integer);
+        // }
 
         // Misc. Validation of types and operators
         if (matches!(left.1.as_ref().unwrap(), Type::Double)
