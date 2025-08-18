@@ -47,14 +47,16 @@ tacky)
 	bash -c "$binary $file --tacky"
 	;;
 optimize)
-	bash -c "$binary $file --tacky --eliminate-unreachable-code"
+	bash -c "$binary $file --tacky"
+	bash -c "$binary $file --tacky --propagate-copies"
 	;;
 codegen)
 	bash -c "$binary $file --codegen"
 	;;
 run)
 	output_name=${first_file%.c}
-	result=$(bash -c "$binary $file --eliminate-unreachable-code")
+	result=$(bash -c "$binary $file --propagate-copies")
+	# result=$(bash -c "$binary $file")
 	# Run the outputted binary (if it exists)
 	$output_name
 	# Store the return code
@@ -64,7 +66,8 @@ run)
 
 	echo "Code:"
 	# Print the generated assembly code
-	bash -c "$binary $file -S --eliminate-unreachable-code" | bat -l asm --paging=never
+	bash -c "$binary $file -S --propagate-copies" | bat -l asm --paging=never
+	# bash -c "$binary $file -S" | bat -l asm --paging=never
 	# bash -c "$binary $file -S" >a.s
 	;;
 esac

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, error::Error};
+use std::error::Error;
 
 use itertools::Itertools;
 
@@ -11,16 +11,15 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
         &mut self,
         _context: &mut OptimizeContext,
     ) -> Result<(), Box<dyn Error>> {
-        let mut marked = HashSet::new();
-
-        self.traverse(0, &mut marked);
+        // preforms a depth-first search of the graph to see what's reachable
+        let indexes = self.post_order_indexes();
         for (k, _) in self.nodes.clone().iter() {
-            if !marked.contains(k) {
+            if !indexes.contains(k) {
                 self.remove_node(*k)
             }
         }
 
-        let keys: Vec<usize> = self.nodes.keys().sorted().copied().collect();
+        let keys: Vec<usize> = self.indexes();
         let keys_len = keys.len();
 
         // CLEAR USELESS JUMPS

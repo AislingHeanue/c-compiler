@@ -9,6 +9,7 @@ use itertools::Itertools;
 pub struct FlowGraph<T, I> {
     pub nodes: HashMap<usize, FlowNode<T, I>>,
     pub label_block_locations: HashMap<String, usize>,
+    pub last_index: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -46,7 +47,6 @@ where
     FlowGraph<T, I>: InstructionMatching<T, I>,
 {
     pub fn new(body: Vec<T>) -> FlowGraph<T, I> {
-        println!("new loop with body {:?}", body);
         let mut label_block_locations = HashMap::new();
         let mut nodes = HashMap::new();
         nodes.insert(0, FlowNode::new()); // this is the entry node
@@ -70,6 +70,7 @@ where
         nodes.insert(nodes.len(), FlowNode::new()); // this is the exit node
 
         let mut out = FlowGraph {
+            last_index: nodes.len() - 1,
             nodes,
             label_block_locations,
         };
@@ -94,7 +95,7 @@ where
     }
 
     pub fn add_edges(&mut self) {
-        let keys: Vec<usize> = self.nodes.keys().sorted().copied().collect();
+        let keys: Vec<usize> = self.indexes();
         let keys_len = keys.len();
         for index in keys.iter() {
             // special case just for the entry and exit nodes.
@@ -128,16 +129,27 @@ where
             }
         }
         self.nodes.remove(&index);
-        println!("{:?}", self.nodes);
     }
 
-    pub fn traverse(&self, index: usize, marked: &mut HashSet<usize>) {
-        let not_seen_already = marked.insert(index);
-        if not_seen_already {
-            let node = self.nodes.get(&index).unwrap();
-            node.afters
-                .iter()
-                .for_each(|after| self.traverse(*after, marked))
-        }
+    pub fn indexes(&self) -> Vec<usize> {
+        self.nodes.keys().sorted().copied().collect_vec()
+    }
+
+    pub fn post_order_indexes(&self) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut seen = Vec::new();
+        self.post_order_search(0, &mut out, &mut seen);
+        out
+    }
+
+    fn post_order_search(&self, index: usize, list: &mut Vec<usize>, seen: &mut Vec<usize>) {
+        let node = self.nodes.get(&index).unwrap();
+        seen.push(index);
+        node.afters.iter().for_each(|after| {
+            if !seen.contains(after) && *after != index {
+                self.post_order_search(*after, list, seen)
+            }
+        });
+        list.push(index);
     }
 }

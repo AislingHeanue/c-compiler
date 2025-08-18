@@ -127,22 +127,12 @@ impl Constant {
             Type::Double => self.to_double(),
             Type::Function(_, _) => unreachable!(),
             Type::Array(_, _) => unreachable!(),
-            Type::Pointer(_) => self.to_pointer(),
+            Type::Pointer(_) => self.to_long(),
             Type::Char => self.to_char(),
             Type::SignedChar => self.to_char(),
             Type::UnsignedChar => self.to_uchar(),
             Type::Void => unreachable!(),
             Type::Struct(_, _) => unreachable!(),
-        }
-    }
-
-    pub fn to_pointer(&self) -> Constant {
-        match self {
-            Constant::Integer(0)
-            | Constant::Long(0)
-            | Constant::UnsignedInteger(0)
-            | Constant::UnsignedLong(0) => Constant::Long(0),
-            _ => unreachable!(),
         }
     }
 

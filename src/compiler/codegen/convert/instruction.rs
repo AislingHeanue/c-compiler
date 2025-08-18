@@ -453,14 +453,67 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     ));
                 }
 
-                for (i, (arg, arg_type)) in args.integer.into_iter().enumerate() {
+                for (i, (arg, _is_signed, arg_type)) in args.integer.into_iter().enumerate() {
                     match arg_type {
-                        AssemblyType::ByteArray(size, _) => Instruction::copy_bytes_to_register(
-                            size as i32,
-                            &mut instructions,
-                            &arg,
-                            &FUNCTION_PARAM_REGISTERS[i + int_register_start],
-                        ),
+                        AssemblyType::ByteArray(size, _) => {
+                            if size < 4 {
+                                // the caller should zero out the first 4 bytes of any argument
+                                // register for compatibility with Clang functions.
+                                instructions.push(Instruction::Mov(
+                                    AssemblyType::Longword,
+                                    Operand::Imm(ImmediateValue::Signed(0)),
+                                    Operand::Reg(
+                                        FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
+                                    ),
+                                ));
+                            }
+                            Instruction::copy_bytes_to_register(
+                                size as i32,
+                                &mut instructions,
+                                &arg,
+                                &FUNCTION_PARAM_REGISTERS[i + int_register_start],
+                            )
+                        }
+                        // AssemblyType::Byte if is_signed => {
+                        //     // the caller should zero out the first 4 bytes of any argument
+                        //     // register for compatibility with Clang functions.
+                        //     // instructions.push(Instruction::Movsx(
+                        //     //     AssemblyType::Byte,
+                        //     //     AssemblyType::Longword,
+                        //     //     arg,
+                        //     //     Operand::Reg(
+                        //     //         FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
+                        //     //     ),
+                        //     // ));
+                        // }
+                        AssemblyType::Byte => {
+                            // the caller should zero out the first 4 bytes of any argument
+                            // register for compatibility with Clang functions.
+                            // instructions.push(Instruction::MovZeroExtend(
+                            //     AssemblyType::Byte,
+                            //     AssemblyType::Longword,
+                            //     arg,
+                            //     Operand::Reg(
+                            //         FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
+                            //     ),
+                            // ));
+                            // Currently doesn't work in this exact form, see
+                            // https://github.com/nlsandler/writing-a-c-compiler-tests/issues/140
+                            instructions.push(Instruction::Mov(
+                                AssemblyType::Longword,
+                                Operand::Imm(ImmediateValue::Signed(0)),
+                                Operand::Reg(
+                                    FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
+                                ),
+                            ));
+                            instructions.push(Instruction::Mov(
+                                AssemblyType::Byte,
+                                arg,
+                                Operand::Reg(
+                                    FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
+                                ),
+                            ));
+                        }
                         _ => {
                             instructions.push(Instruction::Mov(
                                 arg_type,
@@ -481,7 +534,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     ));
                 }
 
-                for (arg, arg_type) in args.stack.into_iter().rev() {
+                for (arg, _is_signed, arg_type) in args.stack.into_iter().rev() {
                     if let AssemblyType::ByteArray(size, _) = arg_type {
                         instructions.push(Instruction::Binary(
                             BinaryOperator::Sub,

@@ -95,7 +95,6 @@ impl CheckTypes for ExpressionNode {
                     for (arg, param) in args.iter_mut().zip(params.iter()) {
                         arg.check_types_and_convert(context)?;
                         arg.convert_type_by_assignment(param, context)?;
-                        arg.pad_single_byte_arg()?;
                     }
 
                     *out.clone()
@@ -332,6 +331,7 @@ impl CheckTypes for ExpressionNode {
                 p.check_types_and_convert(context)?;
                 if let Type::Pointer(p_type) = p.1.as_ref().unwrap() {
                     if let Type::Struct(ref s_name, is_union) = **p_type {
+                        // TODO: check unions
                         let info = context.structs.get(s_name).unwrap().clone();
                         let maybe_member =
                             info.members.find_name(name, is_union, &mut context.structs);
@@ -496,10 +496,16 @@ impl ExpressionNode {
         if !target.is_complete(&mut context.structs) {
             return Err("Can't assign to an incomplete type".into());
         }
+        if self.equals_null_pointer() && matches!(target, Type::Pointer(_)) {
+            *self = ExpressionNode(
+                ExpressionWithoutType::Constant(Constant::UnsignedLong(0)),
+                Some(target.clone()),
+            );
+            return Ok(());
+        }
         let t1 = self.1.as_ref().unwrap();
         if t1 != target {
             if (t1.is_arithmetic() && target.is_arithmetic())
-                || (self.equals_null_pointer() && matches!(target, Type::Pointer(_)))
                 || (*t1 == Type::Pointer(Box::new(Type::Void))
                     && matches!(target, Type::Pointer(_)))
                 || (*target == Type::Pointer(Box::new(Type::Void))
@@ -512,18 +518,6 @@ impl ExpressionNode {
                     // format!("Can't convert {:?} to {:?} by assignment", self, target).into(),
                 );
             }
-        }
-        Ok(())
-    }
-
-    // required because functions that are compiled by clang assume that the caller always pads
-    // 1-byte args to 4 bytes.
-    pub fn pad_single_byte_arg(&mut self) -> Result<(), Box<dyn Error>> {
-        let t1 = self.1.as_ref().unwrap();
-        match t1 {
-            Type::Char | Type::SignedChar => self.convert_type(&Type::Integer),
-            Type::UnsignedChar => self.convert_type(&Type::UnsignedInteger),
-            _ => {}
         }
         Ok(())
     }
@@ -660,12 +654,6 @@ impl ExpressionNode {
             left.convert_type(&common_type);
             right.convert_type(&common_type);
         }
-        // if matches!(
-        //     op,
-        //     BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight
-        // ) {
-        //     right.convert_type(&Type::Integer);
-        // }
 
         // Misc. Validation of types and operators
         if (matches!(left.1.as_ref().unwrap(), Type::Double)
@@ -694,14 +682,13 @@ impl ExpressionNode {
             | BinaryOperatorNode::Subtract
             | BinaryOperatorNode::Multiply
             | BinaryOperatorNode::Divide
-            | BinaryOperatorNode::Mod
             | BinaryOperatorNode::BitwiseAnd
             | BinaryOperatorNode::BitwiseXor
             | BinaryOperatorNode::BitwiseOr => common_type,
-            // types which don't convert the right type
-            BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight => {
-                left.1.clone().unwrap()
-            }
+            // types which don't convert the right type (TODO: why is Mod here?)
+            BinaryOperatorNode::ShiftLeft
+            | BinaryOperatorNode::ShiftRight
+            | BinaryOperatorNode::Mod => left.1.clone().unwrap(),
             // logical
             BinaryOperatorNode::And
             | BinaryOperatorNode::Or

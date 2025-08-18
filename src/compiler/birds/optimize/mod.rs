@@ -3,7 +3,11 @@ use std::{collections::HashMap, error::Error};
 use fold_constants::FoldConstants;
 
 use crate::{
-    compiler::{flow_graph::FlowGraph, parser::StructInfo, types::SymbolInfo},
+    compiler::{
+        flow_graph::FlowGraph,
+        parser::StructInfo,
+        types::{StorageInfo, SymbolInfo},
+    },
     OptimizeConfig,
 };
 
@@ -20,6 +24,8 @@ pub struct OptimizeContext {
     symbols: HashMap<String, SymbolInfo>,
     structs: HashMap<String, StructInfo>,
     block_reaching_copies: HashMap<usize, Vec<(BirdsValueNode, BirdsValueNode)>>,
+    aliased_variables: Vec<BirdsValueNode>,
+    // all_copies: Vec<(BirdsValueNode, BirdsValueNode)>,
     config: OptimizeConfig,
 }
 
@@ -53,6 +59,7 @@ pub fn do_optimize(
         symbols,
         structs,
         block_reaching_copies: HashMap::new(),
+        aliased_variables: Vec::new(),
         config: optimize_config,
     };
     birds = birds.optimize(&mut context)?;
@@ -87,6 +94,7 @@ impl Optimize for Vec<BirdsInstructionNode> {
 
         while !self.is_empty() {
             let original_instructions = self.clone();
+            context.aliased_variables = address_taken_analysis(&self, context);
 
             if context.config.fold_constants {
                 self.fold_constants(context)?;
@@ -117,4 +125,28 @@ impl Optimize for Vec<BirdsInstructionNode> {
         }
         Ok(self)
     }
+}
+
+fn address_taken_analysis(
+    v: &[BirdsInstructionNode],
+    context: &mut OptimizeContext,
+) -> Vec<BirdsValueNode> {
+    context
+        .symbols
+        .iter()
+        .filter_map(|s| {
+            if matches!(s.1.storage, StorageInfo::Static(_, _)) {
+                Some(BirdsValueNode::Var(s.0.clone()))
+            } else {
+                None
+            }
+        })
+        .chain(v.iter().filter_map(|instruction| {
+            if let BirdsInstructionNode::GetAddress(src, _) = instruction {
+                Some(src.clone())
+            } else {
+                None
+            }
+        }))
+        .collect()
 }

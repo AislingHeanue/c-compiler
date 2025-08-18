@@ -58,8 +58,8 @@ impl ConvertContext {
 
 struct Args {
     double: Vec<Operand>,
-    integer: Vec<(Operand, AssemblyType)>,
-    stack: Vec<(Operand, AssemblyType)>,
+    integer: Vec<(Operand, bool, AssemblyType)>,
+    stack: Vec<(Operand, bool, AssemblyType)>,
 }
 
 #[derive(Debug)]
@@ -83,18 +83,18 @@ fn classify_function_args(
     let integer_reg_offset = if return_value_uses_memory { 1 } else { 0 };
 
     for v in values {
-        let (t, _, is_scalar) = AssemblyType::infer(&v, context)?;
+        let (t, is_signed, is_scalar) = AssemblyType::infer(&v, context)?;
         if t == AssemblyType::Double {
             if args.double.len() < 8 {
                 args.double.push(v.convert(context)?);
             } else {
-                args.stack.push((v.convert(context)?, t));
+                args.stack.push((v.convert(context)?, is_signed, t));
             }
         } else if is_scalar {
             if args.integer.len() + integer_reg_offset < 6 {
-                args.integer.push((v.convert(context)?, t));
+                args.integer.push((v.convert(context)?, is_signed, t));
             } else {
-                args.stack.push((v.convert(context)?, t));
+                args.stack.push((v.convert(context)?, is_signed, t));
             }
         } else {
             // oh god v is a struct everyone panic
@@ -117,6 +117,7 @@ fn classify_function_args(
                     } else {
                         maybe_ints.push((
                             Operand::MockMemory(var_name.clone(), i * 8),
+                            false,
                             AssemblyType::get_eightbyte(i * 8, size as i32),
                         ));
                     }
@@ -133,6 +134,7 @@ fn classify_function_args(
                 for i in 0_i32..classes.len() as i32 {
                     args.stack.push((
                         Operand::MockMemory(var_name.clone(), i * 8),
+                        false,
                         AssemblyType::get_eightbyte(i * 8, size as i32),
                     ));
                 }
@@ -237,9 +239,6 @@ fn classify_struct(struct_type: &Type, context: &mut ConvertContext) -> Vec<Clas
         vec![Class::Memory; u64::div_ceil(info.size, 8) as usize]
     } else {
         let member_types = flatten_struct_types(struct_type, context);
-        if name.starts_with("small_struct_arr_and_dbl") {
-            println!("{} {:?} {:?}", name, info, member_types);
-        }
         // size > 8 means there are exactly 2 eightbytes we need to classify
         // (this would probably be more complicated if we supported floats)
         if info.size > 8 {

@@ -62,7 +62,7 @@ impl BirdsTopLevel {
         };
 
         // ZEROTH PASS: Copy all the params out of registers onto the stack.
-        for (i, (param, param_type)) in params.integer.into_iter().enumerate() {
+        for (i, (param, _, param_type)) in params.integer.into_iter().enumerate() {
             if let AssemblyType::ByteArray(size, _) = param_type {
                 Instruction::copy_bytes_from_register(
                     size as i32,
@@ -87,7 +87,7 @@ impl BirdsTopLevel {
             ));
         }
 
-        for (i, (param, param_type)) in params.stack.into_iter().enumerate() {
+        for (i, (param, _, param_type)) in params.stack.into_iter().enumerate() {
             if let AssemblyType::ByteArray(size, _) = param_type {
                 Instruction::copy_bytes(
                     size as i32,
