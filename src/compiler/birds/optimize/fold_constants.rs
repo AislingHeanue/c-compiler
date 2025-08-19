@@ -52,63 +52,39 @@ impl BirdsInstructionNode {
                 BirdsValueNode::Constant(left),
                 BirdsValueNode::Constant(right),
                 dst,
-            ) => {
-                println!(
-                    "FOLDING BINARY {:?}",
-                    BirdsInstructionNode::Binary(
-                        op.clone(),
-                        BirdsValueNode::Constant(left.clone()),
-                        BirdsValueNode::Constant(right.clone()),
-                        dst.clone(),
-                    )
-                );
-                if matches!(op, BirdsBinaryOperatorNode::ShiftRight) {
-                    println!("SHIFT RIGHT TO GET {:?}", left.clone() >> right.clone());
-                }
-                Some(BirdsInstructionNode::Copy(
-                    match op {
-                        BirdsBinaryOperatorNode::Add => BirdsValueNode::Constant(left + right),
-                        BirdsBinaryOperatorNode::Subtract => BirdsValueNode::Constant(left - right),
-                        BirdsBinaryOperatorNode::Multiply => BirdsValueNode::Constant(left * right),
-                        BirdsBinaryOperatorNode::Divide => BirdsValueNode::Constant(left / right),
-                        BirdsBinaryOperatorNode::Mod => BirdsValueNode::Constant(left % right),
-                        BirdsBinaryOperatorNode::Equal => BirdsValueNode::Constant(
-                            Constant::Integer((left.double_eq(&right)) as i32),
-                        ),
-                        BirdsBinaryOperatorNode::NotEqual => BirdsValueNode::Constant(
-                            Constant::Integer(!(left.double_eq(&right)) as i32),
-                        ),
-                        BirdsBinaryOperatorNode::Less => {
-                            BirdsValueNode::Constant(Constant::Integer((left < right) as i32))
-                        }
-                        BirdsBinaryOperatorNode::Greater => {
-                            BirdsValueNode::Constant(Constant::Integer((left > right) as i32))
-                        }
-                        BirdsBinaryOperatorNode::LessEqual => {
-                            BirdsValueNode::Constant(Constant::Integer((left <= right) as i32))
-                        }
-                        BirdsBinaryOperatorNode::GreaterEqual => {
-                            BirdsValueNode::Constant(Constant::Integer((left >= right) as i32))
-                        }
-                        BirdsBinaryOperatorNode::BitwiseAnd => {
-                            BirdsValueNode::Constant(left & right)
-                        }
-                        BirdsBinaryOperatorNode::BitwiseXor => {
-                            BirdsValueNode::Constant(left ^ right)
-                        }
-                        BirdsBinaryOperatorNode::BitwiseOr => {
-                            BirdsValueNode::Constant(left | right)
-                        }
-                        BirdsBinaryOperatorNode::ShiftLeft => {
-                            BirdsValueNode::Constant(left << right)
-                        }
-                        BirdsBinaryOperatorNode::ShiftRight => {
-                            BirdsValueNode::Constant(left >> right)
-                        }
-                    },
-                    dst,
-                ))
-            }
+            ) => Some(BirdsInstructionNode::Copy(
+                match op {
+                    BirdsBinaryOperatorNode::Add => BirdsValueNode::Constant(left + right),
+                    BirdsBinaryOperatorNode::Subtract => BirdsValueNode::Constant(left - right),
+                    BirdsBinaryOperatorNode::Multiply => BirdsValueNode::Constant(left * right),
+                    BirdsBinaryOperatorNode::Divide => BirdsValueNode::Constant(left / right),
+                    BirdsBinaryOperatorNode::Mod => BirdsValueNode::Constant(left % right),
+                    BirdsBinaryOperatorNode::Equal => {
+                        BirdsValueNode::Constant(Constant::Integer((left.double_eq(&right)) as i32))
+                    }
+                    BirdsBinaryOperatorNode::NotEqual => BirdsValueNode::Constant(
+                        Constant::Integer(!(left.double_eq(&right)) as i32),
+                    ),
+                    BirdsBinaryOperatorNode::Less => {
+                        BirdsValueNode::Constant(Constant::Integer((left < right) as i32))
+                    }
+                    BirdsBinaryOperatorNode::Greater => {
+                        BirdsValueNode::Constant(Constant::Integer((left > right) as i32))
+                    }
+                    BirdsBinaryOperatorNode::LessEqual => {
+                        BirdsValueNode::Constant(Constant::Integer((left <= right) as i32))
+                    }
+                    BirdsBinaryOperatorNode::GreaterEqual => {
+                        BirdsValueNode::Constant(Constant::Integer((left >= right) as i32))
+                    }
+                    BirdsBinaryOperatorNode::BitwiseAnd => BirdsValueNode::Constant(left & right),
+                    BirdsBinaryOperatorNode::BitwiseXor => BirdsValueNode::Constant(left ^ right),
+                    BirdsBinaryOperatorNode::BitwiseOr => BirdsValueNode::Constant(left | right),
+                    BirdsBinaryOperatorNode::ShiftLeft => BirdsValueNode::Constant(left << right),
+                    BirdsBinaryOperatorNode::ShiftRight => BirdsValueNode::Constant(left >> right),
+                },
+                dst,
+            )),
             BirdsInstructionNode::JumpZero(BirdsValueNode::Constant(ref c), ref label) => {
                 if c.is_zero() {
                     Some(BirdsInstructionNode::Jump(label.to_string()))
@@ -123,6 +99,56 @@ impl BirdsInstructionNode {
                     Some(BirdsInstructionNode::Jump(label.to_string()))
                 }
             }
+            BirdsInstructionNode::JumpCondition(
+                op,
+                BirdsValueNode::Constant(left),
+                BirdsValueNode::Constant(right),
+                label,
+            ) => match op {
+                BirdsBinaryOperatorNode::Equal => {
+                    if left.double_eq(&right) {
+                        Some(BirdsInstructionNode::Jump(label))
+                    } else {
+                        None
+                    }
+                }
+                BirdsBinaryOperatorNode::NotEqual => {
+                    if !left.double_eq(&right) {
+                        Some(BirdsInstructionNode::Jump(label))
+                    } else {
+                        None
+                    }
+                }
+                BirdsBinaryOperatorNode::Less => {
+                    if left < right {
+                        Some(BirdsInstructionNode::Jump(label))
+                    } else {
+                        None
+                    }
+                }
+                BirdsBinaryOperatorNode::Greater => {
+                    if left > right {
+                        Some(BirdsInstructionNode::Jump(label))
+                    } else {
+                        None
+                    }
+                }
+                BirdsBinaryOperatorNode::LessEqual => {
+                    if left <= right {
+                        Some(BirdsInstructionNode::Jump(label))
+                    } else {
+                        None
+                    }
+                }
+                BirdsBinaryOperatorNode::GreaterEqual => {
+                    if left >= right {
+                        Some(BirdsInstructionNode::Jump(label))
+                    } else {
+                        None
+                    }
+                }
+                t => panic!("{:?}", t),
+            },
             BirdsInstructionNode::Truncate(
                 BirdsValueNode::Constant(c),
                 BirdsValueNode::Var(dst_name),

@@ -416,6 +416,21 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     ]
                 }
             }
+            BirdsInstructionNode::JumpCondition(op, left, right, s) => {
+                let (left_type, is_signed, _) = AssemblyType::infer(&left, context)?;
+                let is_double = left_type == AssemblyType::Double;
+                let possible_codes: (ConditionCode, ConditionCode) = op.convert(context)?;
+                let condition_code = if is_signed && !is_double {
+                    possible_codes.0
+                } else {
+                    possible_codes.1
+                };
+                vec![
+                    // don't forget to swap the left and right operands here
+                    Instruction::Cmp(left_type, right.convert(context)?, left.convert(context)?),
+                    Instruction::JmpCondition(condition_code, s, is_double),
+                ]
+            }
             BirdsInstructionNode::Label(s) => vec![Instruction::Label(s)],
             BirdsInstructionNode::FunctionCall(name, args, dst) => {
                 let mut instructions = Vec::new();

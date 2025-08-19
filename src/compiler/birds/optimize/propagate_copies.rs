@@ -64,6 +64,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 Some(instruction)
             }
             BirdsInstructionNode::Binary(_, ref mut left, ref mut right, _)
+            |BirdsInstructionNode::JumpCondition(_, ref mut left, ref mut right, _)
             | BirdsInstructionNode::AddPointer(ref mut left, ref mut right, _, _) => {
                 Self::replace_value(left, &reaching_copies);
                 Self::replace_value(right, &reaching_copies);

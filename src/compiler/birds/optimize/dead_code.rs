@@ -28,7 +28,8 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
             if let Some((
                 BirdsInstructionNode::Jump(_)
                 | BirdsInstructionNode::JumpZero(_, _)
-                | BirdsInstructionNode::JumpNotZero(_, _),
+                | BirdsInstructionNode::JumpNotZero(_, _)
+                | BirdsInstructionNode::JumpCondition(_, _, _, _),
                 _,
             )) = self.nodes.get(index).unwrap().instructions.back()
             {

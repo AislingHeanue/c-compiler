@@ -107,6 +107,7 @@ impl Destination {
         match self {
             Destination::Direct(val) => (Vec::new(), val),
             Destination::Dereference(val) => {
+                println!("{:?} {:?}", val, target_type);
                 let new_dst = new_temp_variable(target_type, context);
                 (
                     vec![BirdsInstructionNode::LoadFromPointer(val, new_dst.clone())],
@@ -146,6 +147,17 @@ impl BirdsBinaryOperatorNode {
                 | BirdsBinaryOperatorNode::LessEqual
         )
     }
+    pub fn negated(self) -> BirdsBinaryOperatorNode {
+        match self {
+            BirdsBinaryOperatorNode::Equal => BirdsBinaryOperatorNode::NotEqual,
+            BirdsBinaryOperatorNode::NotEqual => BirdsBinaryOperatorNode::Equal,
+            BirdsBinaryOperatorNode::Greater => BirdsBinaryOperatorNode::LessEqual,
+            BirdsBinaryOperatorNode::GreaterEqual => BirdsBinaryOperatorNode::Less,
+            BirdsBinaryOperatorNode::Less => BirdsBinaryOperatorNode::GreaterEqual,
+            BirdsBinaryOperatorNode::LessEqual => BirdsBinaryOperatorNode::Greater,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Convert<BirdsBinaryOperatorNode> for BinaryOperatorNode {
@@ -171,7 +183,8 @@ impl Convert<BirdsBinaryOperatorNode> for BinaryOperatorNode {
             BinaryOperatorNode::LessEqual => BirdsBinaryOperatorNode::LessEqual,
             BinaryOperatorNode::GreaterEqual => BirdsBinaryOperatorNode::GreaterEqual,
             // process these in the 'else' block below instead
-            BinaryOperatorNode::And | BinaryOperatorNode::Or => unreachable!(),
+            // Add is left here as a non-relation dummy value
+            BinaryOperatorNode::And | BinaryOperatorNode::Or => BirdsBinaryOperatorNode::Add,
         };
         Ok(bird_op)
     }

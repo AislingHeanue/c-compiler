@@ -1,5 +1,5 @@
 use crate::compiler::{
-    birds::{BirdsProgramNode, BirdsValueNode},
+    birds::{BirdsBinaryOperatorNode, BirdsProgramNode, BirdsValueNode},
     parser::StructInfo,
     types::{Class, StaticInitialiser, SymbolInfo, Type},
 };
@@ -378,5 +378,24 @@ impl Convert<Program> for BirdsProgramNode {
             body,
             displaying_context: None,
         })
+    }
+}
+
+// returns both signed and unsigned variants of each condition
+impl Convert<(ConditionCode, ConditionCode)> for BirdsBinaryOperatorNode {
+    fn convert(
+        self,
+        _context: &mut ConvertContext,
+    ) -> Result<(ConditionCode, ConditionCode), Box<dyn Error>> {
+        let out = match self {
+            BirdsBinaryOperatorNode::Equal => (ConditionCode::E, ConditionCode::E),
+            BirdsBinaryOperatorNode::NotEqual => (ConditionCode::Ne, ConditionCode::Ne),
+            BirdsBinaryOperatorNode::Less => (ConditionCode::L, ConditionCode::B),
+            BirdsBinaryOperatorNode::Greater => (ConditionCode::G, ConditionCode::A),
+            BirdsBinaryOperatorNode::LessEqual => (ConditionCode::Le, ConditionCode::Be),
+            BirdsBinaryOperatorNode::GreaterEqual => (ConditionCode::Ge, ConditionCode::Ae),
+            _ => unreachable!(),
+        };
+        Ok(out)
     }
 }

@@ -44,6 +44,12 @@ pub enum BirdsInstructionNode {
     Jump(String),
     JumpZero(BirdsValueNode, String),
     JumpNotZero(BirdsValueNode, String),
+    JumpCondition(
+        BirdsBinaryOperatorNode,
+        BirdsValueNode,
+        BirdsValueNode,
+        String,
+    ),
     Label(String),
     // name, args, dst
     FunctionCall(String, Vec<BirdsValueNode>, Option<BirdsValueNode>),

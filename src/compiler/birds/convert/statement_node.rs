@@ -2,7 +2,9 @@ use std::error::Error;
 
 use crate::compiler::{
     birds::{BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsValueNode},
-    parser::{ForInitialiserNode, StatementNode, SwitchMapKey},
+    parser::{
+        ExpressionNode, ExpressionWithoutType, ForInitialiserNode, StatementNode, SwitchMapKey,
+    },
     types::Type,
 };
 
@@ -42,11 +44,8 @@ impl Convert<Vec<BirdsInstructionNode>> for StatementNode {
                     context.last_else_label_number += 1;
                     let new_else_label_name = format!("else_{}", context.last_else_label_number);
 
-                    let (mut instructions, new_cond): E = condition.convert(context)?;
-                    instructions.push(BirdsInstructionNode::JumpZero(
-                        new_cond,
-                        new_else_label_name.clone(),
-                    ));
+                    let mut instructions =
+                        condition.convert_condition(new_else_label_name.clone(), context)?;
                     instructions.append(&mut then.convert(context)?);
                     instructions.push(BirdsInstructionNode::Jump(new_end_label_name.clone()));
                     instructions.push(BirdsInstructionNode::Label(new_else_label_name));
@@ -57,11 +56,8 @@ impl Convert<Vec<BirdsInstructionNode>> for StatementNode {
                 } else {
                     context.last_end_label_number += 1;
                     let new_end_label_name = format!("end_{}", context.last_end_label_number);
-                    let (mut instructions, new_cond): E = condition.convert(context)?;
-                    instructions.push(BirdsInstructionNode::JumpZero(
-                        new_cond,
-                        new_end_label_name.clone(),
-                    ));
+                    let mut instructions =
+                        condition.convert_condition(new_end_label_name.clone(), context)?;
 
                     instructions.append(&mut then.convert(context)?);
 
@@ -91,12 +87,10 @@ impl Convert<Vec<BirdsInstructionNode>> for StatementNode {
                     "continue_{}",
                     this_loop_label
                 ))];
-                let (mut instructions_from_condition, new_src): E = expression.convert(context)?;
-                instructions.append(&mut instructions_from_condition);
-                instructions.push(BirdsInstructionNode::JumpZero(
-                    new_src,
-                    format!("break_{}", this_loop_label),
-                ));
+                instructions.append(
+                    &mut expression
+                        .convert_condition(format!("break_{}", this_loop_label), context)?,
+                );
 
                 instructions.append(&mut body.convert(context)?);
 
@@ -125,13 +119,12 @@ impl Convert<Vec<BirdsInstructionNode>> for StatementNode {
                     "continue_{}",
                     this_loop_label
                 )));
-                let (mut instructions_from_condition, new_src) = expression.convert(context)?;
-                instructions.append(&mut instructions_from_condition);
 
-                instructions.push(BirdsInstructionNode::JumpZero(
-                    new_src,
-                    format!("break_{}", this_loop_label),
-                ));
+                instructions.append(
+                    &mut expression
+                        .convert_condition(format!("break_{}", this_loop_label), context)?,
+                );
+
                 instructions.push(BirdsInstructionNode::Jump(format!(
                     "start_{}",
                     this_loop_label
@@ -161,14 +154,12 @@ impl Convert<Vec<BirdsInstructionNode>> for StatementNode {
                     "start_{}",
                     this_loop_label
                 )));
-                let new_condition_option: Option<E> = cond.convert(context)?;
                 //only check the condition... if the condition was specified
-                if let Some(mut new_condition) = new_condition_option {
-                    instructions.append(&mut new_condition.0);
-                    instructions.push(BirdsInstructionNode::JumpZero(
-                        new_condition.1,
-                        format!("break_{}", this_loop_label),
-                    ));
+                if let Some(condition) = cond {
+                    instructions.append(
+                        &mut condition
+                            .convert_condition(format!("break_{}", this_loop_label), context)?,
+                    );
                 }
 
                 //body
@@ -246,5 +237,38 @@ impl Convert<Vec<BirdsInstructionNode>> for StatementNode {
                 Ok(instructions)
             }
         }
+    }
+}
+
+impl ExpressionNode {
+    fn convert_condition(
+        self,
+        jump_to_on_false: String,
+        context: &mut ConvertContext,
+    ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
+        let mut instructions = Vec::new();
+        match self.0 {
+            ExpressionWithoutType::Binary(op, left, right)
+                if op.clone().convert(context)?.is_relational() =>
+            {
+                let bird_op = op.convert(context)?.negated();
+                let (mut instructions_from_left, new_left): E = left.convert(context)?;
+                instructions.append(&mut instructions_from_left);
+                let (mut instructions_from_right, new_right): E = right.convert(context)?;
+                instructions.append(&mut instructions_from_right);
+                instructions.push(BirdsInstructionNode::JumpCondition(
+                    bird_op,
+                    new_left,
+                    new_right,
+                    jump_to_on_false,
+                ))
+            }
+            _ => {
+                let (mut instructions_from_cond, new_cond): E = self.convert(context)?;
+                instructions.append(&mut instructions_from_cond);
+                instructions.push(BirdsInstructionNode::JumpZero(new_cond, jump_to_on_false));
+            }
+        }
+        Ok(instructions)
     }
 }

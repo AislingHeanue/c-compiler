@@ -72,6 +72,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
             | BirdsInstructionNode::Jump(_)
             | BirdsInstructionNode::JumpZero(_, _)
             | BirdsInstructionNode::JumpNotZero(_, _)
+            | BirdsInstructionNode::JumpCondition(_, _, _, _)
             | BirdsInstructionNode::Label(_)
             | BirdsInstructionNode::StoreInPointer(_, _) => Some(instruction),
         }
@@ -158,6 +159,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                     // }
                 }
                 BirdsInstructionNode::Binary(_, left, right, _)
+                |BirdsInstructionNode::JumpCondition(_, left, right, _)
                 | BirdsInstructionNode::AddPointer(left, right, _, _) => {
                     if matches!(left, BirdsValueNode::Var(_)) && !live_variables.contains(left) {
                         live_variables.push(left.clone())

@@ -55,6 +55,15 @@ codegen)
 	;;
 run)
 	output_name=${first_file%.c}
+	result=$(bash -c "$binary $file")
+	$output_name
+	unoptimized_result_code=$?
+	echo
+	echo "Unoptimized result of $name: $unoptimized_result_code"
+
+	echo "Unoptimized code:"
+	bash -c "$binary $file -S" | bat -l asm --paging=never
+
 	result=$(bash -c "$binary $file --optimize")
 	# result=$(bash -c "$binary $file")
 	# Run the outputted binary (if it exists)

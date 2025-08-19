@@ -30,6 +30,7 @@ impl InstructionMatching<BirdsInstructionNode, BirdsInstructionInfo>
             BirdsInstructionNode::Jump(_)
             | BirdsInstructionNode::JumpZero(_, _)
             | BirdsInstructionNode::JumpNotZero(_, _)
+            | BirdsInstructionNode::JumpCondition(_, _, _, _)
             | BirdsInstructionNode::Return(_) => {
                 current_node
                     .instructions
@@ -65,7 +66,8 @@ impl InstructionMatching<BirdsInstructionNode, BirdsInstructionInfo>
                 self.add_edge(index, &other_index);
             }
             BirdsInstructionNode::JumpZero(_, label)
-            | BirdsInstructionNode::JumpNotZero(_, label) => {
+            | BirdsInstructionNode::JumpNotZero(_, label)
+            | BirdsInstructionNode::JumpCondition(_, _, _, label) => {
                 let other_index = *self.label_block_locations.get(label).unwrap();
                 self.add_edge(index, &other_index);
                 self.add_edge(index, next_index);
