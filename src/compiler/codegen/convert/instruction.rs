@@ -11,13 +11,13 @@ use crate::compiler::{
 };
 use std::error::Error;
 
-use super::{classify_function_args, classify_return, Convert, ReturnInfo};
+use super::{pass_args_to_callee, pass_returns_to_caller, Convert, ReturnInfo};
 
 impl Convert<Vec<Instruction>> for BirdsInstructionNode {
     fn convert(self, context: &mut ConvertContext) -> Result<Vec<Instruction>, Box<dyn Error>> {
         Ok(match self {
             BirdsInstructionNode::Return(Some(src)) => {
-                let returns = classify_return(src.clone(), context)?;
+                let returns = pass_returns_to_caller(src.clone(), context)?;
                 let this_type = AssemblyType::infer(&src, context)?.0;
                 let mut instructions = Vec::new();
                 if returns.uses_memory {
@@ -436,7 +436,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 let mut instructions = Vec::new();
 
                 let returns = if let Some(ref d) = dst {
-                    classify_return(d.clone(), context)?
+                    pass_returns_to_caller(d.clone(), context)?
                 } else {
                     ReturnInfo {
                         integer: Vec::new(),
@@ -455,7 +455,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     0
                 };
 
-                let args = classify_function_args(args, returns.uses_memory, context)?;
+                let args = pass_args_to_callee(args, returns.uses_memory, context)?;
 
                 let len_stack_args = args.stack.len();
                 let stack_padding: i64 = if len_stack_args % 2 == 1 { 8 } else { 0 };

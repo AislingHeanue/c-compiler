@@ -301,8 +301,6 @@ impl CodeDisplay for StaticInitialiser {
                 let label_start = if context.is_mac { "L" } else { ".L" };
                 format!(".quad {}{}", label_start, l)
             }
-            // print 17 digits of precision so that when the linker re-converts this to a real
-            // double value, this has enough precision to guarantee the original value.
             StaticInitialiser::Double(d) => {
                 // use the actual bits of the f64 value in the assembly
                 // more precise (if needed), but less nice to look at/debug
@@ -641,11 +639,23 @@ impl CodeDisplay for Instruction {
                 context.regular();
                 out
             }
+            Instruction::Pop(r) => {
+                context.long();
+                let out = format!(
+                    "{:indent$}popq {}", // TODO: double check
+                    "",
+                    r.show(context),
+                    indent = context.indent
+                );
+                context.regular();
+                out
+            }
             Instruction::Call(s) => {
                 let function_name = if context.is_mac {
                     "_".to_string() + s
                 } else if context.is_linux {
-                    if let AssemblySymbolInfo::Function(false, _) = context.symbols.get(s).unwrap()
+                    if let AssemblySymbolInfo::Function(false, _, _, _) =
+                        context.symbols.get(s).unwrap()
                     {
                         // if a function isn't defined in this file, call it from another file (ie
                         // externally link it)
@@ -748,6 +758,7 @@ impl CodeDisplay for Register {
         match context.word_length_bytes {
             1 => match self {
                 Register::AX => "%al",
+                Register::BX => "%bl",
                 Register::CX => "%cl",
                 Register::DI => "%dil",
                 Register::DX => "%dl",
@@ -756,6 +767,10 @@ impl CodeDisplay for Register {
                 Register::R9 => "%r9b",
                 Register::R10 => "%r10b",
                 Register::R11 => "%r11b",
+                Register::R12 => "%r12b",
+                Register::R13 => "%r13b",
+                Register::R14 => "%r14b",
+                Register::R15 => "%r15b",
                 Register::SP => "%rsp",
                 Register::BP => "%rbp",
                 Register::XMM0 => "%xmm0",
@@ -766,11 +781,18 @@ impl CodeDisplay for Register {
                 Register::XMM5 => "%xmm5",
                 Register::XMM6 => "%xmm6",
                 Register::XMM7 => "%xmm7",
+                Register::XMM8 => "%xmm8",
+                Register::XMM9 => "%xmm9",
+                Register::XMM10 => "%xmm10",
+                Register::XMM11 => "%xmm11",
+                Register::XMM12 => "%xmm12",
+                Register::XMM13 => "%xmm13",
                 Register::XMM14 => "%xmm14",
                 Register::XMM15 => "%xmm15",
             },
             4 => match self {
                 Register::AX => "%eax",
+                Register::BX => "%ebx",
                 Register::CX => "%ecx",
                 Register::DI => "%edi",
                 Register::DX => "%edx",
@@ -779,6 +801,10 @@ impl CodeDisplay for Register {
                 Register::R9 => "%r9d",
                 Register::R10 => "%r10d",
                 Register::R11 => "%r11d",
+                Register::R12 => "%r12d",
+                Register::R13 => "%r13d",
+                Register::R14 => "%r14d",
+                Register::R15 => "%r15d",
                 Register::SP => "%rsp",
                 Register::BP => "%rbp",
                 Register::XMM0 => "%xmm0",
@@ -789,11 +815,18 @@ impl CodeDisplay for Register {
                 Register::XMM5 => "%xmm5",
                 Register::XMM6 => "%xmm6",
                 Register::XMM7 => "%xmm7",
+                Register::XMM8 => "%xmm8",
+                Register::XMM9 => "%xmm9",
+                Register::XMM10 => "%xmm10",
+                Register::XMM11 => "%xmm11",
+                Register::XMM12 => "%xmm12",
+                Register::XMM13 => "%xmm13",
                 Register::XMM14 => "%xmm14",
                 Register::XMM15 => "%xmm15",
             },
             8 => match self {
                 Register::AX => "%rax",
+                Register::BX => "%rbx",
                 Register::CX => "%rcx",
                 Register::DI => "%rdi",
                 Register::DX => "%rdx",
@@ -802,6 +835,10 @@ impl CodeDisplay for Register {
                 Register::R9 => "%r9",
                 Register::R10 => "%r10",
                 Register::R11 => "%r11",
+                Register::R12 => "%r12",
+                Register::R13 => "%r13",
+                Register::R14 => "%r14",
+                Register::R15 => "%r15",
                 Register::SP => "%rsp",
                 Register::BP => "%rbp",
                 Register::XMM0 => "%xmm0",
@@ -812,6 +849,12 @@ impl CodeDisplay for Register {
                 Register::XMM5 => "%xmm5",
                 Register::XMM6 => "%xmm6",
                 Register::XMM7 => "%xmm7",
+                Register::XMM8 => "%xmm8",
+                Register::XMM9 => "%xmm9",
+                Register::XMM10 => "%xmm10",
+                Register::XMM11 => "%xmm11",
+                Register::XMM12 => "%xmm12",
+                Register::XMM13 => "%xmm13",
                 Register::XMM14 => "%xmm14",
                 Register::XMM15 => "%xmm15",
             },

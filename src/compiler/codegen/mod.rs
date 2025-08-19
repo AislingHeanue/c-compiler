@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, error::Error, mem::swap};
 
-use convert::{classify_return_type, Convert, ConvertContext};
+use convert::{classify_params_by_type, classify_return_by_type, Convert, ConvertContext};
 use display::DisplayContext;
 use validate::{Validate, ValidateContext, VALIDATION_PASSES};
 
@@ -51,8 +51,8 @@ pub enum AssemblyType {
 pub enum AssemblySymbolInfo {
     // type, is_static is_a_top_level_constant
     Object(AssemblyType, bool, bool),
-    // is_defined, return_value_uses_memory
-    Function(bool, bool),
+    // is_defined, return_value_uses_memory, registers_used_for_params, registers_used_for_return
+    Function(bool, bool, Vec<Register>, Vec<Register>),
 }
 
 #[derive(Debug)]
@@ -97,6 +97,8 @@ enum Instruction {
     Label(String),
     // only takes 4-byte operands at dst
     Push(Operand),
+    // pops from the stack into a given register (affects RSP)
+    Pop(Register),
     Call(String),
     Ret,
 }
@@ -153,6 +155,7 @@ impl ImmediateValue {
 #[derive(Clone, Debug)]
 enum Register {
     AX, // eax or rax
+    BX,
     CX,
     DX, // edx or rdx
     DI,
@@ -161,6 +164,10 @@ enum Register {
     R9,
     R10,
     R11,
+    R12,
+    R13,
+    R14,
+    R15,
     SP, // the stack pointer!! eg %rsp
     BP, // %rbp for function stack frame setup
     XMM0,
@@ -171,6 +178,12 @@ enum Register {
     XMM5,
     XMM6,
     XMM7,
+    XMM8,
+    XMM9,
+    XMM10,
+    XMM11,
+    XMM12,
+    XMM13,
     XMM14,
     XMM15,
 }
@@ -254,15 +267,25 @@ pub fn codegen(
         if let Type::Function(_, _) = v.symbol_type {
             if let StorageInfo::Function(defined, _) = v.storage {
                 let type_info = v.symbol_type.clone();
-                let uses_memory = if let Type::Function(returns, _) = type_info {
-                    classify_return_type(&returns, &mut context)?
-                } else {
-                    false
-                };
+                let (uses_memory, return_registers, param_registers) =
+                    if let Type::Function(returns, params) = type_info {
+                        let (uses_memory, return_registers) =
+                            classify_return_by_type(&returns, &mut context)?;
+                        let param_registers =
+                            classify_params_by_type(&params, uses_memory, &mut context)?;
+                        (uses_memory, return_registers, param_registers)
+                    } else {
+                        (false, Vec::new(), Vec::new())
+                    };
 
                 assembly_map.insert(
                     k.clone(),
-                    AssemblySymbolInfo::Function(defined, uses_memory),
+                    AssemblySymbolInfo::Function(
+                        defined,
+                        uses_memory,
+                        return_registers,
+                        param_registers,
+                    ),
                 );
             } else {
                 panic!("Function storage info has the wrong type")

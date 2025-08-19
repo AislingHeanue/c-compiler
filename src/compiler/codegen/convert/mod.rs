@@ -8,7 +8,8 @@ use std::{collections::HashMap, error::Error};
 
 use super::{
     AssemblyType, BinaryOperator, ConditionCode, ImmediateValue, Instruction, Operand, Program,
-    Register, TopLevel, UnaryOperator, DOUBLE_PARAM_REGISTERS, FUNCTION_PARAM_REGISTERS,
+    Register, TopLevel, UnaryOperator, DOUBLE_PARAM_REGISTERS, DOUBLE_RETURN_REGISTERS,
+    FUNCTION_PARAM_REGISTERS, FUNCTION_RETURN_REGISTERS,
 };
 
 mod assembly_type;
@@ -69,7 +70,7 @@ struct ReturnInfo {
     uses_memory: bool,
 }
 
-fn classify_function_args(
+fn pass_args_to_callee(
     values: Vec<BirdsValueNode>,
     return_value_uses_memory: bool,
     context: &mut ConvertContext,
@@ -145,7 +146,7 @@ fn classify_function_args(
     Ok(args)
 }
 
-fn classify_return(
+fn pass_returns_to_caller(
     v: BirdsValueNode,
     context: &mut ConvertContext,
 ) -> Result<ReturnInfo, Box<dyn Error>> {
@@ -189,32 +190,107 @@ fn classify_return(
     Ok(out)
 }
 
-pub fn classify_return_type(
+pub fn classify_return_by_type(
     t: &Type,
     context: &mut ConvertContext,
-) -> Result<bool, Box<dyn Error>> {
+) -> Result<(bool, Vec<Register>), Box<dyn Error>> {
+    let mut registers = Vec::new();
     if *t == Type::Void {
-        Ok(false)
+        Ok((false, registers))
     } else {
         let is_scalar = t.is_scalar();
         if !t.is_complete(&mut context.structs) {
             // otherwise, this function causes declarations of functions with incomplete return
             // types to misbehave, even if those functions are never used.
-            return Ok(false);
+            return Ok((false, registers));
         }
         let assembly_type = t.clone().convert(context)?;
 
-        if assembly_type == AssemblyType::Double || is_scalar {
-            Ok(false)
+        if assembly_type == AssemblyType::Double {
+            registers.push(DOUBLE_RETURN_REGISTERS[0].clone());
+            Ok((false, registers))
+        } else if is_scalar {
+            registers.push(FUNCTION_RETURN_REGISTERS[0].clone());
+            Ok((false, registers))
         } else if let Type::Struct(_, _) = t {
             let classes = classify_struct(t, context);
+            let mut integers_used = 0;
+            let mut sse_used = 0;
+            let mut uses_memory = false;
+            for class in classes {
+                match class {
+                    Class::Memory => uses_memory = true,
+                    Class::Sse => {
+                        registers.push(DOUBLE_RETURN_REGISTERS[sse_used].clone());
+                        sse_used += 1;
+                    }
+                    Class::Integer => {
+                        registers.push(FUNCTION_RETURN_REGISTERS[integers_used].clone());
+                        integers_used += 1;
+                    }
+                }
+            }
 
-            Ok(*classes.first().unwrap() == Class::Memory)
+            Ok((uses_memory, registers))
         } else {
             // return type already can't be arrays or functions
             unreachable!()
         }
     }
+}
+
+pub fn classify_params_by_type(
+    types: &[Type],
+    return_value_uses_memory: bool,
+    context: &mut ConvertContext,
+) -> Result<Vec<Register>, Box<dyn Error>> {
+    let mut registers = Vec::new();
+    let mut integers_used = 0;
+    let mut sse_used = 0;
+    if return_value_uses_memory {
+        integers_used = 1;
+    }
+    for t in types.iter() {
+        let is_scalar = t.is_scalar();
+        if !t.is_complete(&mut context.structs) {
+            // otherwise, this function causes declarations of functions with incomplete param
+            // types to misbehave, even if those functions are never used.
+            continue;
+        }
+        let assembly_type = t.clone().convert(context)?;
+
+        if assembly_type == AssemblyType::Double {
+            if sse_used < 8 {
+                registers.push(DOUBLE_PARAM_REGISTERS[sse_used].clone());
+                sse_used += 1;
+            }
+        } else if is_scalar {
+            if integers_used < 6 {
+                registers.push(FUNCTION_PARAM_REGISTERS[integers_used].clone());
+                integers_used += 1;
+            }
+        } else if let Type::Struct(_, _) = t {
+            let classes = classify_struct(t, context);
+            for class in classes {
+                match class {
+                    Class::Memory => {}
+                    Class::Sse => {
+                        if sse_used < 8 {
+                            registers.push(DOUBLE_PARAM_REGISTERS[sse_used].clone());
+                            sse_used += 1;
+                        }
+                    }
+                    Class::Integer => {
+                        if integers_used < 6 {
+                            registers.push(FUNCTION_PARAM_REGISTERS[integers_used].clone());
+                            integers_used += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(registers)
 }
 
 fn get_var_name(v: &BirdsValueNode) -> String {

@@ -68,7 +68,7 @@ impl Operand {
             //     panic!("Could not find matching declaration for {:?}", name)
             // }
             Some(AssemblySymbolInfo::Object(_, false, true)) => unreachable!(),
-            Some(AssemblySymbolInfo::Function(_, _)) => unreachable!(),
+            Some(AssemblySymbolInfo::Function(_, _, _, _)) => unreachable!(),
         }
     }
 }

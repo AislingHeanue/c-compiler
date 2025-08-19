@@ -6,7 +6,7 @@ use itertools::{process_results, Itertools};
 use std::error::Error;
 
 use super::{
-    classify_function_args, classify_return_type, AssemblyType, Convert, ConvertContext,
+    classify_return_by_type, pass_args_to_callee, AssemblyType, Convert, ConvertContext,
     Instruction, Operand, Register, TopLevel, DOUBLE_PARAM_REGISTERS, FUNCTION_PARAM_REGISTERS,
 };
 
@@ -42,12 +42,12 @@ impl BirdsTopLevel {
         let return_uses_memory = if let Some(Type::Function(return_type, _)) =
             context.symbols.get(&name).map(|a| &a.symbol_type)
         {
-            classify_return_type(&return_type.clone(), context)?
+            classify_return_by_type(&return_type.clone(), context)?.0
         } else {
             unreachable!()
         };
 
-        let params = classify_function_args(params_vars, return_uses_memory, context)?;
+        let params = pass_args_to_callee(params_vars, return_uses_memory, context)?;
 
         let mut instructions: Vec<Instruction> = Vec::new();
         let register_offset = if return_uses_memory {

@@ -25,7 +25,7 @@ impl Validate for Vec<Instruction> {
                 context.current_stack_locations = HashMap::new();
                 context.current_stack_size = 0;
                 if context.current_function_name.is_some() {
-                    if let AssemblySymbolInfo::Function(_, true) = context
+                    if let AssemblySymbolInfo::Function(_, true, _,_) = context
                         .symbols
                         .get(context.current_function_name.as_ref().unwrap())
                         .unwrap()
@@ -186,6 +186,7 @@ impl Instruction {
             Instruction::Push(ref mut src) => {
                 src.replace_mock_register(context);
             }
+            Instruction::Pop(_) => {}, // pop only points to real registers
             Instruction::Call(_) => {}
             Instruction::Lea(ref mut src, ref mut dst) => {
                 src.replace_mock_register(context);
