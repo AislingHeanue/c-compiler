@@ -13,6 +13,7 @@ struct CompileConfig {
     optimize_config: OptimizeConfig,
 }
 
+#[derive(Debug)]
 struct OptimizeConfig {
     fold_constants: bool,
     propagate_copies: bool,

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-cargo run --quiet -- c/${1}.c -S >a.s
+cargo run --quiet -- c/${1}.c -S --optimize >a.s
+cargo run --quiet -- c/${1}.c --optimize
 bat c/${1}.c -l c --paging=never
 bat a.s -l asm --paging=never
 bash -c "./c/${1}"

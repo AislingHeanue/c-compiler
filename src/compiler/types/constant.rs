@@ -88,12 +88,6 @@ impl Constant {
     }
 
     pub fn is_zero(&self) -> bool {
-        if let Constant::Double(d) = self {
-            if d.to_bits() == (-0.0_f64).to_bits() {
-                // don't zero out negative zero
-                return false;
-            }
-        }
         matches!(
             self,
             Constant::Integer(0)
@@ -104,6 +98,14 @@ impl Constant {
                 | Constant::Char(0)
                 | Constant::UnsignedChar(0)
         )
+    }
+
+    pub fn promote(self) -> (Constant, bool) {
+        match &self {
+            Constant::Char(i) => (Constant::Integer((*i).into()), true),
+            Constant::UnsignedChar(i) => (Constant::UnsignedInteger((*i).into()), true),
+            _ => (self, false),
+        }
     }
 
     pub fn complement(&self) -> Constant {
@@ -219,6 +221,14 @@ impl Constant {
             Constant::UnsignedChar(i) => *i,
         };
         Constant::UnsignedChar(val)
+    }
+
+    // used to un-override the equality behaviour of nan operands during constant folding
+    pub fn double_eq(&self, other: &Constant) -> bool {
+        match (self, other) {
+            (Constant::Double(left), Constant::Double(right)) => left == right,
+            _ => self.eq(other),
+        }
     }
 }
 
@@ -432,13 +442,25 @@ impl BitXor for Constant {
 impl Shl for Constant {
     type Output = Self;
 
-    fn shl(self, rhs: Self) -> Self::Output {
+    fn shl(mut self, rhs: Self) -> Self::Output {
+        let is_promoted;
+        (self, is_promoted) = self.promote();
         let rhs = rhs.to_int();
         match (self, rhs) {
-            (Constant::Integer(a), Constant::Integer(b)) => Constant::Integer(a << b),
+            (Constant::Integer(a), Constant::Integer(b)) => {
+                if is_promoted {
+                    Constant::Char((a << b) as i8)
+                } else {
+                    Constant::Integer(a << b)
+                }
+            }
             (Constant::Long(a), Constant::Integer(b)) => Constant::Long(a << b),
             (Constant::UnsignedInteger(a), Constant::Integer(b)) => {
-                Constant::UnsignedInteger(a << b)
+                if is_promoted {
+                    Constant::UnsignedChar((a << b) as u8)
+                } else {
+                    Constant::UnsignedInteger(a << b)
+                }
             }
             (Constant::UnsignedLong(a), Constant::Integer(b)) => Constant::UnsignedLong(a << b),
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
@@ -452,13 +474,25 @@ impl Shl for Constant {
 impl Shr for Constant {
     type Output = Self;
 
-    fn shr(self, rhs: Self) -> Self::Output {
+    fn shr(mut self, rhs: Self) -> Self::Output {
+        let is_promoted;
+        (self, is_promoted) = self.promote();
         let rhs = rhs.to_int();
         match (self, rhs) {
-            (Constant::Integer(a), Constant::Integer(b)) => Constant::Integer(a >> b),
+            (Constant::Integer(a), Constant::Integer(b)) => {
+                if is_promoted {
+                    Constant::Char((a >> b) as i8)
+                } else {
+                    Constant::Integer(a >> b)
+                }
+            }
             (Constant::Long(a), Constant::Integer(b)) => Constant::Long(a >> b),
             (Constant::UnsignedInteger(a), Constant::Integer(b)) => {
-                Constant::UnsignedInteger(a >> b)
+                if is_promoted {
+                    Constant::UnsignedChar((a >> b) as u8)
+                } else {
+                    Constant::UnsignedInteger(a >> b)
+                }
             }
             (Constant::UnsignedLong(a), Constant::Integer(b)) => Constant::UnsignedLong(a >> b),
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),

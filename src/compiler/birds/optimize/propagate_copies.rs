@@ -39,6 +39,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
             BirdsInstructionNode::Copy(ref mut src, ref dst) => {
                 for copy in reaching_copies.iter() {
                     if (copy.0 == *src && copy.1 == *dst) || (copy.1 == *src && copy.0 == *dst) {
+                        println!("KILLING (propagate copies) {:?}", instruction);
                         return None;
                     }
                 }
@@ -74,13 +75,23 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 }
                 Some(instruction)
             }
+            BirdsInstructionNode::CopyFromOffset(ref mut name, _, _) => {
+                for copy in reaching_copies.iter() {
+                    if let (BirdsValueNode::Var(src_name), BirdsValueNode::Var(dst_name)) = copy {
+                        if dst_name == name {
+                            *name = src_name.clone();
+                            break;
+                        }
+                    }
+                }
+                Some(instruction)
+            }
             BirdsInstructionNode::Jump(_)
             | BirdsInstructionNode::Return(None)
             | BirdsInstructionNode::Label(_)
             // GetAddress is never propagated to because it returns the sources, address, not its
             // pointer
-            | BirdsInstructionNode::GetAddress(_,_)
-            | BirdsInstructionNode::CopyFromOffset(_, _, _) => Some(instruction),
+            | BirdsInstructionNode::GetAddress(_,_)=> Some(instruction),
         }
     }
 
@@ -141,6 +152,8 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                         }
                         if context.aliased_variables.contains(&copy.0)
                             || context.aliased_variables.contains(&copy.1)
+                            || context.static_variables.contains(&copy.0)
+                            || context.static_variables.contains(&copy.1)
                         {
                             reaching_copies.remove(i);
                             continue;
@@ -151,6 +164,8 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                     for (i, copy) in reaching_copies.clone().iter().enumerate().rev() {
                         if context.aliased_variables.contains(&copy.0)
                             || context.aliased_variables.contains(&copy.1)
+                            || context.static_variables.contains(&copy.0)
+                            || context.static_variables.contains(&copy.1)
                         {
                             reaching_copies.remove(i);
                         }

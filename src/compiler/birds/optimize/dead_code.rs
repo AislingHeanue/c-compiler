@@ -72,7 +72,10 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
 
         // DELETE EMPTY BLOCKS
         for index in keys.iter() {
-            if self.nodes.get(index).unwrap().instructions.is_empty() {
+            if *index != 0
+                && *index != self.last_index
+                && self.nodes.get(index).unwrap().instructions.is_empty()
+            {
                 self.remove_node(*index);
             }
         }

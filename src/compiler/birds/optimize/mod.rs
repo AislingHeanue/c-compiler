@@ -16,15 +16,19 @@ use super::{
 };
 
 mod dead_code;
+mod dead_stores;
 mod flow_graph;
 mod fold_constants;
 mod propagate_copies;
 
+#[derive(Debug)]
 pub struct OptimizeContext {
     symbols: HashMap<String, SymbolInfo>,
     structs: HashMap<String, StructInfo>,
     block_reaching_copies: HashMap<usize, Vec<(BirdsValueNode, BirdsValueNode)>>,
+    block_live_variables: HashMap<usize, Vec<BirdsValueNode>>,
     aliased_variables: Vec<BirdsValueNode>,
+    static_variables: Vec<BirdsValueNode>,
     // all_copies: Vec<(BirdsValueNode, BirdsValueNode)>,
     config: OptimizeConfig,
 }
@@ -32,12 +36,14 @@ pub struct OptimizeContext {
 #[derive(Debug, Clone)]
 pub struct BirdsInstructionInfo {
     reaching_copies: Vec<(BirdsValueNode, BirdsValueNode)>,
+    live_variables: Vec<BirdsValueNode>,
 }
 
 impl BirdsInstructionInfo {
     pub fn new() -> BirdsInstructionInfo {
         BirdsInstructionInfo {
             reaching_copies: Vec::new(),
+            live_variables: Vec::new(),
         }
     }
 }
@@ -59,7 +65,9 @@ pub fn do_optimize(
         symbols,
         structs,
         block_reaching_copies: HashMap::new(),
+        block_live_variables: HashMap::new(),
         aliased_variables: Vec::new(),
+        static_variables: Vec::new(),
         config: optimize_config,
     };
     birds = birds.optimize(&mut context)?;
@@ -94,7 +102,8 @@ impl Optimize for Vec<BirdsInstructionNode> {
 
         while !self.is_empty() {
             let original_instructions = self.clone();
-            context.aliased_variables = address_taken_analysis(&self, context);
+            context.aliased_variables = address_taken_analysis(&self);
+            context.static_variables = static_variables(context);
 
             if context.config.fold_constants {
                 self.fold_constants(context)?;
@@ -127,10 +136,19 @@ impl Optimize for Vec<BirdsInstructionNode> {
     }
 }
 
-fn address_taken_analysis(
-    v: &[BirdsInstructionNode],
-    context: &mut OptimizeContext,
-) -> Vec<BirdsValueNode> {
+fn address_taken_analysis(v: &[BirdsInstructionNode]) -> Vec<BirdsValueNode> {
+    v.iter()
+        .filter_map(|instruction| {
+            if let BirdsInstructionNode::GetAddress(src, _) = instruction {
+                Some(src.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn static_variables(context: &mut OptimizeContext) -> Vec<BirdsValueNode> {
     context
         .symbols
         .iter()
@@ -141,12 +159,5 @@ fn address_taken_analysis(
                 None
             }
         })
-        .chain(v.iter().filter_map(|instruction| {
-            if let BirdsInstructionNode::GetAddress(src, _) = instruction {
-                Some(src.clone())
-            } else {
-                None
-            }
-        }))
         .collect()
 }

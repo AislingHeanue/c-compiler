@@ -1,11 +1,11 @@
-use std::{collections::HashMap, error::Error};
+use std::collections::HashMap;
 
 use crate::compiler::{
     birds::BirdsInstructionNode,
     flow_graph::{FlowGraph, FlowNode, InstructionMatching},
 };
 
-use super::{BirdsInstructionInfo, OptimizeContext};
+use super::BirdsInstructionInfo;
 
 impl InstructionMatching<BirdsInstructionNode, BirdsInstructionInfo>
     for FlowGraph<BirdsInstructionNode, BirdsInstructionInfo>
@@ -74,14 +74,5 @@ impl InstructionMatching<BirdsInstructionNode, BirdsInstructionInfo>
                 self.add_edge(index, next_index);
             }
         }
-    }
-}
-
-impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
-    pub fn eliminate_dead_stores(
-        &mut self,
-        _context: &mut OptimizeContext,
-    ) -> Result<(), Box<dyn Error>> {
-        Ok(())
     }
 }
