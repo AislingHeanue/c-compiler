@@ -310,8 +310,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
             {
                 let dst = new_temp_variable(self.1.as_ref().unwrap(), context);
 
-                let (mut instructions, new_left): E = left.convert(context)?;
-                let (mut instructions_from_right, new_right): E = right.convert(context)?;
+                let mut instructions = Vec::new();
                 context.last_end_label_number += 1;
                 let end_label_name = format!("end_{}", context.last_end_label_number);
 
@@ -322,15 +321,19 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 let true_label_name = format!("true_{}", context.last_true_label_number);
                 match op {
                     BinaryOperatorNode::Or => {
-                        instructions.push(BirdsInstructionNode::JumpNotZero(
-                            new_left,
-                            true_label_name.clone(),
-                        ));
+                        instructions.append(&mut left.convert_condition(
+                            true,
+                            &true_label_name,
+                            context,
+                        )?);
 
-                        instructions.append(&mut instructions_from_right);
+                        instructions.append(&mut right.convert_condition(
+                            true,
+                            &true_label_name,
+                            context,
+                        )?);
 
                         instructions.append(&mut vec![
-                            BirdsInstructionNode::JumpNotZero(new_right, true_label_name.clone()),
                             BirdsInstructionNode::Copy(
                                 BirdsValueNode::Constant(Constant::Integer(0)),
                                 dst.clone(),
@@ -345,15 +348,18 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         ]);
                     }
                     BinaryOperatorNode::And => {
-                        instructions.push(BirdsInstructionNode::JumpZero(
-                            new_left,
-                            false_label_name.clone(),
-                        ));
+                        instructions.append(&mut left.convert_condition(
+                            false,
+                            &false_label_name,
+                            context,
+                        )?);
 
-                        instructions.append(&mut instructions_from_right);
-
+                        instructions.append(&mut right.convert_condition(
+                            false,
+                            &false_label_name,
+                            context,
+                        )?);
                         instructions.append(&mut vec![
-                            BirdsInstructionNode::JumpZero(new_right, false_label_name.clone()),
                             BirdsInstructionNode::Copy(
                                 BirdsValueNode::Constant(Constant::Integer(1)),
                                 dst.clone(),
@@ -470,11 +476,8 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 context.last_else_label_number += 1;
                 let new_else_label_name = format!("else_{}", context.last_else_label_number);
 
-                let (mut instructions, new_cond): E = condition.convert(context)?;
-                instructions.push(BirdsInstructionNode::JumpZero(
-                    new_cond,
-                    new_else_label_name.clone(),
-                ));
+                let mut instructions =
+                    condition.convert_condition(false, &new_else_label_name, context)?;
                 let new_dst_type = self.1.clone().unwrap();
                 if new_dst_type == Type::Void {
                     let (mut instructions_from_then, _): D = then.convert(context)?;
