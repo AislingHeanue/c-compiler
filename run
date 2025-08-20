@@ -1,9 +1,26 @@
 #!/bin/bash
 
-cargo run --quiet -- c/${1}.c -S --optimize >a.s
-cargo run --quiet -- c/${1}.c --optimize
-bat c/${1}.c -l c --paging=never
-bat a.s -l asm --paging=never
-bash -c "./c/${1}"
-echo $?
-rm a.s
+output_name=c/$1
+name=$(basename ${1%.c})
+file=c/${1}.c
+binary="cargo run --quiet --"
+
+bat -l c --paging=never --theme "Visual Studio Dark+" $file
+
+echo "Unoptimized code:"
+bash -c "$binary $file -S" | bat -l asm --paging=never --theme "Visual Studio Dark+"
+a=$(bash -c "$binary $file")
+$output_name
+unoptimized_result_code=$?
+echo "Unoptimized result of $name: $unoptimized_result_code"
+echo
+
+echo "Code:"
+bash -c "$binary $file -S --optimize" | bat -l asm --paging=never --theme "Visual Studio Dark+"
+a=$(bash -c "$binary $file --optimize")
+$output_name
+result_code=$?
+echo "Result of $name: $result_code"
+
+rm c/$1
+rm c/$1.s

@@ -22,8 +22,25 @@ impl Operand {
                     | Register::XMM5
                     | Register::XMM6
                     | Register::XMM7
+                    | Register::XMM8
+                    | Register::XMM9
+                    | Register::XMM10
+                    | Register::XMM11
+                    | Register::XMM12
+                    | Register::XMM13
                     | Register::XMM14
                     | Register::XMM15
+            )
+        } else {
+            false
+        }
+    }
+
+    pub fn is_callee_saved_register(&self) -> bool {
+        if let Operand::Reg(r) = self {
+            matches!(
+                r,
+                Register::BX | Register::R12 | Register::R13 | Register::R14 | Register::R15
             )
         } else {
             false
@@ -69,6 +86,29 @@ impl Operand {
             // }
             Some(AssemblySymbolInfo::Object(_, false, true)) => unreachable!(),
             Some(AssemblySymbolInfo::Function(_, _, _, _)) => unreachable!(),
+        }
+    }
+
+    pub fn replace_mock_register_with_map(&mut self, context: &mut ValidateContext) {
+        match self {
+            Operand::MockReg(name) => {
+                if let Some(register) = context.register_map.get(name) {
+                    // println!("{:?} HAS BEEN RECOLOURED TO LIVE IN {:?}", name, register);
+                    *self = Operand::Reg(register.clone());
+                }
+                // else if name.contains(".") {
+                //     println!("WOOPS I SPILLED {:?}", name);
+                // }
+            }
+            Operand::MockMemory(name, offset) => {
+                if let Some(register) = context.register_map.get(name) {
+                    // println!("{:?} HAS BEEN RECOLOURED TO LIVE IN {:?}", name, register);
+                    *self = Operand::Memory(register.clone(), *offset);
+                } // else if name.contains(".") {
+                  //    println!("WOOPS I SPILLED {:?}", name);
+                  // }
+            }
+            _ => (),
         }
     }
 }

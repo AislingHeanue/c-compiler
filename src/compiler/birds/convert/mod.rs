@@ -19,6 +19,7 @@ mod statement_node;
 
 pub fn do_birds(
     parsed: ProgramNode,
+    ignore_stack_gaps: bool,
     symbols: HashMap<String, SymbolInfo>,
     structs: HashMap<String, StructInfo>,
 ) -> Result<BirdsResult, Box<dyn Error>> {
@@ -30,6 +31,7 @@ pub fn do_birds(
         last_true_label_number: 0,
         current_initialiser_offset: 0,
         num_block_strings: 0,
+        ignore_stack_gaps,
         symbols,
         structs,
     };
@@ -53,6 +55,7 @@ pub struct ConvertContext {
     last_true_label_number: i32,
     current_initialiser_offset: i32,
     num_block_strings: i32,
+    ignore_stack_gaps: bool,
     symbols: HashMap<String, SymbolInfo>,
     structs: HashMap<String, StructInfo>,
 }
@@ -107,7 +110,7 @@ impl Destination {
         match self {
             Destination::Direct(val) => (Vec::new(), val),
             Destination::Dereference(val) => {
-                println!("{:?} {:?}", val, target_type);
+                // println!("{:?} {:?}", val, target_type);
                 let new_dst = new_temp_variable(target_type, context);
                 (
                     vec![BirdsInstructionNode::LoadFromPointer(val, new_dst.clone())],

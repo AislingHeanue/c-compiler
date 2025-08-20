@@ -354,11 +354,7 @@ impl CodeDisplay for Instruction {
                             {:indent$}# (whose location was stored at the current RBP),\n\
                             {:indent$}# to free up the memory used by this function.\n\
                             {:indent$}# popq reads the value at RSP.\n\
-                            {:indent$}movq %rbp, %rsp\n\
-                            {:indent$}popq %rbp\n\
                             {:indent$}ret",
-                        "",
-                        "",
                         "",
                         "",
                         "",
@@ -368,15 +364,7 @@ impl CodeDisplay for Instruction {
                         indent = context.indent
                     )
                 } else {
-                    format!(
-                        "{:indent$}movq %rbp, %rsp\n\
-                            {:indent$}popq %rbp\n\
-                            {:indent$}ret",
-                        "",
-                        "",
-                        "",
-                        indent = context.indent
-                    )
+                    format!("{:indent$}ret", "", indent = context.indent)
                 }
             }
             Instruction::Mov(t, src, dst) => {
@@ -642,7 +630,7 @@ impl CodeDisplay for Instruction {
             Instruction::Pop(r) => {
                 context.long();
                 let out = format!(
-                    "{:indent$}popq {}", // TODO: double check
+                    "{:indent$}popq {}",
                     "",
                     r.show(context),
                     indent = context.indent
@@ -696,10 +684,10 @@ impl CodeDisplay for Operand {
                 ImmediateValue::Unsigned(i) => format!("${}", i),
             },
             Operand::Reg(reg) => reg.show(context),
-            Operand::MockReg(name) => panic!(
-                "Tried to generate assembly code with a mock register: {}",
-                name
-            ),
+            Operand::MockReg(name) => format!("MOCK {}", name), //panic!(
+            //     "Tried to generate assembly code with a mock register: {}",
+            //     name
+            // ),
             Operand::Memory(reg, num) => {
                 let previous_word_length = context.word_length_bytes;
                 context.word_length_bytes = 8;

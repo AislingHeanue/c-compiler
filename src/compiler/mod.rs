@@ -41,7 +41,8 @@ pub fn compile(
         return Ok(());
     }
 
-    let (birds_output, symbols, structs) = birds(parsed, symbols, structs)?;
+    let (birds_output, symbols, structs) =
+        birds(parsed, config.ignore_stack_gaps, symbols, structs)?;
     // if config.only_birds {
     //     println!("{:#?}", birds_output);
     //     return Ok(());

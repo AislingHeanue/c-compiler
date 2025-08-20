@@ -5,7 +5,10 @@ use super::{
     ImmediateValue, Instruction, Operand, Program, Register, TopLevel,
 };
 
+mod allocation;
+mod flow_graph;
 mod instruction;
+mod interference_graph;
 mod operand;
 
 pub trait Validate
@@ -15,11 +18,15 @@ where
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
 }
 
-pub static VALIDATION_PASSES: [ValidationPass; 8] = [
+pub static VALIDATION_PASSES: [ValidationPass; 10] = [
     // always first
+    ValidationPass::AllocateRegisters,
     ValidationPass::ReplaceMockRegisters,
     // always second, sets stack sizes for each function based on the previous pass.
+    // also saves and restores any callee-saved registers used while allocating registers
     ValidationPass::AllocateFunctionStack,
+    ValidationPass::RewriteRet,
+    // other validation steps
     ValidationPass::CheckNaNComparisons,
     ValidationPass::FixShiftOperatorRegister,
     ValidationPass::RewriteMovZeroExtend,
@@ -32,8 +39,10 @@ pub static VALIDATION_PASSES: [ValidationPass; 8] = [
 
 #[derive(Clone, Debug)]
 pub enum ValidationPass {
+    AllocateRegisters,
     ReplaceMockRegisters,
     AllocateFunctionStack,
+    RewriteRet,
     CheckNaNComparisons,
     FixShiftOperatorRegister,
     RewriteMovZeroExtend,
@@ -50,6 +59,11 @@ pub struct ValidateContext {
     stack_sizes: HashMap<String, u32>,
     current_function_name: Option<String>,
     num_labels: u32,
+    block_live_variables: HashMap<usize, Vec<Operand>>,
+    aliased_variables: Vec<Operand>,
+    static_variables: Vec<Operand>,
+    function_callee_saved_registers: HashMap<String, Vec<Register>>,
+    register_map: HashMap<String, Register>,
 }
 
 impl ValidateContext {
@@ -65,6 +79,11 @@ impl ValidateContext {
             stack_sizes: HashMap::new(),
             current_function_name: None,
             num_labels: context.num_labels,
+            block_live_variables: HashMap::new(),
+            aliased_variables: Vec::new(),
+            static_variables: Vec::new(),
+            function_callee_saved_registers: HashMap::new(),
+            register_map: HashMap::new(),
         }
     }
 }

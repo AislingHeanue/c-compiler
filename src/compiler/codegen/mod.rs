@@ -55,7 +55,7 @@ pub enum AssemblySymbolInfo {
     Function(bool, bool, Vec<Register>, Vec<Register>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Instruction {
     // Mov type, src, dst
     Mov(AssemblyType, Operand, Operand),
@@ -103,8 +103,8 @@ enum Instruction {
     Ret,
 }
 
-#[derive(Clone, Debug)]
-enum Operand {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Operand {
     Imm(ImmediateValue), //constant numeric value
     Reg(Register),       // register in assembly
     MockReg(String),     // mocked register for temporary use.
@@ -117,8 +117,8 @@ enum Operand {
     Indexed(Register, Register, i32),
 }
 
-#[derive(Clone, Debug)]
-enum ImmediateValue {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ImmediateValue {
     Signed(i64),
     Unsigned(u64),
 }
@@ -152,8 +152,8 @@ impl ImmediateValue {
     }
 }
 
-#[derive(Clone, Debug)]
-enum Register {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Register {
     AX, // eax or rax
     BX,
     CX,
@@ -231,7 +231,7 @@ pub enum BinaryOperator {
     Or,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ConditionCode {
     E,
     Ne,
@@ -283,8 +283,8 @@ pub fn codegen(
                     AssemblySymbolInfo::Function(
                         defined,
                         uses_memory,
-                        return_registers,
                         param_registers,
+                        return_registers,
                     ),
                 );
             } else {
@@ -318,6 +318,11 @@ pub fn codegen(
     }
 
     let mut validate_context = ValidateContext::new(assembly_map, &context);
+    // converted.displaying_context = Some(RefCell::new(DisplayContext::new(
+    //     &context,
+    //     validate_context.clone(),
+    // )));
+    // println!("{}", converted);
 
     for pass in VALIDATION_PASSES.iter() {
         validate_context.pass = Some(pass.clone());

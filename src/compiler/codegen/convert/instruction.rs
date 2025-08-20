@@ -277,23 +277,28 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 BirdsValueNode::Var(src_name),
                 BirdsValueNode::Var(dst_name),
             ) => {
-                let src_size = context
-                    .symbols
-                    .get(&src_name)
-                    .unwrap()
-                    .symbol_type
-                    .clone()
-                    .get_size(&mut context.structs) as i32;
-                let mut instructions = Vec::new();
-                Instruction::copy_bytes(
-                    src_size,
-                    &mut instructions,
-                    &Operand::MockReg(src_name),
-                    &Operand::MockReg(dst_name),
-                    0,
-                    0,
-                );
-                instructions
+                let t = context.symbols.get(&src_name).unwrap().symbol_type.clone();
+                if t.is_scalar() {
+                    // do not use fancy memory stuff for transferring between scalar types
+                    let src_type = t.convert(context)?;
+                    vec![Instruction::Mov(
+                        src_type,
+                        Operand::MockReg(src_name.clone()),
+                        Operand::MockReg(dst_name.clone()),
+                    )]
+                } else {
+                    let src_size = t.get_size(&mut context.structs) as i32;
+                    let mut instructions = Vec::new();
+                    Instruction::copy_bytes(
+                        src_size,
+                        &mut instructions,
+                        &Operand::MockReg(src_name),
+                        &Operand::MockReg(dst_name),
+                        0,
+                        0,
+                    );
+                    instructions
+                }
             }
             BirdsInstructionNode::Copy(src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
@@ -304,22 +309,34 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 )]
             }
             BirdsInstructionNode::CopyToOffset(BirdsValueNode::Var(src_name), dst, offset) => {
-                let src_size = context
-                    .symbols
-                    .get(&src_name)
-                    .unwrap()
-                    .symbol_type
-                    .clone()
-                    .get_size(&mut context.structs) as i32;
+                let t = context.symbols.get(&src_name).unwrap().symbol_type.clone();
+                let src_size = t.get_size(&mut context.structs) as i32;
+
                 let mut instructions = Vec::new();
-                Instruction::copy_bytes(
-                    src_size,
-                    &mut instructions,
-                    &Operand::MockReg(src_name),
-                    &Operand::MockReg(dst),
-                    0,
-                    offset,
-                );
+                if t.is_scalar() && offset == 0 {
+                    instructions.push(Instruction::Mov(
+                        t.convert(context)?,
+                        Operand::MockReg(src_name),
+                        Operand::MockReg(dst),
+                    ))
+                } else if t.is_scalar() {
+                    Instruction::copy_bytes_from_scalar(
+                        &t.convert(context)?,
+                        &mut instructions,
+                        &Operand::MockReg(src_name),
+                        &Operand::MockReg(dst),
+                        offset,
+                    );
+                } else {
+                    Instruction::copy_bytes(
+                        src_size,
+                        &mut instructions,
+                        &Operand::MockReg(src_name),
+                        &Operand::MockReg(dst),
+                        0,
+                        offset,
+                    );
+                }
                 instructions
             }
             BirdsInstructionNode::CopyToOffset(src, dst, offset) => {
@@ -331,22 +348,33 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 )]
             }
             BirdsInstructionNode::CopyFromOffset(src, offset, BirdsValueNode::Var(dst_name)) => {
-                let dst_size = context
-                    .symbols
-                    .get(&dst_name)
-                    .unwrap()
-                    .symbol_type
-                    .clone()
-                    .get_size(&mut context.structs) as i32;
+                let t = context.symbols.get(&dst_name).unwrap().symbol_type.clone();
+                let dst_size = t.get_size(&mut context.structs) as i32;
                 let mut instructions = Vec::new();
-                Instruction::copy_bytes(
-                    dst_size,
-                    &mut instructions,
-                    &Operand::MockReg(src),
-                    &Operand::MockReg(dst_name),
-                    offset,
-                    0,
-                );
+                if t.is_scalar() && offset == 0 {
+                    instructions.push(Instruction::Mov(
+                        t.convert(context)?,
+                        Operand::MockReg(src),
+                        Operand::MockReg(dst_name),
+                    ))
+                } else if t.is_scalar() {
+                    Instruction::copy_bytes_to_scalar(
+                        &t.convert(context)?,
+                        &mut instructions,
+                        &Operand::MockReg(src),
+                        &Operand::MockReg(dst_name),
+                        offset,
+                    );
+                } else {
+                    Instruction::copy_bytes(
+                        dst_size,
+                        &mut instructions,
+                        &Operand::MockReg(src),
+                        &Operand::MockReg(dst_name),
+                        offset,
+                        0,
+                    );
+                }
                 instructions
             }
             BirdsInstructionNode::CopyFromOffset(src, offset, dst) => {
@@ -614,7 +642,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     for (i, op) in returns.double.iter().enumerate() {
                         let this_src = Operand::Reg(DOUBLE_RETURN_REGISTERS[i].clone());
                         instructions.push(Instruction::Mov(
-                            AssemblyType::Quadword,
+                            AssemblyType::Double,
                             this_src,
                             op.clone(),
                         ))
@@ -893,13 +921,8 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 BirdsValueNode::Var(src_name),
                 BirdsValueNode::Var(dst_name),
             ) => {
-                let dst_size = context
-                    .symbols
-                    .get(&dst_name)
-                    .unwrap()
-                    .symbol_type
-                    .clone()
-                    .get_size(&mut context.structs) as i32;
+                let t = context.symbols.get(&dst_name).unwrap().symbol_type.clone();
+                let dst_size = t.get_size(&mut context.structs) as i32;
 
                 let mut instructions = vec![Instruction::Mov(
                     AssemblyType::Quadword,
@@ -907,14 +930,22 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     Operand::MockReg(src_name.clone()),
                     Operand::Reg(Register::AX),
                 )];
-                Instruction::copy_bytes(
-                    dst_size,
-                    &mut instructions,
-                    &Operand::Memory(Register::AX, 0),
-                    &Operand::MockReg(dst_name),
-                    0,
-                    0,
-                );
+                if t.is_scalar() {
+                    instructions.push(Instruction::Mov(
+                        t.convert(context)?,
+                        Operand::Memory(Register::AX, 0),
+                        Operand::MockReg(dst_name),
+                    ))
+                } else {
+                    Instruction::copy_bytes(
+                        dst_size,
+                        &mut instructions,
+                        &Operand::Memory(Register::AX, 0),
+                        &Operand::MockReg(dst_name),
+                        0,
+                        0,
+                    );
+                }
                 instructions
             }
             BirdsInstructionNode::LoadFromPointer(src, dst) => {
@@ -932,28 +963,30 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 BirdsValueNode::Var(src_name),
                 BirdsValueNode::Var(dst_name),
             ) => {
-                let src_size = context
-                    .symbols
-                    .get(&src_name)
-                    .unwrap()
-                    .symbol_type
-                    .clone()
-                    .get_size(&mut context.structs) as i32;
-
+                let t = context.symbols.get(&src_name).unwrap().symbol_type.clone();
+                let src_size = t.get_size(&mut context.structs) as i32;
                 let mut instructions = vec![Instruction::Mov(
                     AssemblyType::Quadword,
                     // pointer types are scalars, no need to check
                     Operand::MockReg(dst_name.clone()),
                     Operand::Reg(Register::AX),
                 )];
-                Instruction::copy_bytes(
-                    src_size,
-                    &mut instructions,
-                    &Operand::MockReg(src_name),
-                    &Operand::Memory(Register::AX, 0),
-                    0,
-                    0,
-                );
+                if t.is_scalar() {
+                    instructions.push(Instruction::Mov(
+                        t.convert(context)?,
+                        Operand::MockReg(src_name),
+                        Operand::Memory(Register::AX, 0),
+                    ))
+                } else {
+                    Instruction::copy_bytes(
+                        src_size,
+                        &mut instructions,
+                        &Operand::MockReg(src_name),
+                        &Operand::Memory(Register::AX, 0),
+                        0,
+                        0,
+                    );
+                }
                 instructions
             }
             BirdsInstructionNode::StoreInPointer(src, dst) => {
@@ -1111,11 +1144,32 @@ impl Instruction {
             }
         }
     }
+
+    pub fn copy_bytes_from_scalar(
+        t: &AssemblyType,
+        instructions: &mut Vec<Instruction>,
+        src: &Operand,
+        dst: &Operand,
+        offset_dst: i32,
+    ) {
+        instructions.push(Instruction::Mov(*t, src.clone(), dst.offset(offset_dst)));
+    }
+
+    pub fn copy_bytes_to_scalar(
+        t: &AssemblyType,
+        instructions: &mut Vec<Instruction>,
+        src: &Operand,
+        dst: &Operand,
+        offset_src: i32,
+    ) {
+        instructions.push(Instruction::Mov(*t, src.offset(offset_src), dst.clone()));
+    }
 }
 
 impl Operand {
     fn offset(&self, offset: i32) -> Operand {
         match self {
+            // Operand::MockReg(_s) if offset == 0 => self.clone(),
             Operand::MockReg(s) => Operand::MockMemory(s.to_string(), offset),
             Operand::MockMemory(s, other_offset) => {
                 Operand::MockMemory(s.to_string(), offset + other_offset)

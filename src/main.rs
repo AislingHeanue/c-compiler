@@ -10,6 +10,7 @@ struct CompileConfig {
     only_birds: bool,
     only_codegen: bool,
     add_comments: bool,
+    ignore_stack_gaps: bool,
     optimize_config: OptimizeConfig,
 }
 
@@ -39,6 +40,7 @@ fn main() {
     let mut propagate_copies = false;
     let mut eliminate_dead_code = false;
     let mut eliminate_dead_stores = false;
+    let mut ignore_stack_gaps = false;
     for arg in &args[1..] {
         match arg.as_str() {
             "--lex" => only_lex = true,
@@ -54,6 +56,7 @@ fn main() {
             "--propagate-copies" => propagate_copies = true,
             "--eliminate-unreachable-code" => eliminate_dead_code = true,
             "--eliminate-dead-stores" => eliminate_dead_stores = true,
+            "--ignore-stack-gaps" => ignore_stack_gaps = true,
             "--optimize" => {
                 fold_constants = true;
                 propagate_copies = true;
@@ -104,6 +107,7 @@ fn main() {
                 only_birds,
                 only_codegen,
                 add_comments,
+                ignore_stack_gaps,
                 optimize_config: OptimizeConfig {
                     fold_constants,
                     propagate_copies,

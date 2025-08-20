@@ -1,12 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use itertools::Itertools;
 
 use crate::compiler::codegen::{align_stack_size, AssemblySymbolInfo};
 
 use super::{
-    AssemblyType, BinaryOperator, ConditionCode, ImmediateValue, Instruction, Operand, Register,
-    Validate, ValidateContext, ValidationPass,
+    allocation::AllocateRegisters, AssemblyType, BinaryOperator, ConditionCode, ImmediateValue,
+    Instruction, Operand, Register, Validate, ValidateContext, ValidationPass,
 };
 
 impl Validate for Vec<Instruction> {
@@ -19,21 +19,29 @@ impl Validate for Vec<Instruction> {
             return Ok(());
         }
         match context.pass.clone().unwrap() {
+            ValidationPass::AllocateRegisters => {
+                context.aliased_variables = address_taken_analysis(self)
+                    .into_iter()
+                    .unique()
+                    .collect_vec();
+                context.static_variables =
+                    static_variables(context).into_iter().unique().collect_vec();
+                self.allocate_registers(context)?;
+                self.allocate_registers_for_double(context)?;
+            }
             ValidationPass::ReplaceMockRegisters => {
                 // SECOND PASS: replace every mock register with an entry on the stack, making sure to keep
                 // a map from register names to stack locations
                 context.current_stack_locations = HashMap::new();
                 context.current_stack_size = 0;
-                if context.current_function_name.is_some() {
-                    if let AssemblySymbolInfo::Function(_, true, _,_) = context
-                        .symbols
-                        .get(context.current_function_name.as_ref().unwrap())
-                        .unwrap()
-                    {
-                        // start the stack size at 8, so that we can read the location to store the
-                        // return value from the first 8 bytes on the stack
-                        context.current_stack_size = 8;
-                    }
+                if let AssemblySymbolInfo::Function(_, true, _, _) = context
+                    .symbols
+                    .get(context.current_function_name.as_ref().unwrap())
+                    .unwrap()
+                {
+                    // start the stack size at 8, so that we can read the location to store the
+                    // return value from the first 8 bytes on the stack
+                    context.current_stack_size = 8;
                 }
                 *self = Instruction::update_instructions(
                     self.drain(..).collect_vec(),
@@ -50,9 +58,17 @@ impl Validate for Vec<Instruction> {
                     .stack_sizes
                     .get(context.current_function_name.as_ref().unwrap())
                     .unwrap();
+                let callee_registers = context
+                    .function_callee_saved_registers
+                    .get(context.current_function_name.as_ref().unwrap())
+                    .cloned()
+                    .unwrap_or(Vec::new());
+                let callee_registers_size = (8 * callee_registers.len()) as u32;
+                let aligned_total_stack_size =
+                    align_stack_size((stack_size + callee_registers_size).into(), 16);
                 // THIRD PASS: use the value of current_max_pointer to add an instruction to the start of
                 // the function
-                *self = vec![
+                let mut initial_vec = vec![
                     // push the address of RBP to the stack (at RSP).
                     Instruction::Push(Operand::Reg(Register::BP)),
                     // move RBP to RSP's current location.
@@ -61,20 +77,32 @@ impl Validate for Vec<Instruction> {
                         Operand::Reg(Register::SP),
                         Operand::Reg(Register::BP),
                     ),
-                    // allocate space for local variables in the space before RSP in the stack.
-                    Instruction::Binary(
-                        BinaryOperator::Sub,
-                        AssemblyType::Quadword,
-                        Operand::Imm(ImmediateValue::Unsigned(align_stack_size(
-                            (*stack_size).into(),
-                            16,
-                        ))),
-                        Operand::Reg(Register::SP),
-                    ),
-                ]
-                .into_iter()
-                .chain(self.drain(..))
-                .collect();
+                ];
+                let offset = aligned_total_stack_size - callee_registers_size as u64;
+                if offset != 0 {
+                    initial_vec.push(
+                        // allocate space for local variables in the space before RSP in the stack.
+                        Instruction::Binary(
+                            BinaryOperator::Sub,
+                            AssemblyType::Quadword,
+                            Operand::Imm(ImmediateValue::Unsigned(
+                                aligned_total_stack_size - callee_registers_size as u64,
+                            )),
+                            Operand::Reg(Register::SP),
+                        ),
+                    )
+                }
+                for r in callee_registers.into_iter() {
+                    initial_vec.push(Instruction::Push(Operand::Reg(r)));
+                }
+                *self = initial_vec.into_iter().chain(self.drain(..)).collect();
+            }
+            ValidationPass::RewriteRet => {
+                *self = Instruction::update_instructions(
+                    self.drain(..).collect_vec(),
+                    context,
+                    Instruction::rewrite_ret,
+                );
             }
             ValidationPass::CheckNaNComparisons => {
                 *self = Instruction::update_instructions(
@@ -136,6 +164,38 @@ impl Instruction {
             .collect()
     }
 
+    fn rewrite_ret(self, context: &mut ValidateContext) -> Vec<Instruction> {
+        match self {
+            Instruction::Ret => {
+                let mut instructions = VecDeque::new();
+                instructions.append(
+                    &mut vec![
+                        Instruction::Mov(
+                            AssemblyType::Quadword,
+                            Operand::Reg(Register::BP),
+                            Operand::Reg(Register::SP),
+                        ),
+                        Instruction::Pop(Register::BP),
+                        Instruction::Ret,
+                    ]
+                    .into(),
+                );
+
+                let callee_registers = context
+                    .function_callee_saved_registers
+                    .get(context.current_function_name.as_ref().unwrap())
+                    .cloned()
+                    .unwrap_or(Vec::new());
+
+                for r in callee_registers.into_iter() {
+                    instructions.push_front(Instruction::Pop(r));
+                }
+                instructions.into()
+            }
+            _ => vec![self],
+        }
+    }
+
     fn replace_mock_registers(mut self, context: &mut ValidateContext) -> Vec<Instruction> {
         match self {
             Instruction::Mov(_, ref mut src, ref mut dst) => {
@@ -186,7 +246,7 @@ impl Instruction {
             Instruction::Push(ref mut src) => {
                 src.replace_mock_register(context);
             }
-            Instruction::Pop(_) => {}, // pop only points to real registers
+            Instruction::Pop(_) => {} // pop only points to real registers
             Instruction::Call(_) => {}
             Instruction::Lea(ref mut src, ref mut dst) => {
                 src.replace_mock_register(context);
@@ -518,7 +578,7 @@ impl Instruction {
     // be CF or ZF
     fn check_unordered_comparisons(self, context: &mut ValidateContext) -> Vec<Instruction> {
         match self {
-            Instruction::SetCondition(c, dst, true) 
+            Instruction::SetCondition(c, dst, true)
                 // these ones will normally give a positive result on an unordered operation, which
                 // means they all need to be overwritten if PF,ZF and CF are set
                 if matches!(
@@ -586,4 +646,212 @@ impl Instruction {
             _ => vec![self],
         }
     }
+
+    pub fn get_used_and_updated_operands(
+        &self,
+        context: &mut ValidateContext,
+    ) -> (Vec<Operand>, Vec<Operand>) {
+        match self {
+            Instruction::Mov(_, src, dst) => {
+                convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
+            }
+            Instruction::Movsx(_, _, src, dst) => {
+                convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
+            }
+            Instruction::MovZeroExtend(_, _, src, dst) => {
+                convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
+            }
+            Instruction::Lea(_only_data_here, dst) => {
+                convert_uses_and_updates((vec![], vec![dst.clone()]))
+            }
+            Instruction::Cvttsd2si(_, src, dst) => {
+                convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
+            }
+            Instruction::Cvtsi2sd(_, src, dst) => {
+                convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
+            }
+            Instruction::Unary(_, _, src) => {
+                convert_uses_and_updates((vec![src.clone()], vec![src.clone()]))
+            }
+            Instruction::Binary(op, t, left, right) => {
+                if matches!(
+                    op,
+                    BinaryOperator::ShiftLeft
+                        | BinaryOperator::ShiftRight
+                        | BinaryOperator::UnsignedShiftLeft
+                        | BinaryOperator::UnsignedShiftRight
+                ) && *t != AssemblyType::Double
+                    && !matches!(left, Operand::Imm(_))
+                {
+                    // in these specific circumstances, shift operations copy their value to CX and
+                    // then reads it.
+                    convert_uses_and_updates((
+                        vec![left.clone(), right.clone()],
+                        vec![right.clone(), Operand::Reg(Register::CX)],
+                    ))
+                } else {
+                    convert_uses_and_updates((
+                        vec![left.clone(), right.clone()],
+                        vec![right.clone()],
+                    ))
+                }
+            }
+            Instruction::Cmp(_, left, right) => {
+                convert_uses_and_updates((vec![left.clone(), right.clone()], vec![]))
+            }
+            Instruction::Idiv(_, src) => convert_uses_and_updates((
+                vec![
+                    src.clone(),
+                    Operand::Reg(Register::AX),
+                    Operand::Reg(Register::DX),
+                ],
+                vec![Operand::Reg(Register::AX), Operand::Reg(Register::DX)],
+            )),
+            Instruction::Div(_, src) => convert_uses_and_updates((
+                vec![
+                    src.clone(),
+                    Operand::Reg(Register::AX),
+                    Operand::Reg(Register::DX),
+                ],
+                vec![Operand::Reg(Register::AX), Operand::Reg(Register::DX)],
+            )),
+            Instruction::Cdq(_) => convert_uses_and_updates((
+                vec![Operand::Reg(Register::AX)],
+                vec![Operand::Reg(Register::DX)],
+            )),
+            Instruction::SetCondition(_, dst, _) => {
+                convert_uses_and_updates((vec![], vec![dst.clone()]))
+            }
+            Instruction::Push(src) => convert_uses_and_updates((vec![src.clone()], vec![])),
+            Instruction::Call(name) => {
+                let symbol = context.symbols.get(name).unwrap();
+                let used = if let AssemblySymbolInfo::Function(_, _, registers_used_for_params, _) =
+                    symbol
+                {
+                    // println!("{:?}", registers_used_for_params);
+                    registers_used_for_params
+                        .iter()
+                        .map(|r| Operand::Reg(r.clone()))
+                        .collect()
+                } else {
+                    unreachable!()
+                };
+                let updated = vec![
+                    Operand::Reg(Register::DI),
+                    Operand::Reg(Register::SI),
+                    Operand::Reg(Register::DX),
+                    Operand::Reg(Register::CX),
+                    Operand::Reg(Register::R8),
+                    Operand::Reg(Register::R9),
+                    Operand::Reg(Register::AX),
+                    Operand::Reg(Register::XMM0),
+                    Operand::Reg(Register::XMM1),
+                    Operand::Reg(Register::XMM2),
+                    Operand::Reg(Register::XMM3),
+                    Operand::Reg(Register::XMM4),
+                    Operand::Reg(Register::XMM5),
+                    Operand::Reg(Register::XMM6),
+                    Operand::Reg(Register::XMM7),
+                    Operand::Reg(Register::XMM7),
+                    Operand::Reg(Register::XMM8),
+                    Operand::Reg(Register::XMM9),
+                    Operand::Reg(Register::XMM10),
+                    Operand::Reg(Register::XMM11),
+                    Operand::Reg(Register::XMM12),
+                    Operand::Reg(Register::XMM13),
+                    Operand::Reg(Register::XMM14),
+                    Operand::Reg(Register::XMM15),
+                ];
+                convert_uses_and_updates((used, updated))
+            }
+            Instruction::Jmp(_)
+            | Instruction::JmpCondition(_, _, _)
+            | Instruction::Label(_)
+            | Instruction::Pop(_)
+            | Instruction::Ret => (vec![], vec![]),
+        }
+    }
+}
+
+fn convert_uses_and_updates(
+    (uses, updates): (Vec<Operand>, Vec<Operand>),
+) -> (Vec<Operand>, Vec<Operand>) {
+    let mut uses_out = Vec::new();
+    let mut updates_out = Vec::new();
+    for this_use in uses.into_iter() {
+        match this_use {
+            Operand::Imm(_) => {}
+            Operand::Reg(_) => uses_out.push(this_use),
+            Operand::MockReg(_) => uses_out.push(this_use),
+            Operand::Memory(r, _) => uses_out.push(Operand::Reg(r)),
+            Operand::MockMemory(name, _) => uses_out.push(Operand::MockReg(name)),
+            Operand::Data(_, _) => {}
+            Operand::Indexed(base, index, _) => {
+                uses_out.push(Operand::Reg(base));
+                uses_out.push(Operand::Reg(index))
+            }
+        }
+    }
+    for update in updates.into_iter() {
+        match update {
+            Operand::Imm(_) => {}
+            Operand::Reg(_) => updates_out.push(update),
+            Operand::MockReg(_) => updates_out.push(update),
+            // these Operands do not actually cause an update, but they do read
+            Operand::Memory(r, _) => uses_out.push(Operand::Reg(r)),
+            Operand::MockMemory(name, _) => uses_out.push(Operand::MockReg(name)),
+            Operand::Data(_, _) => {}
+            Operand::Indexed(base, index, _) => {
+                uses_out.push(Operand::Reg(base));
+                uses_out.push(Operand::Reg(index))
+            }
+        }
+    }
+    (uses_out, updates_out)
+}
+
+fn address_taken_analysis(v: &[Instruction]) -> Vec<Operand> {
+    v.iter()
+        .filter_map(|instruction| match instruction {
+            Instruction::Lea(src, _) => match src {
+                Operand::MockReg(name) => Some(vec![Operand::MockReg(name.clone())]),
+                Operand::MockMemory(name, _) => Some(vec![Operand::MockReg(name.clone())]),
+                _ => None,
+            },
+            Instruction::Mov(
+                _,
+                Operand::MockMemory(name, _),
+                Operand::MockMemory(other_name, _),
+            ) => Some(vec![
+                Operand::MockReg(name.to_string()).clone(),
+                Operand::MockReg(other_name.to_string()).clone(),
+            ]),
+            Instruction::Mov(_, Operand::MockMemory(name, _), _) => {
+                Some(vec![Operand::MockReg(name.to_string()).clone()])
+            }
+            Instruction::Mov(_, _, Operand::MockMemory(name, _)) => {
+                Some(vec![Operand::MockReg(name.to_string()).clone()])
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+fn static_variables(context: &mut ValidateContext) -> Vec<Operand> {
+    context
+        .symbols
+        .iter()
+        .filter_map(|s| {
+            if matches!(
+                s.1,
+                AssemblySymbolInfo::Object(_, true, _)
+                    | AssemblySymbolInfo::Object(AssemblyType::ByteArray(_, _), _, _)
+            ) {
+                Some(Operand::MockReg(s.0.clone()))
+            } else {
+                None
+            }
+        })
+        .collect()
 }

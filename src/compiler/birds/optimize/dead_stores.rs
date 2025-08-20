@@ -12,7 +12,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
         &mut self,
         context: &mut OptimizeContext,
     ) -> Result<(), Box<dyn Error>> {
-        println!("DEAD STORE LOOP");
+        // println!("DEAD STORE LOOP");
         self.find_dead_stores(context);
 
         let keys = self.indexes();
@@ -53,7 +53,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
             | BirdsInstructionNode::Copy(_, dst)
             | BirdsInstructionNode::Binary(_, _, _, dst) => {
                 if !live_variables.contains(dst) {
-                    println!("KILLING {:?}", instruction);
+                    // println!("KILLING {:?}", instruction);
                     None
                 } else {
                     Some(instruction)
@@ -61,7 +61,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
             }
             BirdsInstructionNode::CopyToOffset(_, name, _) => {
                 if !live_variables.contains(&BirdsValueNode::Var(name.clone())) {
-                    println!("KILLING {:?}", instruction);
+                    // println!("KILLING {:?}", instruction);
                     None
                 } else {
                     Some(instruction)

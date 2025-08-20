@@ -155,10 +155,11 @@ type BirdsResult = (
 
 pub fn birds(
     parsed: ProgramNode,
+    ignore_stack_gaps: bool,
     symbols: HashMap<String, SymbolInfo>,
     structs: HashMap<String, StructInfo>,
 ) -> Result<BirdsResult, Box<dyn Error>> {
-    do_birds(parsed, symbols, structs)
+    do_birds(parsed, ignore_stack_gaps, symbols, structs)
 }
 
 type OptimizeResult = (

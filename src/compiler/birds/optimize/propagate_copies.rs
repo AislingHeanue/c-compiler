@@ -39,7 +39,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
             BirdsInstructionNode::Copy(ref mut src, ref dst) => {
                 for copy in reaching_copies.iter() {
                     if (copy.0 == *src && copy.1 == *dst) || (copy.1 == *src && copy.0 == *dst) {
-                        println!("KILLING (propagate copies) {:?}", instruction);
+                        // println!("KILLING (propagate copies) {:?}", instruction);
                         return None;
                     }
                 }

@@ -29,7 +29,7 @@ if [[ -f $clone_file ]]; then
 else
 	file=$first_file
 fi
-bat $file --paging=never
+bat $file --paging=never --theme "Visual Studio Dark+"
 
 case $stage in
 lex)
@@ -37,11 +37,11 @@ lex)
 	;;
 parse)
 	# Pretty print the output tree as something like C.
-	bash -c "$binary $file --parse > out && bat -l go --paging=never < out || cat out; rm out"
+	bash -c "$binary $file --parse > out && bat -l go --paging=never --theme \"Visual Studio Dark+\" < out || cat out; rm out"
 	;;
 validate)
 	# Pretty print the output tree as something like C.
-	bash -c "$binary $file --validate > out && bat -l go --paging=never < out || cat out; rm out"
+	bash -c "$binary $file --validate > out && bat -l go --paging=never --theme \"Visual Studio Dark+\" < out || cat out; rm out"
 	;;
 tacky)
 	bash -c "$binary $file --tacky"
@@ -55,28 +55,23 @@ codegen)
 	;;
 run)
 	output_name=${first_file%.c}
-	result=$(bash -c "$binary $file")
-	$output_name
-	unoptimized_result_code=$?
+
+	# echo "Unoptimized code:"
+	# bash -c "$binary $file -S" | bat -l asm --paging=never --theme "Visual Studio Dark+"
+	# bash -c "$binary $file"
+	# $output_name
+	# unoptimized_result_code=$?
+	# echo "Unoptimized result of $name: $unoptimized_result_code"
+
 	echo
-	echo "Unoptimized result of $name: $unoptimized_result_code"
-
-	echo "Unoptimized code:"
-	bash -c "$binary $file -S" | bat -l asm --paging=never
-
-	result=$(bash -c "$binary $file --optimize")
-	# result=$(bash -c "$binary $file")
-	# Run the outputted binary (if it exists)
-	$output_name
-	# Store the return code
-	result_code=$?
-	echo
-	echo "Result of $name: $result_code"
-
 	echo "Code:"
-	# Print the generated assembly code
-	bash -c "$binary $file -S --optimize" | bat -l asm --paging=never
-	# bash -c "$binary $file -S" | bat -l asm --paging=never
+	bash -c "$binary $file -S --optimize" | bat -l asm --paging=never --theme "Visual Studio Dark+"
+	# bash -c "$binary $file --optimize"
+	# $output_name
+	# result_code=$?
+	# echo "Result of $name: $result_code"
+
+	# bash -c "$binary $file -S" | bat -l asm --paging=never --theme "Visual Studio Dark+"
 	# bash -c "$binary $file -S" >a.s
 	;;
 esac
