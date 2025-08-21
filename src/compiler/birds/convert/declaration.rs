@@ -278,6 +278,13 @@ impl InitialiserNode {
                     context.current_initialiser_offset + i,
                 ));
                 i += 4;
+            } else if i + 2 <= num {
+                instructions.push(BirdsInstructionNode::CopyToOffset(
+                    BirdsValueNode::Constant(Constant::get_typed(0, &Type::Short)),
+                    dst.clone(),
+                    context.current_initialiser_offset + i,
+                ));
+                i += 2;
             } else {
                 instructions.push(BirdsInstructionNode::CopyToOffset(
                     BirdsValueNode::Constant(Constant::get_typed(0, &Type::Char)),
