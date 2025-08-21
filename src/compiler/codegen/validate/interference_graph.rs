@@ -203,7 +203,6 @@ impl InterferenceGraph {
             && !context.aliased_variables.contains(operand)
         {
             if let Operand::MockReg(_r) = operand {
-                // println!("{:?}", operand);
                 if let Some(node) = self.nodes.get_mut(operand) {
                     node.spill_cost += 1.;
                 } else {
@@ -242,10 +241,7 @@ impl InterferenceGraph {
                             && self.nodes.contains_key(live_reg)
                             && op != live_reg
                         {
-                            // println!(
-                            //     "INTERFERENCE BETWEEN {:?} AND {:?} IN {:?}",
-                            //     op, live_reg, instruction.0
-                            // );
+                            // Interference detected and noted here
                             self.add_edge(op, live_reg);
                         }
                     }
@@ -260,6 +256,14 @@ impl InterferenceGraph {
 
         let right_node = self.nodes.get_mut(right).unwrap();
         right_node.neighbours.insert(left.clone());
+    }
+
+    fn remove_edge(&mut self, left: &Operand, right: &Operand) {
+        let left_node = self.nodes.get_mut(left).unwrap();
+        left_node.neighbours.remove(right);
+
+        let right_node = self.nodes.get_mut(right).unwrap();
+        right_node.neighbours.remove(left);
     }
 
     pub fn colour_graph(&mut self) {
@@ -282,37 +286,10 @@ impl InterferenceGraph {
                 remaining
                     .iter()
                     .min_by(|(_, node_a), (_, node_b)| {
-                        // println!("doing comparisons");
                         let val_a: f64 =
                             node_a.spill_cost / self.count_unpruned_neighbours(node_a) as f64;
                         let val_b: f64 =
                             node_b.spill_cost / self.count_unpruned_neighbours(node_b) as f64;
-                        // println!(
-                        //     "{:?} {} {} has {:?}: count {:?} total count {:?}",
-                        //     op_a,
-                        //     val_a,
-                        //     node_a.spill_cost,
-                        //     node_a
-                        //         .neighbours
-                        //         .iter()
-                        //         .filter(|a| !self.nodes.get(a).unwrap().pruned)
-                        //         .collect_vec(),
-                        //     self.count_unpruned_neighbours(node_a),
-                        //     node_a.neighbours.len(),
-                        // );
-                        // println!(
-                        //     "{:?} {} {} has {:?}: count {:?} total count {:?}",
-                        //     op_b,
-                        //     val_b,
-                        //     node_b.spill_cost,
-                        //     node_b
-                        //         .neighbours
-                        //         .iter()
-                        //         .filter(|a| !self.nodes.get(a).unwrap().pruned)
-                        //         .collect_vec(),
-                        //     self.count_unpruned_neighbours(node_b),
-                        //     node_b.neighbours.len(),
-                        // );
                         // thanks https://stackoverflow.com/questions/28446632
                         match PartialOrd::partial_cmp(&val_a, &val_b) {
                             Some(o) => o,
@@ -325,18 +302,6 @@ impl InterferenceGraph {
             .0
             .clone();
 
-        // println!(
-        //     "CHOSEN NODE IS {:?} with {:?}",
-        //     chosen_node,
-        //     self.count_unpruned_neighbours(self.nodes.get(&chosen_node).unwrap())
-        // );
-        // let node = self.nodes.get(&chosen_node).unwrap();
-        // println!(
-        //     "{:?} / {:?}",
-        //     node.spill_cost,
-        //     self.count_unpruned_neighbours(node)
-        // );
-        // println!("{:?}", node.neighbours,);
         self.nodes.get_mut(&chosen_node).unwrap().pruned = true;
         // recursively colour the rest of the graph, with this node pruned
         self.colour_graph();
@@ -348,10 +313,6 @@ impl InterferenceGraph {
             .iter()
             .filter_map(|op| self.nodes.get(op).unwrap().colour)
             .collect_vec();
-        // println!(
-        //     "neighbours of {:?}, {:?} have neighbour colours {:?}",
-        //     chosen_node, node.neighbours, neighbour_colours
-        // );
 
         let new_colours = (0..max_degree)
             .filter(|c| !neighbour_colours.contains(c))
@@ -368,10 +329,8 @@ impl InterferenceGraph {
             // before returning to the caller, so we want to avoid that as
             // much as possible
             node.colour = Some(*new_colours.last().unwrap());
-            // println!("and therefore choosing (big) {:?}", node.colour);
         } else {
             node.colour = Some(*new_colours.first().unwrap());
-            // println!("and therefore choosing (small) {:?}", node.colour);
         }
         node.pruned = false;
     }
@@ -424,7 +383,95 @@ impl InterferenceGraph {
         context.register_map = out;
     }
 
-    pub fn coalesce(&self, _instructions: &Vec<Instruction>) -> HashMap<Operand, Vec<Operand>> {
-        HashMap::new()
+    // output map points from some operand X to the operand it is Rewritten as.
+    pub fn coalesce(&mut self, instructions: &Vec<Instruction>) -> HashMap<Operand, Operand> {
+        let mut out = HashMap::new();
+
+        for instruction in instructions {
+            if let Instruction::Mov(_, src, dst) = instruction {
+                let src = true_register_value(src, &out);
+                let dst = true_register_value(dst, &out);
+
+                if self.nodes.contains_key(&src)
+                    && self.nodes.contains_key(&dst)
+                    // duh
+                    && src != dst
+                    // can't coalesce nodes that interfere with each other
+                    && !self.nodes.get(&src).unwrap().neighbours.contains(&dst)
+                    && self.can_coalesce(&src, &dst)
+                {
+                    let (merge_this_op, into_this) = if matches!(src, Operand::Reg(_)) {
+                        (dst, src)
+                    } else {
+                        (src, dst)
+                    };
+                    self.coalesce_node(&merge_this_op, &into_this);
+                    out.insert(merge_this_op, into_this);
+                }
+            }
+        }
+
+        out
+    }
+
+    fn can_coalesce(&self, left: &Operand, right: &Operand) -> bool {
+        self.briggs_test(left, right)
+            || (matches!(left, Operand::Reg(_)) && self.george_test(left, right))
+            || (matches!(right, Operand::Reg(_)) && self.george_test(right, left))
+    }
+
+    fn briggs_test(&self, left: &Operand, right: &Operand) -> bool {
+        let max_degree = if self.double { 14 } else { 12 };
+        let left_node = self.nodes.get(left).unwrap();
+        let right_node = self.nodes.get(right).unwrap();
+
+        let significant_neighbours = left_node
+            .neighbours
+            .union(&right_node.neighbours)
+            .filter(|op| {
+                let node = self.nodes.get(op).unwrap();
+                let degree = if node.neighbours.contains(left) && node.neighbours.contains(right) {
+                    node.neighbours.len() - 1
+                } else {
+                    node.neighbours.len()
+                };
+                degree >= max_degree
+            })
+            .count();
+
+        significant_neighbours < max_degree
+    }
+
+    fn george_test(&self, hard_register: &Operand, mock_register: &Operand) -> bool {
+        let max_degree = if self.double { 14 } else { 12 };
+        let mock_register_node = self.nodes.get(mock_register).unwrap();
+        let hard_register_node = self.nodes.get(hard_register).unwrap();
+        // ensures that if we move mock_register to this hard_register, then every neighbour either
+        // 1. does not gain a new neighbour or
+        // 2. does not have more than max_degree neighbours (which means it can be trivially pruned)
+        mock_register_node.neighbours.iter().all(|op| {
+            hard_register_node.neighbours.contains(op)
+                || self.nodes.get(op).unwrap().neighbours.len() < max_degree
+        })
+    }
+
+    fn coalesce_node(&mut self, from: &Operand, to: &Operand) {
+        let node_to_remove = self.nodes.get(from).unwrap();
+        node_to_remove.neighbours.clone().iter().for_each(|op| {
+            self.remove_edge(from, op);
+            self.add_edge(to, op);
+        });
+
+        self.nodes.remove(from);
+    }
+}
+
+pub fn true_register_value(op: &Operand, map: &HashMap<Operand, Operand>) -> Operand {
+    if let Some(new_op) = map.get(op) {
+        // WARNING: infinite loop possible here if the map is constructed terribly,
+        // so don't do that
+        true_register_value(new_op, map)
+    } else {
+        op.clone()
     }
 }

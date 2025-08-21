@@ -93,20 +93,13 @@ impl Operand {
         match self {
             Operand::MockReg(name) => {
                 if let Some(register) = context.register_map.get(name) {
-                    // println!("{:?} HAS BEEN RECOLOURED TO LIVE IN {:?}", name, register);
                     *self = Operand::Reg(register.clone());
                 }
-                // else if name.contains(".") {
-                //     println!("WOOPS I SPILLED {:?}", name);
-                // }
             }
             Operand::MockMemory(name, offset) => {
                 if let Some(register) = context.register_map.get(name) {
-                    // println!("{:?} HAS BEEN RECOLOURED TO LIVE IN {:?}", name, register);
                     *self = Operand::Memory(register.clone(), *offset);
-                } // else if name.contains(".") {
-                  //    println!("WOOPS I SPILLED {:?}", name);
-                  // }
+                }
             }
             _ => (),
         }

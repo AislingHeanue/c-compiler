@@ -500,7 +500,7 @@ impl Instruction {
                         | BinaryOperator::Mult
                         | BinaryOperator::DivDouble
                         | BinaryOperator::Xor
-                ) =>
+                ) && dst.is_in_memory() =>
             {
                 vec![
                     Instruction::Mov(
@@ -661,8 +661,8 @@ impl Instruction {
             Instruction::MovZeroExtend(_, _, src, dst) => {
                 convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
             }
-            Instruction::Lea(_only_data_here, dst) => {
-                convert_uses_and_updates((vec![], vec![dst.clone()]))
+            Instruction::Lea(src, dst) => {
+                convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
             }
             Instruction::Cvttsd2si(_, src, dst) => {
                 convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
@@ -728,7 +728,6 @@ impl Instruction {
                 let used = if let AssemblySymbolInfo::Function(_, _, registers_used_for_params, _) =
                     symbol
                 {
-                    // println!("{:?}", registers_used_for_params);
                     registers_used_for_params
                         .iter()
                         .map(|r| Operand::Reg(r.clone()))

@@ -1,8 +1,11 @@
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
 
-use crate::compiler::codegen::Instruction;
+use crate::compiler::codegen::{Instruction, Operand};
 
-use super::{interference_graph::InterferenceGraph, ValidateContext};
+use super::{
+    interference_graph::{true_register_value, InterferenceGraph},
+    ValidateContext,
+};
 
 pub trait AllocateRegisters {
     fn allocate_registers(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
@@ -12,7 +15,7 @@ pub trait AllocateRegisters {
         context: &mut ValidateContext,
     ) -> Result<(), Box<dyn Error>>;
 
-    fn rewrite_coalesced(&mut self) {}
+    fn rewrite_coalesced(&mut self, coalesced_registers: HashMap<Operand, Operand>);
     fn replace_mock_registers_with_map(&mut self, context: &mut ValidateContext);
 }
 
@@ -25,27 +28,11 @@ impl AllocateRegisters for Vec<Instruction> {
             if coalesced_registers.is_empty() {
                 break;
             }
-            self.rewrite_coalesced();
+            self.rewrite_coalesced(coalesced_registers);
         }
-        // println!("aliased {:?}", context.aliased_variables);
-        // println!("BEGIN INTEGER");
-        // for instruction in self.iter() {
-        //     println!("{:?}", instruction);
-        // }
         interference_graph.colour_graph();
-        // for node in interference_graph.nodes.iter() {
-        //     if let Operand::MockReg(name) = node.0 {
-        //         if name.contains(".") {
-        //             println!("{:?} {:?}", name, node.1.spill_cost);
-        //         }
-        //     }
-        // }
         interference_graph.get_register_map(context);
         self.replace_mock_registers_with_map(context);
-        // println!("END INTEGER");
-        // for instruction in self.iter() {
-        //     println!("{:?}", instruction);
-        // }
         Ok(())
     }
 
@@ -53,18 +40,18 @@ impl AllocateRegisters for Vec<Instruction> {
         &mut self,
         context: &mut ValidateContext,
     ) -> Result<(), Box<dyn Error>> {
-        let mut interference_graph = InterferenceGraph::new(self, true, context);
-        // println!("BEGIN DOUBLE");
-        // for instruction in self.iter() {
-        //     println!("{:?}", instruction);
-        // }
+        let mut interference_graph;
+        loop {
+            interference_graph = InterferenceGraph::new(self, true, context);
+            let coalesced_registers = interference_graph.coalesce(self);
+            if coalesced_registers.is_empty() {
+                break;
+            }
+            self.rewrite_coalesced(coalesced_registers);
+        }
         interference_graph.colour_graph();
         interference_graph.get_register_map(context);
         self.replace_mock_registers_with_map(context);
-        // println!("END DOUBLE");
-        // for instruction in self.iter() {
-        //     println!("{:?}", instruction);
-        // }
         Ok(())
     }
 
@@ -140,7 +127,53 @@ impl AllocateRegisters for Vec<Instruction> {
         *self = out;
     }
 
-    fn rewrite_coalesced(&mut self) {
-        todo!()
+    fn rewrite_coalesced(&mut self, coalesced_registers: HashMap<Operand, Operand>) {
+        let mut instructions = Vec::new();
+        for mut instruction in self.drain(..) {
+            match instruction {
+                Instruction::Mov(_, ref mut src, ref mut dst) => {
+                    *src = true_register_value(src, &coalesced_registers);
+                    *dst = true_register_value(dst, &coalesced_registers);
+                    if src == dst {
+                        continue;
+                    }
+                }
+                Instruction::Movsx(_, _, ref mut src, ref mut dst)
+                | Instruction::MovZeroExtend(_, _, ref mut src, ref mut dst)
+                | Instruction::Lea(ref mut src, ref mut dst)
+                | Instruction::Cvttsd2si(_, ref mut src, ref mut dst)
+                | Instruction::Cvtsi2sd(_, ref mut src, ref mut dst)
+                | Instruction::Binary(_, _, ref mut src, ref mut dst)
+                | Instruction::Cmp(_, ref mut src, ref mut dst) => {
+                    *src = true_register_value(src, &coalesced_registers);
+                    *dst = true_register_value(dst, &coalesced_registers);
+                }
+                Instruction::Unary(_, _, ref mut src)
+                | Instruction::Idiv(_, ref mut src)
+                | Instruction::Div(_, ref mut src)
+                | Instruction::SetCondition(_, ref mut src, _)
+                | Instruction::Push(ref mut src) => {
+                    *src = true_register_value(src, &coalesced_registers);
+                }
+                Instruction::Pop(ref mut r) => {
+                    if let Operand::Reg(new_r) =
+                        true_register_value(&Operand::Reg(r.clone()), &coalesced_registers)
+                    {
+                        *r = new_r;
+                    } else {
+                        // registers cannot be coalesced into non-registers ever
+                        unreachable!()
+                    }
+                }
+                Instruction::Cdq(_)
+                | Instruction::Jmp(_)
+                | Instruction::JmpCondition(_, _, _)
+                | Instruction::Label(_)
+                | Instruction::Call(_)
+                | Instruction::Ret => {}
+            }
+            instructions.push(instruction);
+        }
+        *self = instructions;
     }
 }

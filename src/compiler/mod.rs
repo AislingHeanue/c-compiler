@@ -43,10 +43,6 @@ pub fn compile(
 
     let (birds_output, symbols, structs) =
         birds(parsed, config.ignore_stack_gaps, symbols, structs)?;
-    // if config.only_birds {
-    //     println!("{:#?}", birds_output);
-    //     return Ok(());
-    // }
 
     let (optimized, symbols, structs) =
         optimize(birds_output, symbols, structs, config.optimize_config)?;

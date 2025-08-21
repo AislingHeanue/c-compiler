@@ -154,7 +154,6 @@ fn main() {
 
     for asm_filename in asm_filenames {
         if res.status.code() != Some(0) {
-            // println!("{}", asm_filename);
             println!("{}", fs::read_to_string(&asm_filename).unwrap());
             let _ = fs::remove_file(&asm_filename);
         }

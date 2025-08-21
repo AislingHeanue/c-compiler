@@ -318,17 +318,11 @@ pub fn codegen(
     }
 
     let mut validate_context = ValidateContext::new(assembly_map, &context);
-    // converted.displaying_context = Some(RefCell::new(DisplayContext::new(
-    //     &context,
-    //     validate_context.clone(),
-    // )));
-    // println!("{}", converted);
 
     for pass in VALIDATION_PASSES.iter() {
         validate_context.pass = Some(pass.clone());
         converted.validate(&mut validate_context)?;
     }
-    // println!("{:?}", converted);
 
     // store the DisplayContext in a RefCell so that the Display trait can pick out
     // the value and modify it while it is rendering the actual Assembly code.

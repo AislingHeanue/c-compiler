@@ -12,7 +12,6 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
         &mut self,
         context: &mut OptimizeContext,
     ) -> Result<(), Box<dyn Error>> {
-        // println!("DEAD STORE LOOP");
         self.find_dead_stores(context);
 
         let keys = self.indexes();
@@ -36,7 +35,6 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
         (instruction, info): (BirdsInstructionNode, BirdsInstructionInfo),
     ) -> Option<BirdsInstructionNode> {
         let live_variables = info.live_variables;
-        // println!("{:?} {:?}", instruction, live_variables);
         match &instruction {
             BirdsInstructionNode::Unary(_, _, dst)
             | BirdsInstructionNode::SignedExtend(_, dst)
@@ -87,7 +85,6 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
         let node = self.nodes.get_mut(index).unwrap();
         for instruction in node.instructions.iter_mut().rev() {
             instruction.1.live_variables = live_variables.clone();
-            // println!("{:?}", instruction);
             // any dst we encounter kills a live variable
             match &instruction.0 {
                 BirdsInstructionNode::Unary(_, _, dst)
@@ -107,10 +104,6 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 | BirdsInstructionNode::Binary(_, _, _, dst) => {
                     for (i, value) in live_variables.clone().iter().enumerate().rev() {
                         if value == dst {
-                            // println!(
-                            //     "{:?} is no longer living on account of {:?}",
-                            //     dst, instruction
-                            // );
                             live_variables.remove(i);
                         }
                     }

@@ -56,22 +56,19 @@ codegen)
 run)
 	output_name=${first_file%.c}
 
-	# echo "Unoptimized code:"
-	# bash -c "$binary $file -S" | bat -l asm --paging=never --theme "Visual Studio Dark+"
-	# bash -c "$binary $file"
-	# $output_name
-	# unoptimized_result_code=$?
-	# echo "Unoptimized result of $name: $unoptimized_result_code"
+	echo "Unoptimized code:"
+	bash -c "$binary $file -S" | bat -l asm --paging=never --theme "Visual Studio Dark+"
+	bash -c "$binary $file"
+	$output_name
+	unoptimized_result_code=$?
+	echo "Unoptimized result of $name: $unoptimized_result_code"
 
 	echo
 	echo "Code:"
 	bash -c "$binary $file -S --optimize" | bat -l asm --paging=never --theme "Visual Studio Dark+"
-	# bash -c "$binary $file --optimize"
-	# $output_name
-	# result_code=$?
-	# echo "Result of $name: $result_code"
-
-	# bash -c "$binary $file -S" | bat -l asm --paging=never --theme "Visual Studio Dark+"
-	# bash -c "$binary $file -S" >a.s
+	bash -c "$binary $file --optimize"
+	$output_name
+	result_code=$?
+	echo "Result of $name: $result_code"
 	;;
 esac

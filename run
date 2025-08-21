@@ -13,8 +13,8 @@ a=$(bash -c "$binary $file")
 $output_name
 unoptimized_result_code=$?
 echo "Unoptimized result of $name: $unoptimized_result_code"
-echo
 
+echo
 echo "Code:"
 bash -c "$binary $file -S --optimize" | bat -l asm --paging=never --theme "Visual Studio Dark+"
 a=$(bash -c "$binary $file --optimize")

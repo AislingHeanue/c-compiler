@@ -110,7 +110,6 @@ impl Destination {
         match self {
             Destination::Direct(val) => (Vec::new(), val),
             Destination::Dereference(val) => {
-                // println!("{:?} {:?}", val, target_type);
                 let new_dst = new_temp_variable(target_type, context);
                 (
                     vec![BirdsInstructionNode::LoadFromPointer(val, new_dst.clone())],
