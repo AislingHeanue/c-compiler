@@ -27,6 +27,12 @@ impl Convert<Operand> for BirdsValueNode {
             BirdsValueNode::Constant(Constant::UnsignedChar(c)) => {
                 Ok(Operand::Imm(ImmediateValue::Unsigned(c as u64)))
             }
+            BirdsValueNode::Constant(Constant::Short(c)) => {
+                Ok(Operand::Imm(ImmediateValue::Signed(c as i64)))
+            }
+            BirdsValueNode::Constant(Constant::UnsignedShort(c)) => {
+                Ok(Operand::Imm(ImmediateValue::Unsigned(c as u64)))
+            }
             BirdsValueNode::Constant(Constant::Double(c)) => Ok(create_static_constant(
                 8,
                 StaticInitialiser::Double(c),

@@ -748,10 +748,13 @@ impl ExpressionWithoutType {
         let mut instructions = Vec::new();
         if target_type == &Type::Double {
             match this_type {
-                Type::Integer | Type::Long | Type::Char | Type::SignedChar => {
+                Type::Integer | Type::Long | Type::Char | Type::SignedChar | Type::Short => {
                     instructions.push(BirdsInstructionNode::IntToDouble(src, dst.clone()));
                 }
-                Type::UnsignedInteger | Type::UnsignedLong | Type::UnsignedChar => {
+                Type::UnsignedInteger
+                | Type::UnsignedLong
+                | Type::UnsignedChar
+                | Type::UnsignedShort => {
                     instructions.push(BirdsInstructionNode::UintToDouble(src, dst.clone()));
                 }
                 Type::Array(..) => unreachable!(),
@@ -763,10 +766,13 @@ impl ExpressionWithoutType {
             }
         } else if this_type == &Type::Double {
             match target_type {
-                Type::Integer | Type::Long | Type::Char | Type::SignedChar => {
+                Type::Integer | Type::Long | Type::Char | Type::SignedChar | Type::Short => {
                     instructions.push(BirdsInstructionNode::DoubleToInt(src, dst.clone()));
                 }
-                Type::UnsignedInteger | Type::UnsignedLong | Type::UnsignedChar => {
+                Type::UnsignedInteger
+                | Type::UnsignedLong
+                | Type::UnsignedChar
+                | Type::UnsignedShort => {
                     instructions.push(BirdsInstructionNode::DoubleToUint(src, dst.clone()));
                 }
                 Type::Pointer(_) => unreachable!(),

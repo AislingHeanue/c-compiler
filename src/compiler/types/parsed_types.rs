@@ -19,9 +19,11 @@ impl Type {
         match self {
             Type::Integer => 4,
             Type::Long => 8,
+            Type::Short => 2,
             Type::Double => 8,
             Type::UnsignedInteger => 4,
             Type::UnsignedLong => 8,
+            Type::UnsignedShort => 2,
             Type::Pointer(_) => 8, // pointer is stored like u64
             Type::Char => 1,
             Type::SignedChar => 1,
@@ -36,39 +38,26 @@ impl Type {
     }
 
     pub fn is_signed(&self) -> bool {
-        match self {
-            Type::Integer => true,
-            Type::Long => true,
-            Type::UnsignedInteger => false,
-            Type::UnsignedLong => false,
-            Type::Double => true,
-            Type::Pointer(_) => false,
-            Type::Array(..) => false,
-            Type::Function(_, _) => unreachable!(),
-            Type::Char => true,
-            Type::SignedChar => true,
-            Type::UnsignedChar => false,
-            Type::Void => unreachable!(),
-            Type::Struct(_, _) => false,
-        }
+        matches!(
+            self,
+            Type::Integer | Type::Long | Type::Double | Type::Char | Type::SignedChar | Type::Short
+        )
     }
 
     pub fn is_arithmetic(&self) -> bool {
-        match self {
-            Type::Integer => true,
-            Type::Long => true,
-            Type::UnsignedInteger => true,
-            Type::UnsignedLong => true,
-            Type::Double => true,
-            Type::Pointer(_) => false,
-            Type::Function(_, _) => false,
-            Type::Array(..) => false,
-            Type::Char => true,
-            Type::SignedChar => true,
-            Type::UnsignedChar => true,
-            Type::Void => false,
-            Type::Struct(_, _) => false,
-        }
+        matches!(
+            self,
+            Type::Integer
+                | Type::Long
+                | Type::Short
+                | Type::UnsignedInteger
+                | Type::UnsignedLong
+                | Type::UnsignedShort
+                | Type::Double
+                | Type::Char
+                | Type::SignedChar
+                | Type::UnsignedChar
+        )
     }
 
     pub fn is_integer(&self) -> bool {
@@ -105,11 +94,20 @@ impl Type {
         matches!(self, Type::Char | Type::SignedChar | Type::UnsignedChar)
     }
 
+    pub fn is_smaller_than_int(&self) -> bool {
+        matches!(
+            self,
+            Type::Char | Type::SignedChar | Type::UnsignedChar | Type::Short | Type::UnsignedShort
+        )
+    }
+
     pub fn promote(&self) -> &Type {
         match self {
             Type::Char => &Type::Integer,
             Type::SignedChar => &Type::Integer,
             Type::UnsignedChar => &Type::Integer,
+            Type::Short => &Type::Integer,
+            Type::UnsignedShort => &Type::Integer,
             _ => self,
         }
     }

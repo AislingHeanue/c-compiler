@@ -52,6 +52,12 @@ impl Parse<Type> for VecDeque<Token> {
         if out.contains(&Token::KeywordSigned) && out.contains(&Token::KeywordUnsigned) {
             return Err("Type specified as both signed and unsigned".into());
         }
+        if out.contains(&Token::KeywordShort) && out.contains(&Token::KeywordLong) {
+            return Err("Type specified as both long and short".into());
+        }
+        if out.contains(&Token::KeywordUnsigned) && out.contains(&Token::KeywordShort) {
+            return Ok(Type::UnsignedShort);
+        }
         if out.contains(&Token::KeywordUnsigned) && out.contains(&Token::KeywordLong) {
             return Ok(Type::UnsignedLong);
         }
@@ -77,6 +83,9 @@ impl Parse<Type> for VecDeque<Token> {
         }
         if out.contains(&Token::KeywordLong) {
             return Ok(Type::Long);
+        }
+        if out.contains(&Token::KeywordShort) {
+            return Ok(Type::Short);
         }
         Ok(Type::Integer)
     }
@@ -255,15 +264,15 @@ impl Parse<OutputWithStruct> for VecDeque<Token> {
             // Entering this section means that we failed to properly split the type and the
             // declarator, so try again with a different split
 
-            // println!(
-            //     "Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?}",
-            //     types_deque,type_result, declarator_deque, declarator
-            // );
+            println!(
+                "Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?}",
+                types_deque,type_result, declarator_deque, declarator
+            );
             let move_this_to_the_declarator = types_deque.pop_back().unwrap();
             declarator_deque.push_front(move_this_to_the_declarator);
         }
 
-        Err("Declaration could not be reconciled to match both a type and a declarator".into())
+        Err(format!("Declaration could not be reconciled to match both a type and a declarator, types: {:?}", declarator_deque).into())
         // Ok((this_type, storage, declarator))
     }
 }
@@ -342,6 +351,7 @@ impl Token {
                     | Token::KeywordDouble
                     | Token::KeywordChar
                     | Token::KeywordVoid
+                    | Token::KeywordShort
             )
         }
     }

@@ -329,6 +329,20 @@ impl InitialiserNode {
                 )),
                 Some(target_type.clone()),
             ),
+            Type::Short => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::Short(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
+            Type::UnsignedShort => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::UnsignedShort(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
             Type::Struct(name, is_union) => {
                 let mut members = context.structs.get(name).unwrap().members.clone();
                 // only zero the first value in a union

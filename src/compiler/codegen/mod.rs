@@ -40,6 +40,7 @@ enum TopLevel {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum AssemblyType {
     Byte,     // byte
+    Word,     // i16, short
     Longword, // i32, int
     Quadword, // i64, long
     Double,   // oh boy

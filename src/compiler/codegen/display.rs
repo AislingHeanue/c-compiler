@@ -48,9 +48,14 @@ impl DisplayContext {
         self.indent -= 4;
         self
     }
-    fn short(&mut self) -> &mut DisplayContext {
+    fn byte(&mut self) -> &mut DisplayContext {
         self.word_length_bytes = 1;
         self.instruction_suffix = "b".to_string(); // unused
+        self
+    }
+    fn short(&mut self) -> &mut DisplayContext {
+        self.word_length_bytes = 2;
+        self.instruction_suffix = "w".to_string(); // unused
         self
     }
     fn regular(&mut self) -> &mut DisplayContext {
@@ -79,8 +84,11 @@ impl DisplayContext {
             AssemblyType::Double => {
                 self.double();
             }
-            AssemblyType::Byte => {
+            AssemblyType::Word => {
                 self.short();
+            }
+            AssemblyType::Byte => {
+                self.byte();
             }
             AssemblyType::ByteArray(_, _) => unreachable!(),
         }
@@ -276,18 +284,24 @@ impl CodeDisplay for StaticInitialiser {
             | StaticInitialiser::Comparable(ComparableStatic::UnsignedLong(0)) => unreachable!(),
             StaticInitialiser::Comparable(ComparableStatic::Integer(i)) => format!(".long {}", i),
             StaticInitialiser::Comparable(ComparableStatic::Long(l)) => format!(".quad {}", l),
+            StaticInitialiser::Comparable(ComparableStatic::Short(l)) => {
+                format!(".byte {}", l)
+            }
             StaticInitialiser::Comparable(ComparableStatic::UnsignedInteger(i)) => {
                 format!(".long {}", i)
             }
             StaticInitialiser::Comparable(ComparableStatic::UnsignedLong(l)) => {
                 format!(".quad {}", l)
             }
+            StaticInitialiser::Comparable(ComparableStatic::UnsignedShort(l)) => {
+                format!(".value {}", l)
+            }
             StaticInitialiser::Comparable(ComparableStatic::Char(l)) => {
                 format!(".byte {}", *l as u8)
             }
             // converting unsigned char to signed char here (only to convert it back in a second)
             StaticInitialiser::Comparable(ComparableStatic::UnsignedChar(l)) => {
-                format!(".byte {}", l)
+                format!(".value {}", l)
             }
             StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(n)) => format!(".zero {}", n),
             StaticInitialiser::Comparable(ComparableStatic::String(l, term)) => {
@@ -459,7 +473,7 @@ impl CodeDisplay for Instruction {
                 // number to shift by, is 1 byte long. This is sensible since we don't represent
                 // any numbers higher than 2^256 anyway. I'm just not sure why this seems to have
                 // come up as a regression in my code today, maybe a sneaky GCC change...?
-                context.short();
+                context.byte();
                 let shift_by = src.show(context);
                 format!(
                     "{:indent$}{}{} {}, {}",
@@ -528,7 +542,7 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
-            Instruction::Cdq(AssemblyType::Byte | AssemblyType::Longword) => {
+            Instruction::Cdq(AssemblyType::Byte | AssemblyType::Word | AssemblyType::Longword) => {
                 if context.comments {
                     format!(
                         "{:indent$}# Extend the 32-bit value in EAX to a 64-bit\n\
@@ -592,7 +606,7 @@ impl CodeDisplay for Instruction {
                 )
             }
             Instruction::SetCondition(c, dst, _) => {
-                context.short();
+                context.byte();
                 let out = format!(
                     "{:indent$}set{} {}",
                     "",
@@ -759,6 +773,40 @@ impl CodeDisplay for Register {
                 Register::R13 => "%r13b",
                 Register::R14 => "%r14b",
                 Register::R15 => "%r15b",
+                Register::SP => "%rsp",
+                Register::BP => "%rbp",
+                Register::XMM0 => "%xmm0",
+                Register::XMM1 => "%xmm1",
+                Register::XMM2 => "%xmm2",
+                Register::XMM3 => "%xmm3",
+                Register::XMM4 => "%xmm4",
+                Register::XMM5 => "%xmm5",
+                Register::XMM6 => "%xmm6",
+                Register::XMM7 => "%xmm7",
+                Register::XMM8 => "%xmm8",
+                Register::XMM9 => "%xmm9",
+                Register::XMM10 => "%xmm10",
+                Register::XMM11 => "%xmm11",
+                Register::XMM12 => "%xmm12",
+                Register::XMM13 => "%xmm13",
+                Register::XMM14 => "%xmm14",
+                Register::XMM15 => "%xmm15",
+            },
+            2 => match self {
+                Register::AX => "%ax",
+                Register::BX => "%bx",
+                Register::CX => "%cx",
+                Register::DI => "%di",
+                Register::DX => "%dx",
+                Register::SI => "%si",
+                Register::R8 => "%r8w",
+                Register::R9 => "%r9w",
+                Register::R10 => "%r10w",
+                Register::R11 => "%r11w",
+                Register::R12 => "%r12w",
+                Register::R13 => "%r13w",
+                Register::R14 => "%r14w",
+                Register::R15 => "%r15w",
                 Register::SP => "%rsp",
                 Register::BP => "%rbp",
                 Register::XMM0 => "%xmm0",

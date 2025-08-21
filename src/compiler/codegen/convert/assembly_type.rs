@@ -11,10 +11,12 @@ impl Convert<AssemblyType> for Type {
         match self {
             Type::Integer => Ok(AssemblyType::Longword),
             Type::Long => Ok(AssemblyType::Quadword),
+            Type::Short => Ok(AssemblyType::Word),
             Type::UnsignedInteger => Ok(AssemblyType::Longword),
             Type::UnsignedLong => Ok(AssemblyType::Quadword),
-            Type::Double => Ok(AssemblyType::Double),
+            Type::UnsignedShort => Ok(AssemblyType::Word),
             Type::Pointer(_) => Ok(AssemblyType::Quadword),
+            Type::Double => Ok(AssemblyType::Double),
             Type::Array(t, size) => {
                 let assembly_t = (*t).convert(context)?;
                 let size = assembly_t.get_size() * size;
@@ -56,6 +58,10 @@ impl AssemblyType {
             BirdsValueNode::Constant(Constant::UnsignedChar(_)) => {
                 (AssemblyType::Byte, false, true)
             }
+            BirdsValueNode::Constant(Constant::Short(_)) => (AssemblyType::Word, true, true),
+            BirdsValueNode::Constant(Constant::UnsignedShort(_)) => {
+                (AssemblyType::Word, false, true)
+            }
             BirdsValueNode::Var(name) => {
                 let var_type = context.symbols.get(name).unwrap().symbol_type.clone();
                 let signed = var_type.is_signed();
@@ -77,6 +83,7 @@ impl AssemblyType {
     pub fn get_alignment(&self) -> u32 {
         match self {
             AssemblyType::Byte => 1,
+            AssemblyType::Word => 2,
             AssemblyType::Longword => 4,
             AssemblyType::Quadword => 8,
             AssemblyType::Double => 8,
@@ -87,6 +94,7 @@ impl AssemblyType {
     pub fn get_size(&self) -> u64 {
         match self {
             AssemblyType::Byte => 1,
+            AssemblyType::Word => 2,
             AssemblyType::Longword => 4,
             AssemblyType::Quadword => 8,
             AssemblyType::Double => 8,

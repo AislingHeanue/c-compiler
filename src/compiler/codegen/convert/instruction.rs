@@ -772,7 +772,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             dst.convert(context)?,
                         ),
                     ],
-                    AssemblyType::Byte => vec![
+                    AssemblyType::Byte | AssemblyType::Word => vec![
                         Instruction::Cvttsd2si(
                             AssemblyType::Longword,
                             src.convert(context)?,
@@ -815,7 +815,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
             BirdsInstructionNode::UintToDouble(src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
                 match src_type {
-                    AssemblyType::Byte => {
+                    AssemblyType::Byte | AssemblyType::Word => {
                         vec![
                             Instruction::MovZeroExtend(
                                 src_type,
@@ -1089,6 +1089,13 @@ impl Instruction {
                     dst.offset(i + offset_dst),
                 ));
                 i += 4;
+            } else if i + 2 <= size {
+                instructions.push(Instruction::Mov(
+                    AssemblyType::Word,
+                    src.offset(i + offset_src),
+                    dst.offset(i + offset_dst),
+                ));
+                i += 2;
             } else {
                 instructions.push(Instruction::Mov(
                     AssemblyType::Byte,
@@ -1122,6 +1129,7 @@ impl Instruction {
             }
         }
     }
+
     pub fn copy_bytes_from_register(
         size: i32,
         instructions: &mut Vec<Instruction>,

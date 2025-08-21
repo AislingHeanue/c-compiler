@@ -31,6 +31,8 @@ impl Constant {
             Constant::UnsignedLong(i) => StaticInitialiser::from_number(*i, target),
             Constant::Char(i) => StaticInitialiser::from_number(*i, target),
             Constant::UnsignedChar(i) => StaticInitialiser::from_number(*i, target),
+            Constant::Short(i) => StaticInitialiser::from_number(*i, target),
+            Constant::UnsignedShort(i) => StaticInitialiser::from_number(*i, target),
             Constant::Double(i) => StaticInitialiser::from_double(*i, target),
         }
     }
@@ -63,8 +65,10 @@ impl Constant {
         match target {
             Type::Integer => Constant::Integer(value.try_into().unwrap()),
             Type::Long => Constant::Long(value),
+            Type::Short => Constant::Integer(value.try_into().unwrap()),
             Type::UnsignedInteger => Constant::UnsignedInteger(value.try_into().unwrap()),
             Type::UnsignedLong => Constant::UnsignedLong(value.try_into().unwrap()),
+            Type::UnsignedShort => Constant::Integer(value.try_into().unwrap()),
             // adding a constant to a pointer is only reasonable if the second operand is Long
             Type::Pointer(_) => Constant::Long(value),
             Type::Char => Constant::Char(value.try_into().unwrap()),
@@ -104,6 +108,8 @@ impl Constant {
         match &self {
             Constant::Char(i) => (Constant::Integer((*i).into()), true),
             Constant::UnsignedChar(i) => (Constant::UnsignedInteger((*i).into()), true),
+            Constant::Short(i) => (Constant::Integer((*i).into()), true),
+            Constant::UnsignedShort(i) => (Constant::UnsignedInteger((*i).into()), true),
             _ => (self, false),
         }
     }
@@ -117,6 +123,8 @@ impl Constant {
             Constant::Double(_i) => unreachable!(),
             Constant::Char(i) => Constant::Char(!i),
             Constant::UnsignedChar(i) => Constant::UnsignedChar(!i),
+            Constant::Short(i) => Constant::Short(!i),
+            Constant::UnsignedShort(i) => Constant::UnsignedShort(!i),
         }
     }
 
@@ -135,6 +143,8 @@ impl Constant {
             Type::UnsignedChar => self.to_uchar(),
             Type::Void => unreachable!(),
             Type::Struct(_, _) => unreachable!(),
+            Type::Short => self.to_short(),
+            Type::UnsignedShort => self.to_ushort(),
         }
     }
 
@@ -147,6 +157,8 @@ impl Constant {
             Constant::Double(i) => *i as i32,
             Constant::Char(i) => *i as i32,
             Constant::UnsignedChar(i) => *i as i32,
+            Constant::Short(i) => *i as i32,
+            Constant::UnsignedShort(i) => *i as i32,
         };
         Constant::Integer(val)
     }
@@ -159,6 +171,8 @@ impl Constant {
             Constant::Double(i) => *i as u32,
             Constant::Char(i) => *i as u32,
             Constant::UnsignedChar(i) => *i as u32,
+            Constant::Short(i) => *i as u32,
+            Constant::UnsignedShort(i) => *i as u32,
         };
         Constant::UnsignedInteger(val)
     }
@@ -171,6 +185,8 @@ impl Constant {
             Constant::Double(i) => *i as i64,
             Constant::Char(i) => *i as i64,
             Constant::UnsignedChar(i) => *i as i64,
+            Constant::Short(i) => *i as i64,
+            Constant::UnsignedShort(i) => *i as i64,
         };
         Constant::Long(val)
     }
@@ -183,6 +199,8 @@ impl Constant {
             Constant::Double(i) => *i as u64,
             Constant::Char(i) => *i as u64,
             Constant::UnsignedChar(i) => *i as u64,
+            Constant::Short(i) => *i as u64,
+            Constant::UnsignedShort(i) => *i as u64,
         };
         Constant::UnsignedLong(val)
     }
@@ -195,6 +213,8 @@ impl Constant {
             Constant::Double(i) => *i,
             Constant::Char(i) => *i as f64,
             Constant::UnsignedChar(i) => *i as f64,
+            Constant::Short(i) => *i as f64,
+            Constant::UnsignedShort(i) => *i as f64,
         };
         Constant::Double(val)
     }
@@ -207,6 +227,8 @@ impl Constant {
             Constant::Double(i) => *i as i8,
             Constant::Char(i) => *i,
             Constant::UnsignedChar(i) => *i as i8,
+            Constant::Short(i) => *i as i8,
+            Constant::UnsignedShort(i) => *i as i8,
         };
         Constant::Char(val)
     }
@@ -219,8 +241,40 @@ impl Constant {
             Constant::Double(i) => *i as u8,
             Constant::Char(i) => *i as u8,
             Constant::UnsignedChar(i) => *i,
+            Constant::Short(i) => *i as u8,
+            Constant::UnsignedShort(i) => *i as u8,
         };
         Constant::UnsignedChar(val)
+    }
+
+    pub fn to_short(&self) -> Constant {
+        let val = match self {
+            Constant::Integer(i) => *i as i16,
+            Constant::Long(i) => *i as i16,
+            Constant::UnsignedInteger(i) => *i as i16,
+            Constant::UnsignedLong(i) => *i as i16,
+            Constant::Double(i) => *i as i16,
+            Constant::Char(i) => *i as i16,
+            Constant::UnsignedChar(i) => *i as i16,
+            Constant::Short(i) => *i,
+            Constant::UnsignedShort(i) => *i as i16,
+        };
+        Constant::Short(val)
+    }
+
+    pub fn to_ushort(&self) -> Constant {
+        let val = match self {
+            Constant::Integer(i) => *i as u16,
+            Constant::Long(i) => *i as u16,
+            Constant::UnsignedInteger(i) => *i as u16,
+            Constant::UnsignedLong(i) => *i as u16,
+            Constant::Double(i) => *i as u16,
+            Constant::Char(i) => *i as u16,
+            Constant::UnsignedChar(i) => *i as u16,
+            Constant::Short(i) => *i as u16,
+            Constant::UnsignedShort(i) => *i,
+        };
+        Constant::UnsignedShort(val)
     }
 
     // used to un-override the equality behaviour of nan operands during constant folding
@@ -523,6 +577,8 @@ impl Neg for Constant {
             Constant::Double(i) => Constant::Double(-i),
             Constant::Char(i) => Constant::Char(!i),
             Constant::UnsignedChar(i) => Constant::UnsignedChar(!i + 1), // undefined behaviour
+            Constant::Short(i) => Constant::Short(!i),
+            Constant::UnsignedShort(i) => Constant::UnsignedShort(!i + 1), // undefined behaviour
         }
     }
 }

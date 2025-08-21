@@ -11,8 +11,10 @@ mod struct_member;
 pub enum Type {
     Integer,
     Long,
+    Short,
     UnsignedInteger,
     UnsignedLong,
+    UnsignedShort,
     Double,
     // return type, param types
     Function(Box<Type>, Vec<Type>),
@@ -31,8 +33,10 @@ pub enum Type {
 pub enum Constant {
     Integer(i32),
     Long(i64),
+    Short(i16),
     UnsignedInteger(u32),
     UnsignedLong(u64),
+    UnsignedShort(u16),
     Double(f64),
     Char(i8),
     UnsignedChar(u8),
@@ -96,8 +100,10 @@ impl PartialEq for StaticInitialiser {
 pub enum ComparableStatic {
     Integer(i32),
     Long(i64),
+    Short(i16),
     UnsignedInteger(u32),
     UnsignedLong(u64),
+    UnsignedShort(u16),
     Char(i8),
     UnsignedChar(u8),
     // initialiser representing n * 0x00 bytes

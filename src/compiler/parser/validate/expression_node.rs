@@ -123,6 +123,8 @@ impl CheckTypes for ExpressionNode {
                 Constant::Double(_) => Type::Double,
                 Constant::Char(_) => Type::Char,
                 Constant::UnsignedChar(_) => Type::UnsignedChar,
+                Constant::Short(_) => unreachable!(), // parsed doubles don't actually exist
+                Constant::UnsignedShort(_) => unreachable!(),
             },
             ExpressionWithoutType::Unary(ref op, ref mut src) => {
                 src.check_types_and_convert(context)?;
@@ -134,7 +136,7 @@ impl CheckTypes for ExpressionNode {
                         return Err("Can't apply - or ~ to a non-arithmetic type".into());
                     }
                     // promote char types to int for this operation
-                    if src.1.as_ref().unwrap().is_character() {
+                    if src.1.as_ref().unwrap().is_smaller_than_int() {
                         src.convert_type(&Type::Integer)
                     }
                 }

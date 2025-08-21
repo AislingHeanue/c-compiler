@@ -91,6 +91,8 @@ impl BirdsValueNode {
                 Constant::Double(_) => None,
                 Constant::Char(c) => Some((*c).into()),
                 Constant::UnsignedChar(c) => Some((*c).into()),
+                Constant::Short(c) => Some((*c).into()),
+                Constant::UnsignedShort(c) => Some((*c).into()),
             },
             BirdsValueNode::Var(_) => None,
         }
@@ -106,6 +108,8 @@ impl BirdsValueNode {
                 Constant::Double(_) => Type::Double,
                 Constant::Char(_) => Type::Char,
                 Constant::UnsignedChar(_) => Type::UnsignedChar,
+                Constant::Short(_) => Type::Short,
+                Constant::UnsignedShort(_) => Type::UnsignedShort,
             },
             BirdsValueNode::Var(v) => symbols.get(v).unwrap().symbol_type.clone(),
         }

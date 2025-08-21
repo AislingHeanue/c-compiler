@@ -335,6 +335,8 @@ impl CodeDisplay for Type {
             Type::UnsignedChar => "unsigned_rune".to_string(),
             Type::Void => "void".to_string(),
             Type::Struct(name, _) => name.to_string(),
+            Type::Short => "int16".to_string(),
+            Type::UnsignedShort => "uint16".to_string(),
             // Type::Struct(name, Some(members)) => {
             //     format!(
             //         "struct_{} {{{}{}}}",
@@ -495,8 +497,10 @@ impl CodeDisplay for Constant {
         match self {
             Constant::Integer(c) => c.to_string(),
             Constant::Long(c) => format!("int64({})", c),
+            Constant::Short(c) => format!("int16({})", c),
             Constant::UnsignedInteger(c) => format!("uint32({})", c),
             Constant::UnsignedLong(c) => format!("uint64({})", c),
+            Constant::UnsignedShort(c) => format!("uint16({})", c),
             Constant::Double(c) => format!("float64({})", c),
             Constant::Char(c) => format!("rune({})", c.show(context)),
             Constant::UnsignedChar(c) => format!("unsigned_rune({})", (*c as i8).show(context)),
