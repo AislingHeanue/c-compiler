@@ -1,4 +1,7 @@
-use std::{collections::HashMap, error::Error};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+};
 
 use super::{
     AssemblySymbolInfo, AssemblyType, BinaryOperator, ConditionCode, ConvertContext,
@@ -59,7 +62,7 @@ pub struct ValidateContext {
     stack_sizes: HashMap<String, u32>,
     current_function_name: Option<String>,
     num_labels: u32,
-    block_live_variables: HashMap<usize, Vec<Operand>>,
+    block_live_variables: HashMap<usize, HashSet<Operand>>,
     aliased_variables: Vec<Operand>,
     static_variables: Vec<Operand>,
     function_callee_saved_registers: HashMap<String, Vec<Register>>,

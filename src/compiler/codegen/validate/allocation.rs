@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use crate::compiler::codegen::{Instruction, Operand};
+use crate::compiler::codegen::Instruction;
 
 use super::{interference_graph::InterferenceGraph, ValidateContext};
 
@@ -12,12 +12,21 @@ pub trait AllocateRegisters {
         context: &mut ValidateContext,
     ) -> Result<(), Box<dyn Error>>;
 
+    fn rewrite_coalesced(&mut self) {}
     fn replace_mock_registers_with_map(&mut self, context: &mut ValidateContext);
 }
 
 impl AllocateRegisters for Vec<Instruction> {
     fn allocate_registers(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
-        let mut interference_graph = InterferenceGraph::new(self, false, context);
+        let mut interference_graph: InterferenceGraph;
+        loop {
+            interference_graph = InterferenceGraph::new(self, false, context);
+            let coalesced_registers = interference_graph.coalesce(self);
+            if coalesced_registers.is_empty() {
+                break;
+            }
+            self.rewrite_coalesced();
+        }
         // println!("aliased {:?}", context.aliased_variables);
         // println!("BEGIN INTEGER");
         // for instruction in self.iter() {
@@ -129,5 +138,9 @@ impl AllocateRegisters for Vec<Instruction> {
             }
         }
         *self = out;
+    }
+
+    fn rewrite_coalesced(&mut self) {
+        todo!()
     }
 }

@@ -18,7 +18,7 @@ pub struct InterferenceGraph {
 
 #[derive(Debug)]
 pub struct InterferenceNode {
-    neighbours: Vec<Operand>,
+    neighbours: HashSet<Operand>,
     pub spill_cost: f64,
     colour: Option<usize>,
     pruned: bool,
@@ -59,7 +59,7 @@ static DOUBLE_REGISTERS: [Register; 14] = [
 impl InterferenceNode {
     fn new() -> InterferenceNode {
         InterferenceNode {
-            neighbours: Vec::new(),
+            neighbours: HashSet::new(),
             spill_cost: 1.,
             colour: None,
             pruned: false,
@@ -67,7 +67,7 @@ impl InterferenceNode {
     }
     fn new_register() -> InterferenceNode {
         InterferenceNode {
-            neighbours: Vec::new(),
+            neighbours: HashSet::new(),
             spill_cost: f64::INFINITY,
             colour: None,
             pruned: false,
@@ -82,8 +82,8 @@ impl InterferenceGraph {
             for reg in DOUBLE_REGISTERS.iter() {
                 let mut this_node = InterferenceNode::new_register();
                 for (op, node) in nodes.iter_mut() {
-                    node.neighbours.push(Operand::Reg(reg.clone()));
-                    this_node.neighbours.push(op.clone());
+                    node.neighbours.insert(Operand::Reg(reg.clone()));
+                    this_node.neighbours.insert(op.clone());
                 }
                 nodes.insert(Operand::Reg(reg.clone()), this_node);
             }
@@ -91,8 +91,8 @@ impl InterferenceGraph {
             for reg in INTEGER_REGISTERS.iter() {
                 let mut this_node = InterferenceNode::new_register();
                 for (op, node) in nodes.iter_mut() {
-                    node.neighbours.push(Operand::Reg(reg.clone()));
-                    this_node.neighbours.push(op.clone());
+                    node.neighbours.insert(Operand::Reg(reg.clone()));
+                    this_node.neighbours.insert(op.clone());
                 }
                 nodes.insert(Operand::Reg(reg.clone()), this_node);
             }
@@ -256,14 +256,10 @@ impl InterferenceGraph {
 
     fn add_edge(&mut self, left: &Operand, right: &Operand) {
         let left_node = self.nodes.get_mut(left).unwrap();
-        if !left_node.neighbours.contains(right) {
-            left_node.neighbours.push(right.clone());
-        }
+        left_node.neighbours.insert(right.clone());
 
         let right_node = self.nodes.get_mut(right).unwrap();
-        if !right_node.neighbours.contains(left) {
-            right_node.neighbours.push(left.clone());
-        }
+        right_node.neighbours.insert(left.clone());
     }
 
     pub fn colour_graph(&mut self) {
@@ -285,7 +281,7 @@ impl InterferenceGraph {
             .unwrap_or_else(|| {
                 remaining
                     .iter()
-                    .min_by(|(op_a, node_a), (op_b, node_b)| {
+                    .min_by(|(_, node_a), (_, node_b)| {
                         // println!("doing comparisons");
                         let val_a: f64 =
                             node_a.spill_cost / self.count_unpruned_neighbours(node_a) as f64;
@@ -426,5 +422,9 @@ impl InterferenceGraph {
             );
         }
         context.register_map = out;
+    }
+
+    pub fn coalesce(&self, _instructions: &Vec<Instruction>) -> HashMap<Operand, Vec<Operand>> {
+        HashMap::new()
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::compiler::{
     codegen::{AssemblySymbolInfo, Instruction, Operand},
@@ -9,13 +9,13 @@ use super::ValidateContext;
 
 #[derive(Debug)]
 pub struct InstructionInfo {
-    pub live_registers: Vec<Operand>,
+    pub live_registers: HashSet<Operand>,
 }
 
 impl InstructionInfo {
     fn new() -> InstructionInfo {
         InstructionInfo {
-            live_registers: Vec::new(),
+            live_registers: HashSet::new(),
         }
     }
 }
@@ -88,7 +88,7 @@ impl FlowGraph<Instruction, InstructionInfo> {
     fn transfer_registers(
         &mut self,
         index: &usize,
-        mut live_registers: Vec<Operand>,
+        mut live_registers: HashSet<Operand>,
         context: &mut ValidateContext,
     ) {
         let node = self.nodes.get_mut(index).unwrap();
@@ -98,26 +98,20 @@ impl FlowGraph<Instruction, InstructionInfo> {
             for op in updated {
                 // MockMemory and Memory are already dealt with in convert_uses_and_updates
                 if matches!(op, Operand::Reg(_) | Operand::MockReg(_)) {
-                    for (i, live_op) in live_registers.clone().iter().enumerate().rev() {
-                        if op == *live_op {
-                            live_registers.remove(i);
-                        }
-                    }
+                    live_registers.remove(&op);
                 }
             }
             for op in used {
-                if matches!(op, Operand::Reg(_) | Operand::MockReg(_))
-                    && !live_registers.contains(&op)
-                {
-                    live_registers.push(op)
+                if matches!(op, Operand::Reg(_) | Operand::MockReg(_)) {
+                    live_registers.insert(op);
                 }
             }
         }
         context.block_live_variables.insert(*index, live_registers);
     }
 
-    fn meet_registers(&self, index: &usize, context: &mut ValidateContext) -> Vec<Operand> {
-        let mut live_registers = Vec::new();
+    fn meet_registers(&self, index: &usize, context: &mut ValidateContext) -> HashSet<Operand> {
+        let mut live_registers = HashSet::new();
         let node = self.nodes.get(index).unwrap();
         for after_index in node.afters.iter() {
             for i in context
@@ -126,9 +120,7 @@ impl FlowGraph<Instruction, InstructionInfo> {
                 .unwrap()
                 .iter()
             {
-                if !live_registers.contains(i) {
-                    live_registers.push(i.clone())
-                }
+                live_registers.insert(i.clone());
             }
         }
         live_registers
@@ -159,7 +151,7 @@ impl FlowGraph<Instruction, InstructionInfo> {
                 continue;
             }
             working_list.push_back(*index);
-            context.block_live_variables.insert(*index, Vec::new());
+            context.block_live_variables.insert(*index, HashSet::new());
         }
 
         while !working_list.is_empty() {
