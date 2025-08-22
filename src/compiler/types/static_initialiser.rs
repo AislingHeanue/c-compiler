@@ -46,6 +46,7 @@ impl StaticInitialiser {
             Type::UnsignedShort => StaticInitialiser::unsigned_short_from_double(i),
             Type::Float => StaticInitialiser::float_from_double(i),
             Type::Double => StaticInitialiser::Double(i),
+            Type::LongDouble => StaticInitialiser::LongDouble(i),
             Type::Char => StaticInitialiser::char_from_double(i),
             Type::SignedChar => StaticInitialiser::char_from_double(i),
             Type::UnsignedChar => StaticInitialiser::unsigned_char_from_double(i),
@@ -69,6 +70,7 @@ impl StaticInitialiser {
             Type::UnsignedLongLong => StaticInitialiser::unsigned_long_long(i),
             Type::Float => StaticInitialiser::float(i),
             Type::Double => StaticInitialiser::double(i),
+            Type::LongDouble => StaticInitialiser::long_double(i),
             Type::Char => StaticInitialiser::char(i),
             Type::SignedChar => StaticInitialiser::char(i),
             Type::UnsignedChar => StaticInitialiser::unsigned_char(i),
@@ -206,6 +208,16 @@ impl StaticInitialiser {
             ));
         }
         StaticInitialiser::Double(ConvUtil::approx_as(real_i).unwrap())
+    }
+
+    fn long_double<T: ApproxInto<f64>>(i: T) -> StaticInitialiser {
+        let real_i = i.approx_as_by().unwrap();
+        if real_i == 0. {
+            return StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
+                Type::LongDouble.get_size(&mut HashMap::new()),
+            ));
+        }
+        StaticInitialiser::LongDouble(ConvUtil::approx_as(real_i).unwrap())
     }
 
     fn char_from_double<T: ApproxInto<i8, RoundToZero>>(i: T) -> StaticInitialiser {

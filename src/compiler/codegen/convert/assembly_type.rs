@@ -18,6 +18,7 @@ impl Convert<AssemblyType> for Type {
             Type::Pointer(_) => Ok(AssemblyType::Quadword),
             Type::Float => Ok(AssemblyType::Float),
             Type::Double => Ok(AssemblyType::Double),
+            Type::LongDouble => Ok(AssemblyType::Double),
             Type::Array(t, size) => {
                 let assembly_t = (*t).convert(context)?;
                 let size = assembly_t.get_size() * size;
@@ -57,7 +58,9 @@ impl AssemblyType {
                 (AssemblyType::Quadword, false, true)
             }
             BirdsValueNode::Constant(Constant::Float(_)) => (AssemblyType::Float, true, true),
-            BirdsValueNode::Constant(Constant::Double(_)) => (AssemblyType::Double, true, true),
+            BirdsValueNode::Constant(Constant::Double(_) | Constant::LongDouble(_)) => {
+                (AssemblyType::Double, true, true)
+            }
             BirdsValueNode::Constant(Constant::Char(_)) => (AssemblyType::Byte, true, true),
             BirdsValueNode::Constant(Constant::UnsignedChar(_)) => {
                 (AssemblyType::Byte, false, true)

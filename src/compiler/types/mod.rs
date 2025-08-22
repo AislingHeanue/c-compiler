@@ -19,6 +19,7 @@ pub enum Type {
     UnsignedShort,
     Float,
     Double,
+    LongDouble,
     // return type, param types
     Function(Box<Type>, Vec<Type>),
     // type and length
@@ -44,6 +45,7 @@ pub enum Constant {
     UnsignedShort(u16),
     Float(f32),
     Double(f64),
+    LongDouble(f64),
     Char(i8),
     UnsignedChar(u8),
 }
@@ -76,6 +78,7 @@ pub enum StaticInitialiser {
     Comparable(ComparableStatic),
     Float(f32),
     Double(f64),
+    LongDouble(f64),
 }
 
 fn one_double_is_negative_zero(a: f64, b: f64) -> bool {

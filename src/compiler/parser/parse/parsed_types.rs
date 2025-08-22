@@ -44,6 +44,8 @@ impl Parse<Type> for VecDeque<Token> {
         if out.contains(&Token::KeywordDouble) {
             if out.len() == 1 {
                 return Ok(Type::Double);
+            } else if out.len() == 2 && out.contains(&Token::KeywordLong) {
+                return Ok(Type::LongDouble);
             } else {
                 return Err("Double cannot be used with other type specifiers".into());
             }

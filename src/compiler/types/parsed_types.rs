@@ -23,6 +23,7 @@ impl Type {
             Type::LongLong => 8,
             Type::Float => 4,
             Type::Double => 8,
+            Type::LongDouble => 8,
             Type::UnsignedInteger => 4,
             Type::UnsignedLong => 8,
             Type::UnsignedShort => 2,
@@ -57,6 +58,7 @@ impl Type {
                 | Type::Long
                 | Type::Float
                 | Type::Double
+                | Type::LongDouble
                 | Type::Char
                 | Type::SignedChar
                 | Type::Short
@@ -77,6 +79,7 @@ impl Type {
                 | Type::UnsignedShort
                 | Type::Float
                 | Type::Double
+                | Type::LongDouble
                 | Type::Char
                 | Type::SignedChar
                 | Type::UnsignedChar
@@ -88,7 +91,7 @@ impl Type {
     }
 
     pub fn is_float(&self) -> bool {
-        matches!(self, Type::Float | Type::Double)
+        matches!(self, Type::Float | Type::Double | Type::LongDouble)
     }
 
     pub fn is_scalar(&self) -> bool {
@@ -138,8 +141,9 @@ impl Type {
 
     pub fn class(&self) -> Class {
         match self {
-            Type::Double => Class::Sse,
             Type::Float => Class::Sse,
+            Type::Double => Class::Sse,
+            Type::LongDouble => Class::Sse,
             Type::Array(..) => unreachable!(),
             Type::Function(_, _) => unreachable!(),
             Type::Struct(_, _) => unreachable!(),

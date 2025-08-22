@@ -122,6 +122,7 @@ impl CheckTypes for ExpressionNode {
                 Constant::UnsignedLong(_) => Type::UnsignedLong,
                 Constant::Float(_) => Type::Float,
                 Constant::Double(_) => Type::Double,
+                Constant::LongDouble(_) => Type::LongDouble,
                 Constant::Char(_) => Type::Char,
                 Constant::UnsignedChar(_) => Type::UnsignedChar,
                 Constant::Short(_) => unreachable!(), // parsed doubles don't actually exist

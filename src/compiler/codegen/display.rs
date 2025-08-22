@@ -346,6 +346,10 @@ impl CodeDisplay for StaticInitialiser {
                 let mut ryu_buffer = Buffer::new();
                 format!(".double {}", ryu_buffer.format(*d))
             }
+            StaticInitialiser::LongDouble(f) => {
+                let mut ryu_buffer = Buffer::new();
+                format!(".double {}", ryu_buffer.format(*f))
+            }
         };
 
         format!("{:indent$}{}", "", s, indent = context.indent)

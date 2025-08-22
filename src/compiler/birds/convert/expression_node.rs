@@ -746,7 +746,20 @@ impl ExpressionWithoutType {
         context: &mut ConvertContext,
     ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
         let mut instructions = Vec::new();
-        if target_type.is_float() {
+        if this_type.is_float() && target_type.is_float() {
+            match (this_type, target_type) {
+                (Type::Float, _) => {
+                    instructions.push(BirdsInstructionNode::FloatToDouble(src, dst.clone()));
+                }
+                (_, Type::Float) => {
+                    instructions.push(BirdsInstructionNode::DoubleToFloat(src, dst.clone()));
+                }
+                (_, _) => {
+                    // double and long double are represented the same internally
+                    instructions.push(BirdsInstructionNode::Copy(src, dst.clone()));
+                }
+            }
+        } else if target_type.is_float() {
             match this_type {
                 Type::Integer
                 | Type::Long
@@ -763,14 +776,9 @@ impl ExpressionWithoutType {
                 | Type::UnsignedLongLong => {
                     instructions.push(BirdsInstructionNode::UintToFloat(src, dst.clone()));
                 }
-                Type::Float => {
-                    instructions.push(BirdsInstructionNode::FloatToDouble(src, dst.clone()));
-                }
+                Type::Float | Type::Double | Type::LongDouble => unreachable!(),
                 Type::Array(..) => unreachable!(),
                 Type::Pointer(_) => unreachable!(),
-                Type::Double => {
-                    instructions.push(BirdsInstructionNode::DoubleToFloat(src, dst.clone()));
-                }
                 Type::Function(_, _) => unreachable!(),
                 Type::Void => unreachable!(),
                 Type::Struct(_, _) => unreachable!(),
@@ -794,8 +802,7 @@ impl ExpressionWithoutType {
                 }
                 Type::Pointer(_) => unreachable!(),
                 Type::Array(..) => unreachable!(),
-                Type::Float => unreachable!(),
-                Type::Double => unreachable!(),
+                Type::Float | Type::Double | Type::LongDouble => unreachable!(),
                 Type::Function(_, _) => unreachable!(),
                 Type::Void => unreachable!(),
                 Type::Struct(_, _) => unreachable!(),

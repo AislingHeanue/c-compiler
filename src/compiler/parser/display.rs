@@ -329,6 +329,7 @@ impl CodeDisplay for Type {
             }
             Type::Float => "float32".to_string(),
             Type::Double => "float64".to_string(),
+            Type::LongDouble => "longer_float64".to_string(),
             Type::Pointer(t) => format!("*{}", t.show(context)),
             Type::Array(t, s) => format!("[{}]{}", s, t.show(context)),
             Type::Char => "rune".to_string(),
@@ -500,6 +501,7 @@ impl CodeDisplay for Constant {
             Constant::UnsignedLongLong(c) => format!("longer_uint64({})", c),
             Constant::Float(c) => format!("float32({})", c),
             Constant::Double(c) => format!("float64({})", c),
+            Constant::LongDouble(c) => format!("longer_float64({})", c),
             Constant::Char(c) => format!("rune({})", c.show(context)),
             Constant::UnsignedChar(c) => format!("unsigned_rune({})", (*c as i8).show(context)),
         }

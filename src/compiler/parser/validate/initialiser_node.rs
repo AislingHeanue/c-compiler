@@ -313,6 +313,13 @@ impl InitialiserNode {
                 )),
                 Some(target_type.clone()),
             ),
+            Type::LongDouble => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::LongDouble(0.)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
             Type::Array(t, size) => InitialiserNode(
                 InitialiserWithoutType::Compound(
                     (0..*size)
