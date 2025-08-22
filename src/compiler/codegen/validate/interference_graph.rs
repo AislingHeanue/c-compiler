@@ -139,13 +139,21 @@ impl InterferenceGraph {
                     // it gets into the map
                     self.add_mock_register(&AssemblyType::Quadword, dst, context);
                 }
-                Instruction::Cvttsd2si(t, src_double, dst) => {
-                    self.add_mock_register(&AssemblyType::Double, src_double, context);
-                    self.add_mock_register(t, dst, context);
+                Instruction::FloatToInt(src_t, dst_t, src, dst) => {
+                    self.add_mock_register(src_t, src, context);
+                    self.add_mock_register(dst_t, dst, context);
                 }
-                Instruction::Cvtsi2sd(t, src, dst_double) => {
-                    self.add_mock_register(t, src, context);
+                Instruction::IntToFloat(src_t, dst_t, src, dst) => {
+                    self.add_mock_register(src_t, src, context);
+                    self.add_mock_register(dst_t, dst, context);
+                }
+                Instruction::Cvtss2sd(src_float, dst_double) => {
+                    self.add_mock_register(&AssemblyType::Float, src_float, context);
                     self.add_mock_register(&AssemblyType::Double, dst_double, context);
+                }
+                Instruction::Cvtsd2ss(src_double, dst_float) => {
+                    self.add_mock_register(&AssemblyType::Double, src_double, context);
+                    self.add_mock_register(&AssemblyType::Float, dst_float, context);
                 }
                 Instruction::Unary(_, t, src) => {
                     self.add_mock_register(t, src, context);
@@ -193,8 +201,7 @@ impl InterferenceGraph {
         operand: &Operand,
         context: &mut ValidateContext,
     ) {
-        if ((*t == AssemblyType::Double && self.double)
-            || (*t != AssemblyType::Double && !self.double))
+        if ((t.is_float() && self.double) || (!t.is_float() && !self.double))
             && !matches!(
                 operand,
                 Operand::Imm(_) | Operand::Data(_, _) | Operand::Indexed(_, _, _)

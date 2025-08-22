@@ -42,6 +42,13 @@ impl Parse<Type> for VecDeque<Token> {
                 return Err("Double cannot be used with other type specifiers".into());
             }
         }
+        if out.contains(&Token::KeywordFloat) {
+            if out.len() == 1 {
+                return Ok(Type::Float);
+            } else {
+                return Err("Float cannot be used with other type specifiers".into());
+            }
+        }
         if out.contains(&Token::KeywordVoid) {
             if out.len() == 1 {
                 return Ok(Type::Void);
@@ -352,6 +359,7 @@ impl Token {
                     | Token::KeywordChar
                     | Token::KeywordVoid
                     | Token::KeywordShort
+                    | Token::KeywordFloat
             )
         }
     }

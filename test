@@ -64,8 +64,8 @@ for chapter_num in $(seq 1 $chapter); do
 		fi
 	done
 done
+echo "$results"
 if $passing; then
-	echo "$results"
 	exit 0
 else
 	exit 1

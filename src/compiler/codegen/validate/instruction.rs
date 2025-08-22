@@ -210,11 +210,11 @@ impl Instruction {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
             }
-            Instruction::Cvttsd2si(_, ref mut src, ref mut dst) => {
+            Instruction::FloatToInt(_, _, ref mut src, ref mut dst) => {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
             }
-            Instruction::Cvtsi2sd(_, ref mut src, ref mut dst) => {
+            Instruction::IntToFloat(_, _, ref mut src, ref mut dst) => {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
             }
@@ -252,6 +252,14 @@ impl Instruction {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
             }
+            Instruction::Cvtss2sd(ref mut src, ref mut dst) => {
+                src.replace_mock_register(context);
+                dst.replace_mock_register(context);
+            }
+            Instruction::Cvtsd2ss(ref mut src, ref mut dst) => {
+                src.replace_mock_register(context);
+                dst.replace_mock_register(context);
+            }
         };
         vec![self]
     }
@@ -265,7 +273,7 @@ impl Instruction {
                         | BinaryOperator::ShiftRight
                         | BinaryOperator::UnsignedShiftLeft
                         | BinaryOperator::UnsignedShiftRight
-                ) && t != AssemblyType::Double
+                ) && !t.is_float()
                     && !matches!(left, Operand::Imm(_)) =>
             {
                 vec![
@@ -338,9 +346,9 @@ impl Instruction {
                 Instruction::Mov(src_type, Operand::Imm(value), Operand::Reg(Register::R10)),
                 Instruction::MovZeroExtend(src_type, dst_type, Operand::Reg(Register::R10), dst),
             ],
-            Instruction::Cvtsi2sd(src_t, Operand::Imm(value), dst) => vec![
+            Instruction::IntToFloat(src_t, dst_t, Operand::Imm(value), dst) => vec![
                 Instruction::Mov(src_t, Operand::Imm(value), Operand::Reg(Register::R10)),
-                Instruction::Cvtsi2sd(src_t, Operand::Reg(Register::R10), dst),
+                Instruction::IntToFloat(src_t, dst_t, Operand::Reg(Register::R10), dst),
             ],
             // FIX INSTRUCTIONS THAT CAN'T TAKE LARGE INTS
             Instruction::Binary(op, AssemblyType::Quadword, Operand::Imm(value), dst)
@@ -445,7 +453,7 @@ impl Instruction {
         match self {
             // FIX ILLEGAL MEMORY ADDRESSES AS DST
             Instruction::Binary(BinaryOperator::Mult, t, src, dst) if dst.is_in_memory() => {
-                let scratch_register = if t == AssemblyType::Double {
+                let scratch_register = if t.is_float() {
                     Operand::Reg(Register::XMM15)
                 } else {
                     Operand::Reg(Register::R11)
@@ -471,50 +479,43 @@ impl Instruction {
                     Instruction::Mov(dst_type, Operand::Reg(Register::R11), dst),
                 ]
             }
-            Instruction::Cvttsd2si(dst_t, src, dst) if dst.is_in_memory() => {
+            Instruction::FloatToInt(src_t, dst_t, src, dst) if dst.is_in_memory() => {
                 vec![
-                    Instruction::Cvttsd2si(dst_t, src, Operand::Reg(Register::R11)),
+                    Instruction::FloatToInt(src_t, dst_t, src, Operand::Reg(Register::R11)),
                     Instruction::Mov(dst_t, Operand::Reg(Register::R11), dst),
                 ]
             }
-            Instruction::Cvtsi2sd(src_t, src, dst) if dst.is_in_memory() => {
+            Instruction::IntToFloat(src_t, dst_t, src, dst) if dst.is_in_memory() => {
                 vec![
-                    Instruction::Cvtsi2sd(src_t, src, Operand::Reg(Register::XMM15)),
-                    Instruction::Mov(AssemblyType::Double, Operand::Reg(Register::XMM15), dst),
+                    Instruction::IntToFloat(src_t, dst_t, src, Operand::Reg(Register::XMM15)),
+                    Instruction::Mov(dst_t, Operand::Reg(Register::XMM15), dst),
                 ]
             }
-            Instruction::Cmp(AssemblyType::Double, left, right) if right.is_in_memory() => {
+            Instruction::Cmp(t, left, right) if t.is_float() && right.is_in_memory() => {
                 vec![
                     // do Mov and then Cmp here and not the other way around. This is because we
                     // typically need to read the flags set by Cmp immediately after the
                     // instruction is run, so we can't append extra instructions after it.
-                    Instruction::Mov(AssemblyType::Double, right, Operand::Reg(Register::XMM15)),
-                    Instruction::Cmp(AssemblyType::Double, left, Operand::Reg(Register::XMM15)),
+                    Instruction::Mov(t, right, Operand::Reg(Register::XMM15)),
+                    Instruction::Cmp(t, left, Operand::Reg(Register::XMM15)),
                 ]
             }
-            Instruction::Binary(op, AssemblyType::Double, src, dst)
-                if matches!(
-                    op,
-                    BinaryOperator::Add
-                        | BinaryOperator::Sub
-                        | BinaryOperator::Mult
-                        | BinaryOperator::DivDouble
-                        | BinaryOperator::Xor
-                ) && dst.is_in_memory() =>
+            Instruction::Binary(op, t, src, dst)
+                if t.is_float()
+                    && matches!(
+                        op,
+                        BinaryOperator::Add
+                            | BinaryOperator::Sub
+                            | BinaryOperator::Mult
+                            | BinaryOperator::DivDouble
+                            | BinaryOperator::Xor
+                    )
+                    && dst.is_in_memory() =>
             {
                 vec![
-                    Instruction::Mov(
-                        AssemblyType::Double,
-                        dst.clone(),
-                        Operand::Reg(Register::XMM15),
-                    ),
-                    Instruction::Binary(
-                        op,
-                        AssemblyType::Double,
-                        src,
-                        Operand::Reg(Register::XMM15),
-                    ),
-                    Instruction::Mov(AssemblyType::Double, Operand::Reg(Register::XMM15), dst),
+                    Instruction::Mov(t, dst.clone(), Operand::Reg(Register::XMM15)),
+                    Instruction::Binary(op, t, src, Operand::Reg(Register::XMM15)),
+                    Instruction::Mov(t, Operand::Reg(Register::XMM15), dst),
                 ]
             }
             // FIX CONSTANT VALUE AS DST
@@ -547,9 +548,9 @@ impl Instruction {
         };
         if src.is_in_memory() && dst.is_in_memory() {
             match self {
-                Instruction::Mov(AssemblyType::Double, src, dst) => vec![
-                    Instruction::Mov(AssemblyType::Double, src, Operand::Reg(Register::XMM14)),
-                    Instruction::Mov(AssemblyType::Double, Operand::Reg(Register::XMM14), dst),
+                Instruction::Mov(t, src, dst) if t.is_float() => vec![
+                    Instruction::Mov(t, src, Operand::Reg(Register::XMM14)),
+                    Instruction::Mov(t, Operand::Reg(Register::XMM14), dst),
                 ],
                 Instruction::Mov(t, src, dst) => vec![
                     Instruction::Mov(t, src, Operand::Reg(Register::R10)),
@@ -664,10 +665,16 @@ impl Instruction {
             Instruction::Lea(src, dst) => {
                 convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
             }
-            Instruction::Cvttsd2si(_, src, dst) => {
+            Instruction::IntToFloat(_, _, src, dst) => {
                 convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
             }
-            Instruction::Cvtsi2sd(_, src, dst) => {
+            Instruction::FloatToInt(_, _, src, dst) => {
+                convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
+            }
+            Instruction::Cvtss2sd(src, dst) => {
+                convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
+            }
+            Instruction::Cvtsd2ss(src, dst) => {
                 convert_uses_and_updates((vec![src.clone()], vec![dst.clone()]))
             }
             Instruction::Unary(_, _, src) => {
@@ -680,7 +687,7 @@ impl Instruction {
                         | BinaryOperator::ShiftRight
                         | BinaryOperator::UnsignedShiftLeft
                         | BinaryOperator::UnsignedShiftRight
-                ) && *t != AssemblyType::Double
+                ) && !t.is_float()
                     && !matches!(left, Operand::Imm(_))
                 {
                     // in these specific circumstances, shift operations copy their value to CX and

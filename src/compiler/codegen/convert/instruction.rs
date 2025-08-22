@@ -128,7 +128,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 }
             }
             BirdsInstructionNode::Binary(BirdsBinaryOperatorNode::Divide, left, right, dst)
-                if AssemblyType::infer(&left, context)?.0 != AssemblyType::Double =>
+                if !AssemblyType::infer(&left, context)?.0.is_float() =>
             {
                 let (left_type, is_signed, _) = AssemblyType::infer(&left, context)?;
                 if is_signed {
@@ -679,17 +679,20 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     dst.convert(context)?,
                 )]
             }
-            BirdsInstructionNode::DoubleToInt(src, dst) => {
+            BirdsInstructionNode::FloatToInt(src, dst) => {
+                let src_type = AssemblyType::infer(&src, context)?.0;
                 let dst_type = AssemblyType::infer(&dst, context)?.0;
-                if dst_type != AssemblyType::Byte {
-                    vec![Instruction::Cvttsd2si(
+                if dst_type != AssemblyType::Byte && dst_type != AssemblyType::Word {
+                    vec![Instruction::FloatToInt(
+                        src_type,
                         dst_type,
                         src.convert(context)?,
                         dst.convert(context)?,
                     )]
                 } else {
                     vec![
-                        Instruction::Cvttsd2si(
+                        Instruction::FloatToInt(
+                            src_type,
                             AssemblyType::Longword,
                             src.convert(context)?,
                             Operand::Reg(Register::AX),
@@ -702,12 +705,13 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     ]
                 }
             }
-            BirdsInstructionNode::DoubleToUint(src, dst) => {
+            BirdsInstructionNode::FloatToUint(src, dst) => {
+                let src_type = AssemblyType::infer(&src, context)?.0;
                 let dst_type = AssemblyType::infer(&dst, context)?.0;
                 match dst_type {
                     AssemblyType::Quadword => {
                         context.num_labels += 1;
-                        let instruction_label = format!("double_to_uint_{}", context.num_labels);
+                        let instruction_label = format!("float_to_uint_{}", context.num_labels);
                         let i_max_value = i64::MAX as u64 + 1;
                         let i_max = create_static_constant(
                             8,
@@ -717,7 +721,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
 
                         vec![
                             Instruction::Cmp(
-                                AssemblyType::Double,
+                                src_type,
                                 i_max.clone(),
                                 src.clone().convert(context)?,
                             ),
@@ -726,7 +730,8 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                                 format!("out_of_range_{}", &instruction_label),
                                 true,
                             ),
-                            Instruction::Cvttsd2si(
+                            Instruction::FloatToInt(
+                                src_type,
                                 AssemblyType::Quadword,
                                 src.clone().convert(context)?,
                                 dst.clone().convert(context)?,
@@ -736,7 +741,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             // avoid overwriting src (eg. if it's a variable we want to reference
                             // later)
                             Instruction::Mov(
-                                AssemblyType::Double,
+                                src_type,
                                 src.convert(context)?,
                                 Operand::Reg(Register::XMM0),
                             ),
@@ -746,7 +751,8 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                                 i_max,
                                 Operand::Reg(Register::XMM0),
                             ),
-                            Instruction::Cvttsd2si(
+                            Instruction::FloatToInt(
+                                src_type,
                                 AssemblyType::Quadword,
                                 Operand::Reg(Register::XMM0),
                                 dst.clone().convert(context)?,
@@ -761,7 +767,8 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                         ]
                     }
                     AssemblyType::Longword => vec![
-                        Instruction::Cvttsd2si(
+                        Instruction::FloatToInt(
+                            src_type,
                             AssemblyType::Quadword,
                             src.convert(context)?,
                             Operand::Reg(Register::AX),
@@ -773,7 +780,8 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                         ),
                     ],
                     AssemblyType::Byte | AssemblyType::Word => vec![
-                        Instruction::Cvttsd2si(
+                        Instruction::FloatToInt(
+                            src_type,
                             AssemblyType::Longword,
                             src.convert(context)?,
                             Operand::Reg(Register::AX),
@@ -784,13 +792,14 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             dst.convert(context)?,
                         ),
                     ],
-                    AssemblyType::Double => unreachable!(),
+                    AssemblyType::Double | AssemblyType::Float => unreachable!(),
                     AssemblyType::ByteArray(_size, _align) => unreachable!(),
                 }
             }
-            BirdsInstructionNode::IntToDouble(src, dst) => {
+            BirdsInstructionNode::IntToFloat(src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
-                if src_type == AssemblyType::Byte {
+                let dst_type = AssemblyType::infer(&dst, context)?.0;
+                if src_type == AssemblyType::Byte || src_type == AssemblyType::Word {
                     vec![
                         Instruction::Movsx(
                             src_type,
@@ -798,22 +807,25 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             src.convert(context)?,
                             Operand::Reg(Register::AX),
                         ),
-                        Instruction::Cvtsi2sd(
+                        Instruction::IntToFloat(
                             AssemblyType::Longword,
+                            dst_type,
                             Operand::Reg(Register::AX),
                             dst.convert(context)?,
                         ),
                     ]
                 } else {
-                    vec![Instruction::Cvtsi2sd(
+                    vec![Instruction::IntToFloat(
                         src_type,
+                        dst_type,
                         src.convert(context)?,
                         dst.convert(context)?,
                     )]
                 }
             }
-            BirdsInstructionNode::UintToDouble(src, dst) => {
+            BirdsInstructionNode::UintToFloat(src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
+                let dst_type = AssemblyType::infer(&dst, context)?.0;
                 match src_type {
                     AssemblyType::Byte | AssemblyType::Word => {
                         vec![
@@ -823,8 +835,9 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                                 src.convert(context)?,
                                 Operand::Reg(Register::AX),
                             ),
-                            Instruction::Cvtsi2sd(
+                            Instruction::IntToFloat(
                                 AssemblyType::Longword,
+                                dst_type,
                                 Operand::Reg(Register::AX),
                                 dst.convert(context)?,
                             ),
@@ -838,8 +851,9 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                                 src.convert(context)?,
                                 Operand::Reg(Register::AX),
                             ),
-                            Instruction::Cvtsi2sd(
+                            Instruction::IntToFloat(
                                 AssemblyType::Quadword,
+                                dst_type,
                                 Operand::Reg(Register::AX),
                                 dst.convert(context)?,
                             ),
@@ -859,8 +873,9 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                                 format!("out_of_range_{}", &instruction_label),
                                 false,
                             ),
-                            Instruction::Cvtsi2sd(
+                            Instruction::IntToFloat(
                                 AssemblyType::Quadword,
+                                dst_type,
                                 src.clone().convert(context)?,
                                 dst.clone().convert(context)?,
                             ),
@@ -894,8 +909,9 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                                 Operand::Reg(Register::AX),
                                 Operand::Reg(Register::DX),
                             ),
-                            Instruction::Cvtsi2sd(
+                            Instruction::IntToFloat(
                                 AssemblyType::Quadword,
+                                dst_type,
                                 Operand::Reg(Register::DX),
                                 dst.clone().convert(context)?,
                             ),
@@ -908,8 +924,22 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             Instruction::Label(format!("end_{}", &instruction_label)),
                         ]
                     }
-                    AssemblyType::Double | AssemblyType::ByteArray(_, _) => unreachable!(),
+                    AssemblyType::Double | AssemblyType::Float | AssemblyType::ByteArray(_, _) => {
+                        unreachable!()
+                    }
                 }
+            }
+            BirdsInstructionNode::DoubleToFloat(src, dst) => {
+                vec![Instruction::Cvtsd2ss(
+                    src.convert(context)?,
+                    dst.convert(context)?,
+                )]
+            }
+            BirdsInstructionNode::FloatToDouble(src, dst) => {
+                vec![Instruction::Cvtss2sd(
+                    src.convert(context)?,
+                    dst.convert(context)?,
+                )]
             }
             BirdsInstructionNode::GetAddress(src, dst) => {
                 vec![Instruction::Lea(

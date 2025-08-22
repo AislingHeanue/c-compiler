@@ -20,6 +20,7 @@ impl Type {
             Type::Integer => 4,
             Type::Long => 8,
             Type::Short => 2,
+            Type::Float => 4,
             Type::Double => 8,
             Type::UnsignedInteger => 4,
             Type::UnsignedLong => 8,
@@ -40,7 +41,13 @@ impl Type {
     pub fn is_signed(&self) -> bool {
         matches!(
             self,
-            Type::Integer | Type::Long | Type::Double | Type::Char | Type::SignedChar | Type::Short
+            Type::Integer
+                | Type::Long
+                | Type::Float
+                | Type::Double
+                | Type::Char
+                | Type::SignedChar
+                | Type::Short
         )
     }
 
@@ -53,6 +60,7 @@ impl Type {
                 | Type::UnsignedInteger
                 | Type::UnsignedLong
                 | Type::UnsignedShort
+                | Type::Float
                 | Type::Double
                 | Type::Char
                 | Type::SignedChar
@@ -61,10 +69,11 @@ impl Type {
     }
 
     pub fn is_integer(&self) -> bool {
-        match self {
-            Type::Double => false,
-            _ => self.is_arithmetic(),
-        }
+        !self.is_float() && self.is_arithmetic()
+    }
+
+    pub fn is_float(&self) -> bool {
+        matches!(self, Type::Float | Type::Double)
     }
 
     pub fn is_scalar(&self) -> bool {
@@ -115,6 +124,7 @@ impl Type {
     pub fn class(&self) -> Class {
         match self {
             Type::Double => Class::Sse,
+            Type::Float => Class::Sse,
             Type::Array(..) => unreachable!(),
             Type::Function(_, _) => unreachable!(),
             Type::Struct(_, _) => unreachable!(),

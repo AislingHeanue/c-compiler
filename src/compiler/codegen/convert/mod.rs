@@ -1,5 +1,6 @@
 use crate::compiler::{
     birds::{BirdsBinaryOperatorNode, BirdsProgramNode, BirdsValueNode},
+    codegen::align_stack_size,
     parser::StructInfo,
     types::{Class, StaticInitialiser, SymbolInfo, Type},
 };
@@ -156,7 +157,7 @@ fn pass_returns_to_caller(
         double: Vec::new(),
         uses_memory: false,
     };
-    if t == AssemblyType::Double {
+    if t.is_float() {
         out.double.push(v.convert(context)?);
     } else if is_scalar {
         out.integer.push((v.convert(context)?, t));
@@ -206,7 +207,7 @@ pub fn classify_return_by_type(
         }
         let assembly_type = t.clone().convert(context)?;
 
-        if assembly_type == AssemblyType::Double {
+        if assembly_type.is_float() {
             registers.push(DOUBLE_RETURN_REGISTERS[0].clone());
             Ok((false, registers))
         } else if is_scalar {
@@ -315,21 +316,18 @@ fn classify_struct(struct_type: &Type, context: &mut ConvertContext) -> Vec<Clas
         vec![Class::Memory; u64::div_ceil(info.size, 8) as usize]
     } else {
         let member_types = flatten_struct_types(struct_type, context);
+        let classes = flatten_types_to_classes(&member_types, 0, context);
         // size > 8 means there are exactly 2 eightbytes we need to classify
         // (this would probably be more complicated if we supported floats)
         if info.size > 8 {
-            match (
-                member_types.first().unwrap().class(),
-                member_types.last().unwrap().class(),
-            ) {
+            match (classes.0.unwrap(), classes.1.unwrap()) {
                 (Class::Sse, Class::Sse) => vec![Class::Sse, Class::Sse],
-                (Class::Sse, _) => vec![Class::Sse, Class::Integer],
+                (Class::Sse, Class::Integer) => vec![Class::Sse, Class::Integer],
                 (_, Class::Sse) => vec![Class::Integer, Class::Sse],
-
                 (_, _) => vec![Class::Integer, Class::Integer],
             }
         } else {
-            match member_types.first().unwrap().class() {
+            match classes.0.unwrap() {
                 Class::Sse => vec![Class::Sse],
                 _ => vec![Class::Integer],
             }
@@ -348,45 +346,8 @@ fn flatten_struct_types(this_type: &Type, context: &mut ConvertContext) -> Vec<T
                 .flat_map(|m| flatten_struct_types(&m.member_type, context))
                 .collect()
         }
-        Type::Struct(name, true) => {
-            // this whole block is a hack and should probably be moved to the parent function,
-            // but for now that would involve rewriting some code I don't want to touch, at least
-            // until/if I add more types eg. float
-            let info = context.structs.get(name).unwrap().clone();
-            let mut type_possibilities = Vec::new();
-            for member in info.members {
-                type_possibilities.push(flatten_struct_types(&member.member_type, context));
-            }
-            if info.size <= 8 {
-                let mut out_type = Type::Double; // so that we get [Class::Sse]
-                for possibility in type_possibilities {
-                    if possibility.iter().any(|t| t.class() != Class::Sse) {
-                        out_type = Type::Long; // so that we get [Class::Integer]
-                    }
-                }
-                vec![out_type] // so that the resulting class is [Integer]
-            } else {
-                // we can now assume we need to return 2 classes exactly since if size > 16 then we
-                // write to memory automatically
-                let mut first_out_type = Type::Double;
-                let mut second_out_type = Type::Double;
-                for possibility in type_possibilities {
-                    if possibility.first().unwrap().class() != Class::Sse {
-                        first_out_type = Type::Long;
-                    }
-                    if possibility
-                        .iter()
-                        .map(|t| t.get_size(&mut context.structs))
-                        .sum::<u64>()
-                        > 8
-                        && possibility.last().unwrap().class() != Class::Sse
-                    {
-                        second_out_type = Type::Long;
-                    }
-                }
-                vec![first_out_type, second_out_type]
-            }
-        }
+        // unions need lots of extra care and attention, handled in the below function
+        Type::Struct(_name, true) => vec![this_type.clone()],
         Type::Array(inner_type, size) => {
             let out_types = flatten_struct_types(inner_type, context);
             // if we encounter an array of size N, then flatten the inner type and
@@ -397,6 +358,68 @@ fn flatten_struct_types(this_type: &Type, context: &mut ConvertContext) -> Vec<T
                 .collect()
         }
         _ => vec![this_type.clone()],
+    }
+}
+
+fn flatten_types_to_classes(
+    member_types: &[Type],
+    mut current_size: u64,
+    context: &mut ConvertContext,
+) -> (Option<Class>, Option<Class>) {
+    let starting_size = current_size;
+    let mut first_out_class = Class::Sse;
+    let mut second_out_class = Class::Sse;
+    for t in member_types.iter() {
+        current_size = align_stack_size(current_size, t.get_alignment(&mut context.structs));
+        match t {
+            Type::Struct(name, true) => {
+                let info = context.structs.get(name).unwrap().clone();
+                let type_possibilities = info
+                    .members
+                    .iter()
+                    .map(|m| flatten_struct_types(&m.member_type, context))
+                    .collect_vec();
+                // if info.size <= 8 {
+                for possibility in type_possibilities {
+                    let classes = flatten_types_to_classes(&possibility, current_size, context);
+                    if let Some(class) = classes.0 {
+                        if class != Class::Sse {
+                            first_out_class = Class::Integer
+                        }
+                    }
+                    if let Some(class) = classes.1 {
+                        if class != Class::Sse {
+                            second_out_class = Class::Integer
+                        }
+                    }
+                }
+                current_size += info.size;
+            }
+            t => {
+                // any types here are NOT aggregate, meaning we can get classes directly
+                if t.class() != Class::Sse {
+                    if current_size < 8 {
+                        first_out_class = Class::Integer;
+                        if current_size + t.get_size(&mut context.structs) > 8 {
+                            // this entry spans 2 eightbytes
+                            second_out_class = Class::Integer;
+                        }
+                    } else {
+                        second_out_class = Class::Integer;
+                    }
+                }
+                current_size += t.get_size(&mut context.structs);
+            }
+        }
+    }
+    if starting_size <= 8 {
+        if current_size <= 8 {
+            (Some(first_out_class), None)
+        } else {
+            (Some(first_out_class), Some(second_out_class))
+        }
+    } else {
+        (None, Some(second_out_class))
     }
 }
 

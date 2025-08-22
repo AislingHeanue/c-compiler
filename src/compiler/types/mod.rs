@@ -15,6 +15,7 @@ pub enum Type {
     UnsignedInteger,
     UnsignedLong,
     UnsignedShort,
+    Float,
     Double,
     // return type, param types
     Function(Box<Type>, Vec<Type>),
@@ -37,6 +38,7 @@ pub enum Constant {
     UnsignedInteger(u32),
     UnsignedLong(u64),
     UnsignedShort(u16),
+    Float(f32),
     Double(f64),
     Char(i8),
     UnsignedChar(u8),
@@ -68,6 +70,7 @@ pub enum StorageClass {
 #[derive(Debug, Clone)]
 pub enum StaticInitialiser {
     Comparable(ComparableStatic),
+    Float(f32),
     Double(f64),
 }
 
@@ -77,10 +80,26 @@ fn one_double_is_negative_zero(a: f64, b: f64) -> bool {
     (a_n0 && !b_n0) || (b_n0 && !a_n0)
 }
 
+fn one_float_is_negative_zero(a: f32, b: f32) -> bool {
+    let a_n0 = a.to_bits() == (-0.0_f32).to_bits();
+    let b_n0 = b.to_bits() == (-0.0_f32).to_bits();
+    (a_n0 && !b_n0) || (b_n0 && !a_n0)
+}
+
 impl PartialEq for StaticInitialiser {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Comparable(a), Self::Comparable(b)) => a == b,
+            (Self::Float(a), Self::Float(b)) => {
+                // 0.0 does not equal -0.0 !!!
+                if one_float_is_negative_zero(*a, *b) {
+                    false
+                } else if a.is_nan() && b.is_nan() {
+                    true
+                } else {
+                    a == b
+                }
+            }
             (Self::Double(a), Self::Double(b)) => {
                 // 0.0 does not equal -0.0 !!!
                 if one_double_is_negative_zero(*a, *b) {

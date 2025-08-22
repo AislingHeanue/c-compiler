@@ -68,6 +68,11 @@ impl DisplayContext {
         self.instruction_suffix = "q".to_string();
         self
     }
+    fn float(&mut self) -> &mut DisplayContext {
+        self.word_length_bytes = 4;
+        self.instruction_suffix = "ss".to_string();
+        self
+    }
     fn double(&mut self) -> &mut DisplayContext {
         self.word_length_bytes = 8;
         self.instruction_suffix = "sd".to_string();
@@ -80,6 +85,9 @@ impl DisplayContext {
             }
             AssemblyType::Quadword => {
                 self.long();
+            }
+            AssemblyType::Float => {
+                self.float();
             }
             AssemblyType::Double => {
                 self.double();
@@ -285,7 +293,7 @@ impl CodeDisplay for StaticInitialiser {
             StaticInitialiser::Comparable(ComparableStatic::Integer(i)) => format!(".long {}", i),
             StaticInitialiser::Comparable(ComparableStatic::Long(l)) => format!(".quad {}", l),
             StaticInitialiser::Comparable(ComparableStatic::Short(l)) => {
-                format!(".byte {}", l)
+                format!(".value {}", l)
             }
             StaticInitialiser::Comparable(ComparableStatic::UnsignedInteger(i)) => {
                 format!(".long {}", i)
@@ -301,7 +309,7 @@ impl CodeDisplay for StaticInitialiser {
             }
             // converting unsigned char to signed char here (only to convert it back in a second)
             StaticInitialiser::Comparable(ComparableStatic::UnsignedChar(l)) => {
-                format!(".value {}", l)
+                format!(".byte {}", l)
             }
             StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(n)) => format!(".zero {}", n),
             StaticInitialiser::Comparable(ComparableStatic::String(l, term)) => {
@@ -314,6 +322,11 @@ impl CodeDisplay for StaticInitialiser {
             StaticInitialiser::Comparable(ComparableStatic::Pointer(l)) => {
                 let label_start = if context.is_mac { "L" } else { ".L" };
                 format!(".quad {}{}", label_start, l)
+            }
+
+            StaticInitialiser::Float(f) => {
+                let mut ryu_buffer = Buffer::new();
+                format!(".float {}", ryu_buffer.format(*f))
             }
             StaticInitialiser::Double(d) => {
                 // use the actual bits of the f64 value in the assembly
@@ -430,21 +443,41 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
-            Instruction::Cvttsd2si(dst_type, src, dst) => {
+            Instruction::IntToFloat(src_type, dst_type, src, dst) => {
                 format!(
-                    "{:indent$}cvttsd2si{} {}, {}",
+                    "{:indent$}cvtsi2{}{} {}, {}",
                     "",
+                    context.suffix_for_type(dst_type),
+                    context.suffix_for_type(src_type),
+                    src.show(context),
+                    dst.show(context),
+                    indent = context.indent
+                )
+            }
+            Instruction::FloatToInt(src_type, dst_type, src, dst) => {
+                format!(
+                    "{:indent$}cvtt{}2si{} {}, {}",
+                    "",
+                    context.suffix_for_type(src_type),
                     context.suffix_for_type(dst_type),
                     src.show(context),
                     dst.show(context),
                     indent = context.indent
                 )
             }
-            Instruction::Cvtsi2sd(src_type, src, dst) => {
+            Instruction::Cvtss2sd(src, dst) => {
                 format!(
-                    "{:indent$}cvtsi2sd{} {}, {}",
+                    "{:indent$}cvtss2sd {}, {}",
                     "",
-                    context.suffix_for_type(src_type),
+                    src.show(context),
+                    dst.show(context),
+                    indent = context.indent
+                )
+            }
+            Instruction::Cvtsd2ss(src, dst) => {
+                format!(
+                    "{:indent$}cvtsd2ss {}, {}",
+                    "",
                     src.show(context),
                     dst.show(context),
                     indent = context.indent
@@ -542,7 +575,12 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
-            Instruction::Cdq(AssemblyType::Byte | AssemblyType::Word | AssemblyType::Longword) => {
+            Instruction::Cdq(
+                AssemblyType::Byte
+                | AssemblyType::Word
+                | AssemblyType::Longword
+                | AssemblyType::Float,
+            ) => {
                 if context.comments {
                     format!(
                         "{:indent$}# Extend the 32-bit value in EAX to a 64-bit\n\

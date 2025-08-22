@@ -13,6 +13,7 @@ pub trait ApproximableOrdinal:
     + ApproxInto<u16, Wrapping>
     + ApproxInto<u32, Wrapping>
     + ApproxInto<u64, Wrapping>
+    + ApproxInto<f32>
     + ApproxInto<f64>
     + Copy
 {
@@ -41,6 +42,7 @@ impl StaticInitialiser {
             Type::UnsignedInteger => StaticInitialiser::unsigned_integer_from_double(i),
             Type::UnsignedLong => StaticInitialiser::unsigned_long_from_double(i),
             Type::UnsignedShort => StaticInitialiser::unsigned_short_from_double(i),
+            Type::Float => StaticInitialiser::float_from_double(i),
             Type::Double => StaticInitialiser::Double(i),
             Type::Char => StaticInitialiser::char_from_double(i),
             Type::SignedChar => StaticInitialiser::char_from_double(i),
@@ -61,6 +63,7 @@ impl StaticInitialiser {
             Type::UnsignedInteger => StaticInitialiser::unsigned_integer(i),
             Type::UnsignedLong => StaticInitialiser::unsigned_long(i),
             Type::UnsignedShort => StaticInitialiser::unsigned_short(i),
+            Type::Float => StaticInitialiser::float(i),
             Type::Double => StaticInitialiser::double(i),
             Type::Char => StaticInitialiser::char(i),
             Type::SignedChar => StaticInitialiser::char(i),
@@ -161,6 +164,16 @@ impl StaticInitialiser {
         StaticInitialiser::Comparable(ComparableStatic::UnsignedLong(real_i))
     }
 
+    fn float<T: ApproxInto<f32>>(i: T) -> StaticInitialiser {
+        let real_i = i.approx_as().unwrap();
+        if real_i == 0. {
+            return StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
+                Type::Float.get_size(&mut HashMap::new()),
+            ));
+        }
+        StaticInitialiser::Float(ConvUtil::approx_as(real_i).unwrap())
+    }
+
     fn double<T: ApproxInto<f64>>(i: T) -> StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0. {
@@ -250,6 +263,16 @@ impl StaticInitialiser {
         }
         StaticInitialiser::Comparable(ComparableStatic::UnsignedLong(real_i))
     }
+
+    fn float_from_double<T: ApproxInto<f32>>(i: T) -> StaticInitialiser {
+        let real_i = i.approx_as().unwrap();
+        if real_i == 0. {
+            return StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
+                Type::Float.get_size(&mut HashMap::new()),
+            ));
+        }
+        StaticInitialiser::Float(ConvUtil::approx_as(real_i).unwrap())
+    }
 }
 
 impl ComparableStatic {
@@ -257,9 +280,12 @@ impl ComparableStatic {
         match self {
             ComparableStatic::Integer(i) => Constant::Integer(*i),
             ComparableStatic::Long(l) => Constant::Long(*l),
+            ComparableStatic::Short(l) => Constant::Short(*l),
             ComparableStatic::UnsignedInteger(i) => Constant::UnsignedInteger(*i),
             ComparableStatic::UnsignedLong(l) => Constant::UnsignedLong(*l),
+            ComparableStatic::UnsignedShort(l) => Constant::UnsignedShort(*l),
             ComparableStatic::ZeroBytes(n) => match n {
+                2 => Constant::Short(0),
                 4 => Constant::Integer(0),
                 8 => Constant::Long(0),
                 _ => unreachable!(),

@@ -179,7 +179,7 @@ impl BirdsInstructionNode {
                     BirdsValueNode::Var(dst_name),
                 ))
             }
-            BirdsInstructionNode::IntToDouble(
+            BirdsInstructionNode::IntToFloat(
                 BirdsValueNode::Constant(c),
                 BirdsValueNode::Var(dst_name),
             ) => {
@@ -189,7 +189,7 @@ impl BirdsInstructionNode {
                     BirdsValueNode::Var(dst_name),
                 ))
             }
-            BirdsInstructionNode::UintToDouble(
+            BirdsInstructionNode::UintToFloat(
                 BirdsValueNode::Constant(c),
                 BirdsValueNode::Var(dst_name),
             ) => {
@@ -199,7 +199,7 @@ impl BirdsInstructionNode {
                     BirdsValueNode::Var(dst_name),
                 ))
             }
-            BirdsInstructionNode::DoubleToInt(
+            BirdsInstructionNode::FloatToInt(
                 BirdsValueNode::Constant(c),
                 BirdsValueNode::Var(dst_name),
             ) => {
@@ -209,7 +209,7 @@ impl BirdsInstructionNode {
                     BirdsValueNode::Var(dst_name),
                 ))
             }
-            BirdsInstructionNode::DoubleToUint(
+            BirdsInstructionNode::FloatToUint(
                 BirdsValueNode::Constant(c),
                 BirdsValueNode::Var(dst_name),
             ) => {

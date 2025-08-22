@@ -120,6 +120,7 @@ impl CheckTypes for ExpressionNode {
                 Constant::Long(_) => Type::Long,
                 Constant::UnsignedInteger(_) => Type::UnsignedInteger,
                 Constant::UnsignedLong(_) => Type::UnsignedLong,
+                Constant::Float(_) => Type::Float,
                 Constant::Double(_) => Type::Double,
                 Constant::Char(_) => Type::Char,
                 Constant::UnsignedChar(_) => Type::UnsignedChar,
@@ -146,8 +147,8 @@ impl CheckTypes for ExpressionNode {
                 match op {
                     UnaryOperatorNode::Not => Type::Integer, // returns 0 or 1 (eg boolean-like)
                     UnaryOperatorNode::Complement => {
-                        if src.1.as_ref().unwrap() == &Type::Double {
-                            return Err("'~' cannot operate on a double".into());
+                        if src.1.as_ref().unwrap().is_float() {
+                            return Err("'~' cannot operate on a float or double".into());
                         }
                         src.1.clone().unwrap()
                     }
@@ -232,8 +233,10 @@ impl CheckTypes for ExpressionNode {
                 let src_type = e.1.as_ref().unwrap();
                 if matches!((&src_type, &target), (&Type::Double, &Type::Pointer(_)))
                     || matches!((&target, &src_type), (&Type::Double, &Type::Pointer(_)))
+                    || matches!((&src_type, &target), (&Type::Float, &Type::Pointer(_)))
+                    || matches!((&target, &src_type), (&Type::Float, &Type::Pointer(_)))
                 {
-                    return Err("Cannot cast between Double and Pointer types".into());
+                    return Err("Cannot cast between Float or Double and Pointer types".into());
                 }
 
                 target.check_types(context)?;
@@ -333,7 +336,6 @@ impl CheckTypes for ExpressionNode {
                 p.check_types_and_convert(context)?;
                 if let Type::Pointer(p_type) = p.1.as_ref().unwrap() {
                     if let Type::Struct(ref s_name, is_union) = **p_type {
-                        // TODO: check unions
                         let info = context.structs.get(s_name).unwrap().clone();
                         let maybe_member =
                             info.members.find_name(name, is_union, &mut context.structs);
@@ -422,8 +424,18 @@ impl ExpressionNode {
 
         if t1 == t2 {
             t1.clone()
-        } else if t1 == &Type::Double || t2 == &Type::Double {
-            Type::Double
+        } else if t1.is_float() {
+            if t2.is_float() {
+                if t1.get_size(structs) > t2.get_size(structs) {
+                    t1.clone()
+                } else {
+                    t2.clone()
+                }
+            } else {
+                t1.clone()
+            }
+        } else if t2.is_float() {
+            t2.clone()
         } else if t1.get_size(structs) == t2.get_size(structs) {
             if t1.is_signed() {
                 t2.clone()
@@ -658,7 +670,7 @@ impl ExpressionNode {
         }
 
         // Misc. Validation of types and operators
-        if (matches!(left.1.as_ref().unwrap(), Type::Double)
+        if (left.1.as_ref().unwrap().is_float()
             && matches!(
                 op,
                 BinaryOperatorNode::BitwiseAnd
@@ -668,7 +680,7 @@ impl ExpressionNode {
                     | BinaryOperatorNode::ShiftRight
                     | BinaryOperatorNode::Mod
             ))
-            || (matches!(right_type, Type::Double)
+            || (right_type.is_float()
                 && matches!(
                     op,
                     BinaryOperatorNode::Mod

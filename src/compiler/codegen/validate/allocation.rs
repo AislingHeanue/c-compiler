@@ -71,11 +71,19 @@ impl AllocateRegisters for Vec<Instruction> {
                     src.replace_mock_register_with_map(context);
                     dst.replace_mock_register_with_map(context);
                 }
-                Instruction::Cvttsd2si(_, ref mut src, ref mut dst) => {
+                Instruction::FloatToInt(_, _, ref mut src, ref mut dst) => {
                     src.replace_mock_register_with_map(context);
                     dst.replace_mock_register_with_map(context);
                 }
-                Instruction::Cvtsi2sd(_, ref mut src, ref mut dst) => {
+                Instruction::IntToFloat(_, _, ref mut src, ref mut dst) => {
+                    src.replace_mock_register_with_map(context);
+                    dst.replace_mock_register_with_map(context);
+                }
+                Instruction::Cvtss2sd(ref mut src, ref mut dst) => {
+                    src.replace_mock_register_with_map(context);
+                    dst.replace_mock_register_with_map(context);
+                }
+                Instruction::Cvtsd2ss(ref mut src, ref mut dst) => {
                     src.replace_mock_register_with_map(context);
                     dst.replace_mock_register_with_map(context);
                 }
@@ -141,8 +149,10 @@ impl AllocateRegisters for Vec<Instruction> {
                 Instruction::Movsx(_, _, ref mut src, ref mut dst)
                 | Instruction::MovZeroExtend(_, _, ref mut src, ref mut dst)
                 | Instruction::Lea(ref mut src, ref mut dst)
-                | Instruction::Cvttsd2si(_, ref mut src, ref mut dst)
-                | Instruction::Cvtsi2sd(_, ref mut src, ref mut dst)
+                | Instruction::FloatToInt(_, _, ref mut src, ref mut dst)
+                | Instruction::IntToFloat(_, _, ref mut src, ref mut dst)
+                | Instruction::Cvtsd2ss(ref mut src, ref mut dst)
+                | Instruction::Cvtss2sd(ref mut src, ref mut dst)
                 | Instruction::Binary(_, _, ref mut src, ref mut dst)
                 | Instruction::Cmp(_, ref mut src, ref mut dst) => {
                     *src = true_register_value(src, &coalesced_registers);

@@ -8,7 +8,7 @@ use crate::compiler::{
     types::{ComparableStatic, Constant, StaticInitialiser, Type},
 };
 
-use super::one_double_is_negative_zero;
+use super::{one_double_is_negative_zero, one_float_is_negative_zero};
 
 impl Constant {
     pub fn static_convert_to(&self, target: &Type) -> StaticInitialiser {
@@ -33,6 +33,7 @@ impl Constant {
             Constant::UnsignedChar(i) => StaticInitialiser::from_number(*i, target),
             Constant::Short(i) => StaticInitialiser::from_number(*i, target),
             Constant::UnsignedShort(i) => StaticInitialiser::from_number(*i, target),
+            Constant::Float(i) => StaticInitialiser::from_double((*i).into(), target),
             Constant::Double(i) => StaticInitialiser::from_double(*i, target),
         }
     }
@@ -65,10 +66,10 @@ impl Constant {
         match target {
             Type::Integer => Constant::Integer(value.try_into().unwrap()),
             Type::Long => Constant::Long(value),
-            Type::Short => Constant::Integer(value.try_into().unwrap()),
+            Type::Short => Constant::Short(value.try_into().unwrap()),
             Type::UnsignedInteger => Constant::UnsignedInteger(value.try_into().unwrap()),
             Type::UnsignedLong => Constant::UnsignedLong(value.try_into().unwrap()),
-            Type::UnsignedShort => Constant::Integer(value.try_into().unwrap()),
+            Type::UnsignedShort => Constant::UnsignedShort(value.try_into().unwrap()),
             // adding a constant to a pointer is only reasonable if the second operand is Long
             Type::Pointer(_) => Constant::Long(value),
             Type::Char => Constant::Char(value.try_into().unwrap()),
@@ -77,14 +78,19 @@ impl Constant {
 
             Type::Function(_, _) => unreachable!(),
             Type::Array(..) => unreachable!(),
+            Type::Float => panic!("Can't use get_typed_constant to generate a float"),
             Type::Double => panic!("Can't use get_typed_constant to generate a double"),
             Type::Void => unreachable!(),
             Type::Struct(_, _) => unreachable!(),
         }
     }
 
-    pub fn get_double(value: f64) -> Constant {
-        Constant::Double(value)
+    pub fn get_typed_float(value: f64, target: &Type) -> Constant {
+        match target {
+            Type::Double => Constant::Double(value),
+            Type::Float => Constant::Float(value as f32),
+            _ => unreachable!(),
+        }
     }
 
     pub fn zero(target: &Type, structs: &mut HashMap<String, StructInfo>) -> StaticInitialiser {
@@ -120,6 +126,7 @@ impl Constant {
             Constant::Long(i) => Constant::Long(!i),
             Constant::UnsignedInteger(i) => Constant::UnsignedInteger(!i),
             Constant::UnsignedLong(i) => Constant::UnsignedLong(!i),
+            Constant::Float(_i) => unreachable!(),
             Constant::Double(_i) => unreachable!(),
             Constant::Char(i) => Constant::Char(!i),
             Constant::UnsignedChar(i) => Constant::UnsignedChar(!i),
@@ -134,6 +141,7 @@ impl Constant {
             Type::Long => self.to_long(),
             Type::UnsignedInteger => self.to_uint(),
             Type::UnsignedLong => self.to_ulong(),
+            Type::Float => self.to_float(),
             Type::Double => self.to_double(),
             Type::Function(_, _) => unreachable!(),
             Type::Array(_, _) => unreachable!(),
@@ -154,6 +162,7 @@ impl Constant {
             Constant::Long(i) => *i as i32,
             Constant::UnsignedInteger(i) => *i as i32,
             Constant::UnsignedLong(i) => *i as i32,
+            Constant::Float(i) => *i as i32,
             Constant::Double(i) => *i as i32,
             Constant::Char(i) => *i as i32,
             Constant::UnsignedChar(i) => *i as i32,
@@ -168,6 +177,7 @@ impl Constant {
             Constant::Long(i) => *i as u32,
             Constant::UnsignedInteger(i) => *i,
             Constant::UnsignedLong(i) => *i as u32,
+            Constant::Float(i) => *i as u32,
             Constant::Double(i) => *i as u32,
             Constant::Char(i) => *i as u32,
             Constant::UnsignedChar(i) => *i as u32,
@@ -182,6 +192,7 @@ impl Constant {
             Constant::Long(i) => *i,
             Constant::UnsignedInteger(i) => *i as i64,
             Constant::UnsignedLong(i) => *i as i64,
+            Constant::Float(i) => *i as i64,
             Constant::Double(i) => *i as i64,
             Constant::Char(i) => *i as i64,
             Constant::UnsignedChar(i) => *i as i64,
@@ -196,6 +207,7 @@ impl Constant {
             Constant::Long(i) => *i as u64,
             Constant::UnsignedInteger(i) => *i as u64,
             Constant::UnsignedLong(i) => *i,
+            Constant::Float(i) => *i as u64,
             Constant::Double(i) => *i as u64,
             Constant::Char(i) => *i as u64,
             Constant::UnsignedChar(i) => *i as u64,
@@ -204,12 +216,28 @@ impl Constant {
         };
         Constant::UnsignedLong(val)
     }
+    pub fn to_float(&self) -> Constant {
+        let val = match self {
+            Constant::Integer(i) => *i as f32,
+            Constant::Long(i) => *i as f32,
+            Constant::UnsignedInteger(i) => *i as f32,
+            Constant::UnsignedLong(i) => *i as f32,
+            Constant::Float(i) => *i,
+            Constant::Double(i) => *i as f32,
+            Constant::Char(i) => *i as f32,
+            Constant::UnsignedChar(i) => *i as f32,
+            Constant::Short(i) => *i as f32,
+            Constant::UnsignedShort(i) => *i as f32,
+        };
+        Constant::Float(val)
+    }
     pub fn to_double(&self) -> Constant {
         let val = match self {
             Constant::Integer(i) => *i as f64,
             Constant::Long(i) => *i as f64,
             Constant::UnsignedInteger(i) => *i as f64,
             Constant::UnsignedLong(i) => *i as f64,
+            Constant::Float(i) => *i as f64,
             Constant::Double(i) => *i,
             Constant::Char(i) => *i as f64,
             Constant::UnsignedChar(i) => *i as f64,
@@ -224,6 +252,7 @@ impl Constant {
             Constant::Long(i) => *i as i8,
             Constant::UnsignedInteger(i) => *i as i8,
             Constant::UnsignedLong(i) => *i as i8,
+            Constant::Float(i) => *i as i8,
             Constant::Double(i) => *i as i8,
             Constant::Char(i) => *i,
             Constant::UnsignedChar(i) => *i as i8,
@@ -238,6 +267,7 @@ impl Constant {
             Constant::Long(i) => *i as u8,
             Constant::UnsignedInteger(i) => *i as u8,
             Constant::UnsignedLong(i) => *i as u8,
+            Constant::Float(i) => *i as u8,
             Constant::Double(i) => *i as u8,
             Constant::Char(i) => *i as u8,
             Constant::UnsignedChar(i) => *i,
@@ -253,6 +283,7 @@ impl Constant {
             Constant::Long(i) => *i as i16,
             Constant::UnsignedInteger(i) => *i as i16,
             Constant::UnsignedLong(i) => *i as i16,
+            Constant::Float(i) => *i as i16,
             Constant::Double(i) => *i as i16,
             Constant::Char(i) => *i as i16,
             Constant::UnsignedChar(i) => *i as i16,
@@ -268,6 +299,7 @@ impl Constant {
             Constant::Long(i) => *i as u16,
             Constant::UnsignedInteger(i) => *i as u16,
             Constant::UnsignedLong(i) => *i as u16,
+            Constant::Float(i) => *i as u16,
             Constant::Double(i) => *i as u16,
             Constant::Char(i) => *i as u16,
             Constant::UnsignedChar(i) => *i as u16,
@@ -288,6 +320,8 @@ impl Constant {
 
 impl PartialEq for Constant {
     fn eq(&self, other: &Self) -> bool {
+        // WARNING: adding any more types means you have to populate this field, or the constant
+        // folding pass loops indefinitely.
         match (self, other) {
             (Self::Integer(a), Self::Integer(b)) => a == b,
             (Self::Long(a), Self::Long(b)) => a == b,
@@ -303,8 +337,20 @@ impl PartialEq for Constant {
                     a == b
                 }
             }
+            (Self::Float(a), Self::Float(b)) => {
+                // 0.0 does not equal -0.0 !!!
+                if one_float_is_negative_zero(*a, *b) {
+                    false
+                } else if a.is_nan() && b.is_nan() {
+                    true
+                } else {
+                    a == b
+                }
+            }
             (Self::Char(a), Self::Char(b)) => a == b,
             (Self::UnsignedChar(a), Self::UnsignedChar(b)) => a == b,
+            (Self::Short(a), Self::Short(b)) => a == b,
+            (Self::UnsignedShort(a), Self::UnsignedShort(b)) => a == b,
             _ => false,
         }
     }
@@ -324,6 +370,11 @@ impl Add for Constant {
             (Constant::Double(a), Constant::Double(b)) => Constant::Double(a + b),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a + b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a + b),
+            (Constant::Short(a), Constant::Short(b)) => Constant::Short(a + b),
+            (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => {
+                Constant::UnsignedShort(a + b)
+            }
+            (Constant::Float(a), Constant::Float(b)) => Constant::Float(a + b),
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -343,6 +394,11 @@ impl Sub for Constant {
             (Constant::Double(a), Constant::Double(b)) => Constant::Double(a - b),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a - b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a - b),
+            (Constant::Short(a), Constant::Short(b)) => Constant::Short(a - b),
+            (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => {
+                Constant::UnsignedShort(a - b)
+            }
+            (Constant::Float(a), Constant::Float(b)) => Constant::Float(a - b),
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -362,6 +418,11 @@ impl Mul for Constant {
             (Constant::Double(a), Constant::Double(b)) => Constant::Double(a * b),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a * b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a * b),
+            (Constant::Short(a), Constant::Short(b)) => Constant::Short(a * b),
+            (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => {
+                Constant::UnsignedShort(a * b)
+            }
+            (Constant::Float(a), Constant::Float(b)) => Constant::Float(a * b),
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -392,6 +453,11 @@ impl Div for Constant {
             }
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a / b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a / b),
+            (Constant::Short(a), Constant::Short(b)) => Constant::Short(a / b),
+            (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => {
+                Constant::UnsignedShort(a / b)
+            }
+            (Constant::Float(a), Constant::Float(b)) => Constant::Float(a / b),
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -415,6 +481,11 @@ impl Rem for Constant {
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a % b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a % b),
+            (Constant::Short(a), Constant::Short(b)) => Constant::Short(a % b),
+            (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => {
+                Constant::UnsignedShort(a % b)
+            }
+            (Constant::Float(a), Constant::Float(b)) => Constant::Float(a % b),
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -431,6 +502,9 @@ impl PartialOrd for Constant {
             (Constant::Double(a), Constant::Double(b)) => a.partial_cmp(b),
             (Constant::Char(a), Constant::Char(b)) => Some(a.cmp(b)),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Some(a.cmp(b)),
+            (Constant::Short(a), Constant::Short(b)) => Some(a.cmp(b)),
+            (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => Some(a.cmp(b)),
+            (Constant::Float(a), Constant::Float(b)) => a.partial_cmp(b),
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -450,6 +524,11 @@ impl BitAnd for Constant {
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a & b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a & b),
+            (Constant::Short(a), Constant::Short(b)) => Constant::Short(a & b),
+            (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => {
+                Constant::UnsignedShort(a & b)
+            }
+            (Constant::Float(_a), Constant::Float(_b)) => unreachable!(),
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -469,6 +548,11 @@ impl BitOr for Constant {
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a | b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a | b),
+            (Constant::Short(a), Constant::Short(b)) => Constant::Short(a | b),
+            (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => {
+                Constant::UnsignedShort(a | b)
+            }
+            (Constant::Float(_a), Constant::Float(_b)) => unreachable!(),
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -488,6 +572,11 @@ impl BitXor for Constant {
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a ^ b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a ^ b),
+            (Constant::Short(a), Constant::Short(b)) => Constant::Short(a ^ b),
+            (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => {
+                Constant::UnsignedShort(a ^ b)
+            }
+            (Constant::Float(_a), Constant::Float(_b)) => unreachable!(),
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -520,6 +609,9 @@ impl Shl for Constant {
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
             (Constant::Char(a), Constant::Integer(b)) => Constant::Char(a << b),
             (Constant::UnsignedChar(a), Constant::Integer(b)) => Constant::UnsignedChar(a << b),
+            (Constant::Short(a), Constant::Integer(b)) => Constant::Short(a << b),
+            (Constant::UnsignedShort(a), Constant::Integer(b)) => Constant::UnsignedShort(a << b),
+            (Constant::Float(_a), Constant::Integer(_b)) => unreachable!(),
             _ => unreachable!(), // can only do shl with integers as the second arg
         }
     }
@@ -552,6 +644,9 @@ impl Shr for Constant {
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
             (Constant::Char(a), Constant::Integer(b)) => Constant::Char(a >> b),
             (Constant::UnsignedChar(a), Constant::Integer(b)) => Constant::UnsignedChar(a >> b),
+            (Constant::Short(a), Constant::Integer(b)) => Constant::Short(a >> b),
+            (Constant::UnsignedShort(a), Constant::Integer(b)) => Constant::UnsignedShort(a >> b),
+            (Constant::Float(_a), Constant::Integer(_b)) => unreachable!(),
             _ => unreachable!(), // can only do shr with integers as the second arg
         }
     }
@@ -574,6 +669,7 @@ impl Neg for Constant {
             Constant::Long(i) => Constant::Long(-i),
             Constant::UnsignedInteger(i) => Constant::UnsignedInteger(!i + 1), // undefined behaviour
             Constant::UnsignedLong(i) => Constant::UnsignedLong(!i + 1), // undefined behaviour
+            Constant::Float(i) => Constant::Float(-i),
             Constant::Double(i) => Constant::Double(-i),
             Constant::Char(i) => Constant::Char(!i),
             Constant::UnsignedChar(i) => Constant::UnsignedChar(!i + 1), // undefined behaviour

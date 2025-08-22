@@ -285,6 +285,13 @@ impl InitialiserNode {
                 )),
                 Some(target_type.clone()),
             ),
+            Type::Float => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::Float(0.)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
             Type::Double => InitialiserNode(
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::Double(0.)),

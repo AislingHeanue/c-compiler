@@ -16,6 +16,7 @@ impl Convert<AssemblyType> for Type {
             Type::UnsignedLong => Ok(AssemblyType::Quadword),
             Type::UnsignedShort => Ok(AssemblyType::Word),
             Type::Pointer(_) => Ok(AssemblyType::Quadword),
+            Type::Float => Ok(AssemblyType::Float),
             Type::Double => Ok(AssemblyType::Double),
             Type::Array(t, size) => {
                 let assembly_t = (*t).convert(context)?;
@@ -53,6 +54,7 @@ impl AssemblyType {
             BirdsValueNode::Constant(Constant::UnsignedLong(_)) => {
                 (AssemblyType::Quadword, false, true)
             }
+            BirdsValueNode::Constant(Constant::Float(_)) => (AssemblyType::Float, true, true),
             BirdsValueNode::Constant(Constant::Double(_)) => (AssemblyType::Double, true, true),
             BirdsValueNode::Constant(Constant::Char(_)) => (AssemblyType::Byte, true, true),
             BirdsValueNode::Constant(Constant::UnsignedChar(_)) => {
@@ -86,6 +88,7 @@ impl AssemblyType {
             AssemblyType::Word => 2,
             AssemblyType::Longword => 4,
             AssemblyType::Quadword => 8,
+            AssemblyType::Float => 4,
             AssemblyType::Double => 8,
             AssemblyType::ByteArray(_size, alignment) => *alignment,
         }
@@ -97,8 +100,13 @@ impl AssemblyType {
             AssemblyType::Word => 2,
             AssemblyType::Longword => 4,
             AssemblyType::Quadword => 8,
+            AssemblyType::Float => 4,
             AssemblyType::Double => 8,
             AssemblyType::ByteArray(size, _alignment) => *size,
         }
+    }
+
+    pub fn is_float(&self) -> bool {
+        matches!(self, AssemblyType::Float | AssemblyType::Double)
     }
 }

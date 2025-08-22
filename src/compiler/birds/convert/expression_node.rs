@@ -81,11 +81,11 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     } else {
                         BirdsBinaryOperatorNode::Subtract
                     };
-                    if new_dst_type == Type::Double {
+                    if new_dst_type.is_float() {
                         instructions.push(BirdsInstructionNode::Binary(
                             bird_op,
                             evaluated_src.clone(),
-                            BirdsValueNode::Constant(Constant::get_double(1.)),
+                            BirdsValueNode::Constant(Constant::get_typed_float(1., &new_dst_type)),
                             new_dst.clone(),
                         ));
                     } else {
@@ -144,11 +144,11 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     } else {
                         BirdsBinaryOperatorNode::Subtract
                     };
-                    if new_dst_type == Type::Double {
+                    if new_dst_type.is_float() {
                         instructions.push(BirdsInstructionNode::Binary(
                             bird_op,
                             new_dst.clone(),
-                            BirdsValueNode::Constant(Constant::get_double(1.)),
+                            BirdsValueNode::Constant(Constant::get_typed_float(1., &new_dst_type)),
                             evaluated_src.clone(),
                         ));
                     } else {
@@ -746,37 +746,43 @@ impl ExpressionWithoutType {
         context: &mut ConvertContext,
     ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
         let mut instructions = Vec::new();
-        if target_type == &Type::Double {
+        if target_type.is_float() {
             match this_type {
                 Type::Integer | Type::Long | Type::Char | Type::SignedChar | Type::Short => {
-                    instructions.push(BirdsInstructionNode::IntToDouble(src, dst.clone()));
+                    instructions.push(BirdsInstructionNode::IntToFloat(src, dst.clone()));
                 }
                 Type::UnsignedInteger
                 | Type::UnsignedLong
                 | Type::UnsignedChar
                 | Type::UnsignedShort => {
-                    instructions.push(BirdsInstructionNode::UintToDouble(src, dst.clone()));
+                    instructions.push(BirdsInstructionNode::UintToFloat(src, dst.clone()));
+                }
+                Type::Float => {
+                    instructions.push(BirdsInstructionNode::FloatToDouble(src, dst.clone()));
                 }
                 Type::Array(..) => unreachable!(),
                 Type::Pointer(_) => unreachable!(),
-                Type::Double => unreachable!(),
+                Type::Double => {
+                    instructions.push(BirdsInstructionNode::DoubleToFloat(src, dst.clone()));
+                }
                 Type::Function(_, _) => unreachable!(),
                 Type::Void => unreachable!(),
                 Type::Struct(_, _) => unreachable!(),
             }
-        } else if this_type == &Type::Double {
+        } else if this_type.is_float() {
             match target_type {
                 Type::Integer | Type::Long | Type::Char | Type::SignedChar | Type::Short => {
-                    instructions.push(BirdsInstructionNode::DoubleToInt(src, dst.clone()));
+                    instructions.push(BirdsInstructionNode::FloatToInt(src, dst.clone()));
                 }
                 Type::UnsignedInteger
                 | Type::UnsignedLong
                 | Type::UnsignedChar
                 | Type::UnsignedShort => {
-                    instructions.push(BirdsInstructionNode::DoubleToUint(src, dst.clone()));
+                    instructions.push(BirdsInstructionNode::FloatToUint(src, dst.clone()));
                 }
                 Type::Pointer(_) => unreachable!(),
                 Type::Array(..) => unreachable!(),
+                Type::Float => unreachable!(),
                 Type::Double => unreachable!(),
                 Type::Function(_, _) => unreachable!(),
                 Type::Void => unreachable!(),

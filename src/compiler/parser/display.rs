@@ -327,6 +327,7 @@ impl CodeDisplay for Type {
             Type::Function(output, inputs) => {
                 format!("func ({}) {}", inputs.show(context), output.show(context))
             }
+            Type::Float => "float32".to_string(),
             Type::Double => "float64".to_string(),
             Type::Pointer(t) => format!("*{}", t.show(context)),
             Type::Array(t, s) => format!("[{}]{}", s, t.show(context)),
@@ -337,14 +338,6 @@ impl CodeDisplay for Type {
             Type::Struct(name, _) => name.to_string(),
             Type::Short => "int16".to_string(),
             Type::UnsignedShort => "uint16".to_string(),
-            // Type::Struct(name, Some(members)) => {
-            //     format!(
-            //         "struct_{} {{{}{}}}",
-            //         name,
-            //         members.show(&mut context.indent()),
-            //         context.new_line_start()
-            //     )
-            // }
         }
     }
 }
@@ -501,6 +494,7 @@ impl CodeDisplay for Constant {
             Constant::UnsignedInteger(c) => format!("uint32({})", c),
             Constant::UnsignedLong(c) => format!("uint64({})", c),
             Constant::UnsignedShort(c) => format!("uint16({})", c),
+            Constant::Float(c) => format!("float32({})", c),
             Constant::Double(c) => format!("float64({})", c),
             Constant::Char(c) => format!("rune({})", c.show(context)),
             Constant::UnsignedChar(c) => format!("unsigned_rune({})", (*c as i8).show(context)),

@@ -54,6 +54,7 @@ pub enum Token {
     Identifier(String),
     IntegerConstant(i64),
     LongConstant(i64),
+    FloatConstant(f32),
     DoubleConstant(f64),
     UnsignedIntegerConstant(u64),
     UnsignedLongConstant(u64),
@@ -78,6 +79,7 @@ pub enum Token {
     KeywordLong,
     KeywordSigned,
     KeywordUnsigned,
+    KeywordFloat,
     KeywordDouble,
     KeywordChar,
     KeywordShort,
@@ -152,6 +154,7 @@ lazy_static! {
                 Token::LongConstant(_) => r"([0-9]+[lL])[^\w.]",
                 Token::UnsignedIntegerConstant(_) => r"([0-9]+[uU])[^\w.]",
                 Token::UnsignedLongConstant(_) => r"([0-9]+([lL][uU]|[uU][lL]))[^\w.]",
+                Token::FloatConstant(_) => r"((?:(?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[fF])[^\w.]",
                 Token::DoubleConstant(_) => r"((?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]",
                 Token::CharacterConstant(_) => r#"'(?:[^'\\\n]|\\['"?\\abfnrtv])'"#,
                 Token::StringLiteral(_) => r#""(?:[^"\\\n]|\\['"?\\abfnrtv])*""#,
@@ -181,6 +184,7 @@ lazy_static! {
                 Token::KeywordLong =>r"long\b",
                 Token::KeywordSigned =>r"signed\b",
                 Token::KeywordUnsigned =>r"unsigned\b",
+                Token::KeywordFloat =>r"float\b",
                 Token::KeywordDouble =>r"double\b",
                 Token::KeywordChar =>r"char\b",
                 Token::KeywordShort =>r"short\b",
@@ -223,6 +227,9 @@ impl Token {
                     .parse::<u64>()
                     .unwrap(),
             ),
+            Token::FloatConstant(_) => {
+                Token::DoubleConstant(text.trim_end_matches(['f', 'F']).parse::<f64>().unwrap())
+            }
             Token::DoubleConstant(_) => Token::DoubleConstant(text.parse::<f64>().unwrap()),
             _ => self.clone(),
         }
@@ -380,7 +387,7 @@ impl TokenVector for VecDeque<Token> {
     }
 
     fn peek(&mut self) -> Result<Token, Box<dyn Error>> {
-        // println!("peeking {:?}", tokens.front());
+        // println!("peeking {:?}", self.front());
         Ok(self
             .front()
             .ok_or::<Box<dyn Error>>("Unexpected end of tokens".into())?

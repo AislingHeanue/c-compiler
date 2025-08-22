@@ -43,7 +43,8 @@ pub enum AssemblyType {
     Word,     // i16, short
     Longword, // i32, int
     Quadword, // i64, long
-    Double,   // oh boy
+    Float,
+    Double, // oh boy
     // size, alignment
     ByteArray(u64, u32), // 'opaque chunk of memory' eg arrays
 }
@@ -68,12 +69,16 @@ enum Instruction {
     // src MUST be Memory or Data. Data is a quadword
     Lea(Operand, Operand),
     // named after a good friend of mine with the same name
-    // Double to Signed Int
+    // Double to Signed Int (t for truncated)
     // dst_type, src, dst
-    Cvttsd2si(AssemblyType, Operand, Operand),
+    FloatToInt(AssemblyType, AssemblyType, Operand, Operand),
     // Signed Int to Double
     // src_type, src, dst
-    Cvtsi2sd(AssemblyType, Operand, Operand),
+    IntToFloat(AssemblyType, AssemblyType, Operand, Operand),
+    // float to double
+    Cvtss2sd(Operand, Operand),
+    // double to float
+    Cvtsd2ss(Operand, Operand),
     // operand is both src and dst
     Unary(UnaryOperator, AssemblyType, Operand), // Operand here is both the src and dst.
     // op src, dst. dst is the *first* number in the operation

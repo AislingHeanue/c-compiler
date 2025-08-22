@@ -56,12 +56,12 @@ codegen)
 run)
 	output_name=${first_file%.c}
 
-	echo "Unoptimized code:"
-	bash -c "$binary $file -S" | bat -l asm --paging=never --theme "Visual Studio Dark+"
-	bash -c "$binary $file"
-	$output_name
-	unoptimized_result_code=$?
-	echo "Unoptimized result of $name: $unoptimized_result_code"
+	# echo "Unoptimized code:"
+	# bash -c "$binary $file"
+	# bash -c "$binary $file -S" | bat -l asm --paging=never --theme "Visual Studio Dark+"
+	# $output_name
+	# unoptimized_result_code=$?
+	# echo "Unoptimized result of $name: $unoptimized_result_code"
 
 	echo
 	echo "Code:"
