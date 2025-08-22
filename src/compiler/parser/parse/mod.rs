@@ -160,7 +160,9 @@ impl Parse<Constant> for VecDeque<Token> {
             Token::LongLongConstant(v) => Ok(Constant::LongLong(v)),
             Token::UnsignedLongConstant(v) => Ok(Constant::UnsignedLong(v)),
             Token::UnsignedLongLongConstant(v) => Ok(Constant::UnsignedLongLong(v)),
+            Token::FloatConstant(v) => Ok(Constant::Float(v)),
             Token::DoubleConstant(v) => Ok(Constant::Double(v)),
+            Token::LongDoubleConstant(_v) => todo!(), //Ok(Constant::Double(v)),
             Token::CharacterConstant(num) => Ok(Constant::Integer(num.into())),
             _ => unreachable!(),
         }

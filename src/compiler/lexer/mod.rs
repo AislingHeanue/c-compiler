@@ -57,6 +57,7 @@ pub enum Token {
     LongLongConstant(i64),
     FloatConstant(f32),
     DoubleConstant(f64),
+    LongDoubleConstant(f64),
     UnsignedIntegerConstant(u64),
     UnsignedLongConstant(u64),
     UnsignedLongLongConstant(u64),
@@ -160,6 +161,7 @@ lazy_static! {
                 Token::UnsignedLongLongConstant(_) => r"([0-9]+((?:ll|LL)[uU]|[uU](?:ll|LL)))[^\w.]",
                 Token::FloatConstant(_) => r"((?:(?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[fF])[^\w.]",
                 Token::DoubleConstant(_) => r"((?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]",
+                Token::LongDoubleConstant(_) => r"((?:(?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[lL])[^\w.]",
                 Token::CharacterConstant(_) => r#"'(?:[^'\\\n]|\\['"?\\abfnrtv])'"#,
                 Token::StringLiteral(_) => r#""(?:[^"\\\n]|\\['"?\\abfnrtv])*""#,
                 // Token::IntegerConstant(_) => r"([0-9]+)\b",
@@ -240,9 +242,12 @@ impl Token {
                     .unwrap(),
             ),
             Token::FloatConstant(_) => {
-                Token::DoubleConstant(text.trim_end_matches(['f', 'F']).parse::<f64>().unwrap())
+                Token::FloatConstant(text.trim_end_matches(['f', 'F']).parse::<f32>().unwrap())
             }
             Token::DoubleConstant(_) => Token::DoubleConstant(text.parse::<f64>().unwrap()),
+            Token::LongDoubleConstant(_) => {
+                Token::LongDoubleConstant(text.trim_end_matches(['l', 'L']).parse::<f64>().unwrap())
+            }
             _ => self.clone(),
         }
     }
@@ -352,7 +357,9 @@ impl Token {
                 | Token::UnsignedIntegerConstant(_)
                 | Token::UnsignedLongConstant(_)
                 | Token::UnsignedLongLongConstant(_)
+                | Token::FloatConstant(_)
                 | Token::DoubleConstant(_)
+                | Token::LongDoubleConstant(_)
                 | Token::CharacterConstant(_)
         )
     }

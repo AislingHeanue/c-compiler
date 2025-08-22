@@ -532,7 +532,17 @@ impl CodeDisplay for Instruction {
                     format!(
                         "{:indent$}{} {}, {}",
                         "",
-                        op.show_double(context),
+                        op.show_double(t, context),
+                        src.show(context),
+                        dst.show(context),
+                        indent = context.indent
+                    )
+                } else if *t == AssemblyType::Float {
+                    context.float();
+                    format!(
+                        "{:indent$}{} {}, {}",
+                        "",
+                        op.show_double(t, context),
                         src.show(context),
                         dst.show(context),
                         indent = context.indent
@@ -610,7 +620,7 @@ impl CodeDisplay for Instruction {
                 panic!("Cdq cannot apply to bytes")
             }
             Instruction::Cmp(t, left, right) => {
-                if *t == AssemblyType::Double {
+                if t.is_float() {
                     format!(
                         "{:indent$}comi{} {}, {}",
                         "",
@@ -976,11 +986,13 @@ impl CodeDisplay for BinaryOperator {
 }
 
 impl BinaryOperator {
-    fn show_double(&self, context: &mut DisplayContext) -> String {
-        match self {
-            BinaryOperator::Mult => "mulsd".to_string(),
-            BinaryOperator::Xor => "xorpd".to_string(),
-            op => format!("{}{}", op.show(context), context.instruction_suffix),
+    fn show_double(&self, t: &AssemblyType, context: &mut DisplayContext) -> String {
+        match (self, t) {
+            (BinaryOperator::Mult, AssemblyType::Float) => "mulss".to_string(),
+            (BinaryOperator::Mult, AssemblyType::Double) => "mulsd".to_string(),
+            (BinaryOperator::Xor, AssemblyType::Float) => "xorps".to_string(),
+            (BinaryOperator::Xor, AssemblyType::Double) => "xorpd".to_string(),
+            (op, _) => format!("{}{}", op.show(context), context.instruction_suffix),
         }
     }
 }
