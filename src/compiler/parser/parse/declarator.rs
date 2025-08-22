@@ -137,8 +137,10 @@ impl ParseDeclarator for VecDeque<Token> {
         let maybe_i: Option<u64> = match c {
             Constant::Integer(i) => i.try_into().ok(),
             Constant::Long(i) => i.try_into().ok(),
+            Constant::LongLong(i) => i.try_into().ok(),
             Constant::UnsignedInteger(i) => Some(i.into()),
             Constant::UnsignedLong(i) => Some(i),
+            Constant::UnsignedLongLong(i) => Some(i),
             Constant::Char(i) => Some(i as u64),
             _ => None,
         };

@@ -271,6 +271,13 @@ impl InitialiserNode {
                 )),
                 Some(target_type.clone()),
             ),
+            Type::LongLong => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::LongLong(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
             Type::UnsignedInteger => InitialiserNode(
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::UnsignedInteger(0)),
@@ -281,6 +288,13 @@ impl InitialiserNode {
             Type::UnsignedLong => InitialiserNode(
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::UnsignedLong(0)),
+                    Some(target_type.clone()),
+                )),
+                Some(target_type.clone()),
+            ),
+            Type::UnsignedLongLong => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::UnsignedLongLong(0)),
                     Some(target_type.clone()),
                 )),
                 Some(target_type.clone()),

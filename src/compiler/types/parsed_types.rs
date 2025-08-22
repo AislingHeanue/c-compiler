@@ -20,11 +20,13 @@ impl Type {
             Type::Integer => 4,
             Type::Long => 8,
             Type::Short => 2,
+            Type::LongLong => 8,
             Type::Float => 4,
             Type::Double => 8,
             Type::UnsignedInteger => 4,
             Type::UnsignedLong => 8,
             Type::UnsignedShort => 2,
+            Type::UnsignedLongLong => 8,
             Type::Pointer(_) => 8, // pointer is stored like u64
             Type::Char => 1,
             Type::SignedChar => 1,
@@ -38,6 +40,16 @@ impl Type {
         }
     }
 
+    // this ensures that LongLong is treated as the common type in any arithmetic expression
+    // involving long. This is needed because LongLong outranks long despite being the same size
+    pub fn get_size_for_common_type(&self, structs: &mut HashMap<String, StructInfo>) -> f32 {
+        let mut result = self.get_size(structs) as f32;
+        if matches!(self, Type::LongLong | Type::UnsignedLongLong) {
+            result += 0.1;
+        }
+        result
+    }
+
     pub fn is_signed(&self) -> bool {
         matches!(
             self,
@@ -48,6 +60,7 @@ impl Type {
                 | Type::Char
                 | Type::SignedChar
                 | Type::Short
+                | Type::LongLong
         )
     }
 
@@ -56,9 +69,11 @@ impl Type {
             self,
             Type::Integer
                 | Type::Long
+                | Type::LongLong
                 | Type::Short
                 | Type::UnsignedInteger
                 | Type::UnsignedLong
+                | Type::UnsignedLongLong
                 | Type::UnsignedShort
                 | Type::Float
                 | Type::Double

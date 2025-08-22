@@ -748,13 +748,19 @@ impl ExpressionWithoutType {
         let mut instructions = Vec::new();
         if target_type.is_float() {
             match this_type {
-                Type::Integer | Type::Long | Type::Char | Type::SignedChar | Type::Short => {
+                Type::Integer
+                | Type::Long
+                | Type::Char
+                | Type::SignedChar
+                | Type::Short
+                | Type::LongLong => {
                     instructions.push(BirdsInstructionNode::IntToFloat(src, dst.clone()));
                 }
                 Type::UnsignedInteger
                 | Type::UnsignedLong
                 | Type::UnsignedChar
-                | Type::UnsignedShort => {
+                | Type::UnsignedShort
+                | Type::UnsignedLongLong => {
                     instructions.push(BirdsInstructionNode::UintToFloat(src, dst.clone()));
                 }
                 Type::Float => {
@@ -771,13 +777,19 @@ impl ExpressionWithoutType {
             }
         } else if this_type.is_float() {
             match target_type {
-                Type::Integer | Type::Long | Type::Char | Type::SignedChar | Type::Short => {
+                Type::Integer
+                | Type::Long
+                | Type::Char
+                | Type::SignedChar
+                | Type::Short
+                | Type::LongLong => {
                     instructions.push(BirdsInstructionNode::FloatToInt(src, dst.clone()));
                 }
                 Type::UnsignedInteger
                 | Type::UnsignedLong
                 | Type::UnsignedChar
-                | Type::UnsignedShort => {
+                | Type::UnsignedShort
+                | Type::UnsignedLongLong => {
                     instructions.push(BirdsInstructionNode::FloatToUint(src, dst.clone()));
                 }
                 Type::Pointer(_) => unreachable!(),

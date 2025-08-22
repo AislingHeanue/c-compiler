@@ -54,10 +54,12 @@ pub enum Token {
     Identifier(String),
     IntegerConstant(i64),
     LongConstant(i64),
+    LongLongConstant(i64),
     FloatConstant(f32),
     DoubleConstant(f64),
     UnsignedIntegerConstant(u64),
     UnsignedLongConstant(u64),
+    UnsignedLongLongConstant(u64),
     CharacterConstant(i8),
     StringLiteral(Vec<i8>),
     KeywordInt,
@@ -152,8 +154,10 @@ lazy_static! {
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
                 Token::IntegerConstant(_) => r"([0-9]+)[^\w.]",
                 Token::LongConstant(_) => r"([0-9]+[lL])[^\w.]",
+                Token::LongLongConstant(_) => r"([0-9]+(?:ll|LL))[^\w.]",
                 Token::UnsignedIntegerConstant(_) => r"([0-9]+[uU])[^\w.]",
                 Token::UnsignedLongConstant(_) => r"([0-9]+([lL][uU]|[uU][lL]))[^\w.]",
+                Token::UnsignedLongLongConstant(_) => r"([0-9]+((?:ll|LL)[uU]|[uU](?:ll|LL)))[^\w.]",
                 Token::FloatConstant(_) => r"((?:(?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[fF])[^\w.]",
                 Token::DoubleConstant(_) => r"((?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]",
                 Token::CharacterConstant(_) => r#"'(?:[^'\\\n]|\\['"?\\abfnrtv])'"#,
@@ -219,10 +223,18 @@ impl Token {
             Token::LongConstant(_) => {
                 Token::LongConstant(text.trim_end_matches(['l', 'L']).parse::<i64>().unwrap())
             }
+            Token::LongLongConstant(_) => {
+                Token::LongLongConstant(text.trim_end_matches(['l', 'L']).parse::<i64>().unwrap())
+            }
             Token::UnsignedIntegerConstant(_) => Token::UnsignedIntegerConstant(
                 text.trim_end_matches(['u', 'U']).parse::<u64>().unwrap(),
             ),
             Token::UnsignedLongConstant(_) => Token::UnsignedLongConstant(
+                text.trim_end_matches(['l', 'L', 'u', 'U'])
+                    .parse::<u64>()
+                    .unwrap(),
+            ),
+            Token::UnsignedLongLongConstant(_) => Token::UnsignedLongLongConstant(
                 text.trim_end_matches(['l', 'L', 'u', 'U'])
                     .parse::<u64>()
                     .unwrap(),
@@ -292,7 +304,7 @@ impl Token {
                     token_a_precedence.cmp(&token_b_precedence)
                 })
             })
-            .ok_or::<Box<dyn Error>>("Invalid token detected".into())
+            .ok_or::<Box<dyn Error>>(format!("Invalid token detected: {:?}", text).into())
     }
 }
 
@@ -336,8 +348,10 @@ impl Token {
             self,
             Token::IntegerConstant(_)
                 | Token::LongConstant(_)
+                | Token::LongLongConstant(_)
                 | Token::UnsignedIntegerConstant(_)
                 | Token::UnsignedLongConstant(_)
+                | Token::UnsignedLongLongConstant(_)
                 | Token::DoubleConstant(_)
                 | Token::CharacterConstant(_)
         )

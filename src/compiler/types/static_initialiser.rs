@@ -38,9 +38,11 @@ impl StaticInitialiser {
         match target {
             Type::Integer => StaticInitialiser::integer_from_double(i),
             Type::Long => StaticInitialiser::long_from_double(i),
+            Type::LongLong => StaticInitialiser::long_from_double(i),
             Type::Short => StaticInitialiser::short_from_double(i),
             Type::UnsignedInteger => StaticInitialiser::unsigned_integer_from_double(i),
             Type::UnsignedLong => StaticInitialiser::unsigned_long_from_double(i),
+            Type::UnsignedLongLong => StaticInitialiser::unsigned_long_from_double(i),
             Type::UnsignedShort => StaticInitialiser::unsigned_short_from_double(i),
             Type::Float => StaticInitialiser::float_from_double(i),
             Type::Double => StaticInitialiser::Double(i),
@@ -60,9 +62,11 @@ impl StaticInitialiser {
             Type::Integer => StaticInitialiser::integer(i),
             Type::Long => StaticInitialiser::long(i),
             Type::Short => StaticInitialiser::short(i),
+            Type::LongLong => StaticInitialiser::long_long(i),
             Type::UnsignedInteger => StaticInitialiser::unsigned_integer(i),
             Type::UnsignedLong => StaticInitialiser::unsigned_long(i),
             Type::UnsignedShort => StaticInitialiser::unsigned_short(i),
+            Type::UnsignedLongLong => StaticInitialiser::unsigned_long_long(i),
             Type::Float => StaticInitialiser::float(i),
             Type::Double => StaticInitialiser::double(i),
             Type::Char => StaticInitialiser::char(i),
@@ -124,6 +128,16 @@ impl StaticInitialiser {
         StaticInitialiser::Comparable(ComparableStatic::Long(real_i))
     }
 
+    fn long_long<T: ApproxInto<i64, Wrapping>>(i: T) -> StaticInitialiser {
+        let real_i = i.approx_as_by().unwrap();
+        if real_i == 0 {
+            return StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
+                Type::LongLong.get_size(&mut HashMap::new()),
+            ));
+        }
+        StaticInitialiser::Comparable(ComparableStatic::LongLong(real_i))
+    }
+
     fn unsigned_char<T: ApproxInto<u8, Wrapping>>(i: T) -> StaticInitialiser {
         let real_i = i.approx_as_by().unwrap();
         if real_i == 0 {
@@ -162,6 +176,16 @@ impl StaticInitialiser {
             ));
         }
         StaticInitialiser::Comparable(ComparableStatic::UnsignedLong(real_i))
+    }
+
+    fn unsigned_long_long<T: ApproxInto<u64, Wrapping>>(i: T) -> StaticInitialiser {
+        let real_i = i.approx_as_by().unwrap();
+        if real_i == 0 {
+            return StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
+                Type::UnsignedLongLong.get_size(&mut HashMap::new()),
+            ));
+        }
+        StaticInitialiser::Comparable(ComparableStatic::UnsignedLongLong(real_i))
     }
 
     fn float<T: ApproxInto<f32>>(i: T) -> StaticInitialiser {
@@ -276,16 +300,16 @@ impl StaticInitialiser {
 }
 
 impl ComparableStatic {
+    // NOTE: this function only needs to be updated for types that aren't promoted to in
     pub fn to_constant(&self) -> Constant {
         match self {
             ComparableStatic::Integer(i) => Constant::Integer(*i),
             ComparableStatic::Long(l) => Constant::Long(*l),
-            ComparableStatic::Short(l) => Constant::Short(*l),
+            ComparableStatic::LongLong(l) => Constant::LongLong(*l),
             ComparableStatic::UnsignedInteger(i) => Constant::UnsignedInteger(*i),
             ComparableStatic::UnsignedLong(l) => Constant::UnsignedLong(*l),
-            ComparableStatic::UnsignedShort(l) => Constant::UnsignedShort(*l),
+            ComparableStatic::UnsignedLongLong(l) => Constant::UnsignedLongLong(*l),
             ComparableStatic::ZeroBytes(n) => match n {
-                2 => Constant::Short(0),
                 4 => Constant::Integer(0),
                 8 => Constant::Long(0),
                 _ => unreachable!(),

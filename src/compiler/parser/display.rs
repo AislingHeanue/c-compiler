@@ -338,6 +338,8 @@ impl CodeDisplay for Type {
             Type::Struct(name, _) => name.to_string(),
             Type::Short => "int16".to_string(),
             Type::UnsignedShort => "uint16".to_string(),
+            Type::LongLong => "longer_int64".to_string(),
+            Type::UnsignedLongLong => "longer_uint64".to_string(),
         }
     }
 }
@@ -491,9 +493,11 @@ impl CodeDisplay for Constant {
             Constant::Integer(c) => c.to_string(),
             Constant::Long(c) => format!("int64({})", c),
             Constant::Short(c) => format!("int16({})", c),
+            Constant::LongLong(c) => format!("longer_int64({})", c),
             Constant::UnsignedInteger(c) => format!("uint32({})", c),
             Constant::UnsignedLong(c) => format!("uint64({})", c),
             Constant::UnsignedShort(c) => format!("uint16({})", c),
+            Constant::UnsignedLongLong(c) => format!("longer_uint64({})", c),
             Constant::Float(c) => format!("float32({})", c),
             Constant::Double(c) => format!("float64({})", c),
             Constant::Char(c) => format!("rune({})", c.show(context)),

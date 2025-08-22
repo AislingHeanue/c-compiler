@@ -10,10 +10,10 @@ impl Convert<AssemblyType> for Type {
     fn convert(self, context: &mut ConvertContext) -> Result<AssemblyType, Box<dyn Error>> {
         match self {
             Type::Integer => Ok(AssemblyType::Longword),
-            Type::Long => Ok(AssemblyType::Quadword),
+            Type::Long | Type::LongLong => Ok(AssemblyType::Quadword),
             Type::Short => Ok(AssemblyType::Word),
             Type::UnsignedInteger => Ok(AssemblyType::Longword),
-            Type::UnsignedLong => Ok(AssemblyType::Quadword),
+            Type::UnsignedLong | Type::UnsignedLongLong => Ok(AssemblyType::Quadword),
             Type::UnsignedShort => Ok(AssemblyType::Word),
             Type::Pointer(_) => Ok(AssemblyType::Quadword),
             Type::Float => Ok(AssemblyType::Float),
@@ -47,11 +47,13 @@ impl AssemblyType {
         // returns the assembly type and whether the value is a signed number and a scalar
         Ok(match src {
             BirdsValueNode::Constant(Constant::Integer(_)) => (AssemblyType::Longword, true, true),
-            BirdsValueNode::Constant(Constant::Long(_)) => (AssemblyType::Quadword, true, true),
+            BirdsValueNode::Constant(Constant::Long(_) | Constant::LongLong(_)) => {
+                (AssemblyType::Quadword, true, true)
+            }
             BirdsValueNode::Constant(Constant::UnsignedInteger(_)) => {
                 (AssemblyType::Longword, false, true)
             }
-            BirdsValueNode::Constant(Constant::UnsignedLong(_)) => {
+            BirdsValueNode::Constant(Constant::UnsignedLong(_) | Constant::UnsignedLongLong(_)) => {
                 (AssemblyType::Quadword, false, true)
             }
             BirdsValueNode::Constant(Constant::Float(_)) => (AssemblyType::Float, true, true),

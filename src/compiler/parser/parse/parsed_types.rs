@@ -19,11 +19,17 @@ impl Parse<Type> for VecDeque<Token> {
             return Err("No type tokens found".into());
         }
         let mut seen = Vec::new();
+        let mut is_long_long = false;
         for i in out.iter() {
             if seen.contains(i) {
-                return Err("Repeated token in type definition".into());
+                if *i == Token::KeywordLong && !is_long_long {
+                    is_long_long = true;
+                } else {
+                    return Err("Repeated token in type definition".into());
+                }
+            } else {
+                seen.push(i.clone());
             }
-            seen.push(i.clone());
         }
         if let Some(Token::Identifier(s)) = out
             .iter()
@@ -66,7 +72,11 @@ impl Parse<Type> for VecDeque<Token> {
             return Ok(Type::UnsignedShort);
         }
         if out.contains(&Token::KeywordUnsigned) && out.contains(&Token::KeywordLong) {
-            return Ok(Type::UnsignedLong);
+            if is_long_long {
+                return Ok(Type::UnsignedLongLong);
+            } else {
+                return Ok(Type::UnsignedLong);
+            }
         }
         if out.contains(&Token::KeywordChar) {
             if out.iter().any(|t| {
@@ -89,7 +99,11 @@ impl Parse<Type> for VecDeque<Token> {
             return Ok(Type::UnsignedInteger);
         }
         if out.contains(&Token::KeywordLong) {
-            return Ok(Type::Long);
+            if is_long_long {
+                return Ok(Type::LongLong);
+            } else {
+                return Ok(Type::Long);
+            }
         }
         if out.contains(&Token::KeywordShort) {
             return Ok(Type::Short);

@@ -100,6 +100,8 @@ impl BirdsValueNode {
                 Constant::UnsignedChar(c) => Some((*c).into()),
                 Constant::Short(c) => Some((*c).into()),
                 Constant::UnsignedShort(c) => Some((*c).into()),
+                Constant::LongLong(c) => Some((*c).try_into().unwrap()),
+                Constant::UnsignedLongLong(c) => Some((*c).try_into().unwrap()),
             },
             BirdsValueNode::Var(_) => None,
         }
@@ -110,8 +112,10 @@ impl BirdsValueNode {
             BirdsValueNode::Constant(constant) => match constant {
                 Constant::Integer(_) => Type::Integer,
                 Constant::Long(_) => Type::Long,
+                Constant::LongLong(_) => Type::LongLong,
                 Constant::UnsignedInteger(_) => Type::UnsignedInteger,
                 Constant::UnsignedLong(_) => Type::UnsignedLong,
+                Constant::UnsignedLongLong(_) => Type::UnsignedLongLong,
                 Constant::Float(_) => Type::Float,
                 Constant::Double(_) => Type::Double,
                 Constant::Char(_) => Type::Char,

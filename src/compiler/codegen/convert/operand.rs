@@ -12,13 +12,13 @@ impl Convert<Operand> for BirdsValueNode {
             BirdsValueNode::Constant(Constant::Integer(c)) => {
                 Ok(Operand::Imm(ImmediateValue::Signed(c as i64)))
             }
-            BirdsValueNode::Constant(Constant::Long(c)) => {
+            BirdsValueNode::Constant(Constant::Long(c) | Constant::LongLong(c)) => {
                 Ok(Operand::Imm(ImmediateValue::Signed(c)))
             }
             BirdsValueNode::Constant(Constant::UnsignedInteger(c)) => {
                 Ok(Operand::Imm(ImmediateValue::Unsigned(c as u64)))
             }
-            BirdsValueNode::Constant(Constant::UnsignedLong(c)) => {
+            BirdsValueNode::Constant(Constant::UnsignedLong(c) | Constant::UnsignedLongLong(c)) => {
                 Ok(Operand::Imm(ImmediateValue::Unsigned(c)))
             }
             BirdsValueNode::Constant(Constant::Char(c)) => {

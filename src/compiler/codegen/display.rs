@@ -289,16 +289,24 @@ impl CodeDisplay for StaticInitialiser {
             StaticInitialiser::Comparable(ComparableStatic::Integer(0))
             | StaticInitialiser::Comparable(ComparableStatic::Long(0))
             | StaticInitialiser::Comparable(ComparableStatic::UnsignedInteger(0))
-            | StaticInitialiser::Comparable(ComparableStatic::UnsignedLong(0)) => unreachable!(),
+            | StaticInitialiser::Comparable(ComparableStatic::UnsignedLong(0))
+            | StaticInitialiser::Comparable(ComparableStatic::LongLong(0))
+            | StaticInitialiser::Comparable(ComparableStatic::UnsignedLongLong(0)) => {
+                unreachable!()
+            }
             StaticInitialiser::Comparable(ComparableStatic::Integer(i)) => format!(".long {}", i),
-            StaticInitialiser::Comparable(ComparableStatic::Long(l)) => format!(".quad {}", l),
+            StaticInitialiser::Comparable(
+                ComparableStatic::Long(l) | ComparableStatic::LongLong(l),
+            ) => format!(".quad {}", l),
             StaticInitialiser::Comparable(ComparableStatic::Short(l)) => {
                 format!(".value {}", l)
             }
             StaticInitialiser::Comparable(ComparableStatic::UnsignedInteger(i)) => {
                 format!(".long {}", i)
             }
-            StaticInitialiser::Comparable(ComparableStatic::UnsignedLong(l)) => {
+            StaticInitialiser::Comparable(
+                ComparableStatic::UnsignedLong(l) | ComparableStatic::UnsignedLongLong(l),
+            ) => {
                 format!(".quad {}", l)
             }
             StaticInitialiser::Comparable(ComparableStatic::UnsignedShort(l)) => {

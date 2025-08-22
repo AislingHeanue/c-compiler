@@ -35,6 +35,8 @@ impl Constant {
             Constant::UnsignedShort(i) => StaticInitialiser::from_number(*i, target),
             Constant::Float(i) => StaticInitialiser::from_double((*i).into(), target),
             Constant::Double(i) => StaticInitialiser::from_double(*i, target),
+            Constant::LongLong(i) => StaticInitialiser::from_number(*i, target),
+            Constant::UnsignedLongLong(i) => StaticInitialiser::from_number(*i, target),
         }
     }
     // pub fn static_convert_double_to(&self, target: &Type) -> StaticInitialiser {
@@ -53,8 +55,10 @@ impl Constant {
         match self {
             Constant::Integer(0)
             | Constant::Long(0)
+            | Constant::LongLong(0)
             | Constant::UnsignedInteger(0)
-            | Constant::UnsignedLong(0) => {
+            | Constant::UnsignedLong(0)
+            | Constant::UnsignedLongLong(0) => {
                 StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(8))
             }
             _ => unreachable!(),
@@ -67,9 +71,11 @@ impl Constant {
             Type::Integer => Constant::Integer(value.try_into().unwrap()),
             Type::Long => Constant::Long(value),
             Type::Short => Constant::Short(value.try_into().unwrap()),
+            Type::LongLong => Constant::LongLong(value),
             Type::UnsignedInteger => Constant::UnsignedInteger(value.try_into().unwrap()),
             Type::UnsignedLong => Constant::UnsignedLong(value.try_into().unwrap()),
             Type::UnsignedShort => Constant::UnsignedShort(value.try_into().unwrap()),
+            Type::UnsignedLongLong => Constant::UnsignedLongLong(value.try_into().unwrap()),
             // adding a constant to a pointer is only reasonable if the second operand is Long
             Type::Pointer(_) => Constant::Long(value),
             Type::Char => Constant::Char(value.try_into().unwrap()),
@@ -124,8 +130,10 @@ impl Constant {
         match self {
             Constant::Integer(i) => Constant::Integer(!i),
             Constant::Long(i) => Constant::Long(!i),
+            Constant::LongLong(i) => Constant::LongLong(!i),
             Constant::UnsignedInteger(i) => Constant::UnsignedInteger(!i),
             Constant::UnsignedLong(i) => Constant::UnsignedLong(!i),
+            Constant::UnsignedLongLong(i) => Constant::UnsignedLongLong(!i),
             Constant::Float(_i) => unreachable!(),
             Constant::Double(_i) => unreachable!(),
             Constant::Char(i) => Constant::Char(!i),
@@ -153,6 +161,8 @@ impl Constant {
             Type::Struct(_, _) => unreachable!(),
             Type::Short => self.to_short(),
             Type::UnsignedShort => self.to_ushort(),
+            Type::LongLong => self.to_long_long(),
+            Type::UnsignedLongLong => self.to_ulong_long(),
         }
     }
 
@@ -168,6 +178,8 @@ impl Constant {
             Constant::UnsignedChar(i) => *i as i32,
             Constant::Short(i) => *i as i32,
             Constant::UnsignedShort(i) => *i as i32,
+            Constant::LongLong(i) => *i as i32,
+            Constant::UnsignedLongLong(i) => *i as i32,
         };
         Constant::Integer(val)
     }
@@ -183,6 +195,8 @@ impl Constant {
             Constant::UnsignedChar(i) => *i as u32,
             Constant::Short(i) => *i as u32,
             Constant::UnsignedShort(i) => *i as u32,
+            Constant::LongLong(i) => *i as u32,
+            Constant::UnsignedLongLong(i) => *i as u32,
         };
         Constant::UnsignedInteger(val)
     }
@@ -198,6 +212,8 @@ impl Constant {
             Constant::UnsignedChar(i) => *i as i64,
             Constant::Short(i) => *i as i64,
             Constant::UnsignedShort(i) => *i as i64,
+            Constant::LongLong(i) => *i,
+            Constant::UnsignedLongLong(i) => *i as i64,
         };
         Constant::Long(val)
     }
@@ -213,9 +229,12 @@ impl Constant {
             Constant::UnsignedChar(i) => *i as u64,
             Constant::Short(i) => *i as u64,
             Constant::UnsignedShort(i) => *i as u64,
+            Constant::LongLong(i) => *i as u64,
+            Constant::UnsignedLongLong(i) => *i,
         };
         Constant::UnsignedLong(val)
     }
+
     pub fn to_float(&self) -> Constant {
         let val = match self {
             Constant::Integer(i) => *i as f32,
@@ -228,6 +247,8 @@ impl Constant {
             Constant::UnsignedChar(i) => *i as f32,
             Constant::Short(i) => *i as f32,
             Constant::UnsignedShort(i) => *i as f32,
+            Constant::LongLong(i) => *i as f32,
+            Constant::UnsignedLongLong(i) => *i as f32,
         };
         Constant::Float(val)
     }
@@ -243,6 +264,8 @@ impl Constant {
             Constant::UnsignedChar(i) => *i as f64,
             Constant::Short(i) => *i as f64,
             Constant::UnsignedShort(i) => *i as f64,
+            Constant::LongLong(i) => *i as f64,
+            Constant::UnsignedLongLong(i) => *i as f64,
         };
         Constant::Double(val)
     }
@@ -258,6 +281,8 @@ impl Constant {
             Constant::UnsignedChar(i) => *i as i8,
             Constant::Short(i) => *i as i8,
             Constant::UnsignedShort(i) => *i as i8,
+            Constant::LongLong(i) => *i as i8,
+            Constant::UnsignedLongLong(i) => *i as i8,
         };
         Constant::Char(val)
     }
@@ -273,10 +298,11 @@ impl Constant {
             Constant::UnsignedChar(i) => *i,
             Constant::Short(i) => *i as u8,
             Constant::UnsignedShort(i) => *i as u8,
+            Constant::LongLong(i) => *i as u8,
+            Constant::UnsignedLongLong(i) => *i as u8,
         };
         Constant::UnsignedChar(val)
     }
-
     pub fn to_short(&self) -> Constant {
         let val = match self {
             Constant::Integer(i) => *i as i16,
@@ -289,10 +315,11 @@ impl Constant {
             Constant::UnsignedChar(i) => *i as i16,
             Constant::Short(i) => *i,
             Constant::UnsignedShort(i) => *i as i16,
+            Constant::LongLong(i) => *i as i16,
+            Constant::UnsignedLongLong(i) => *i as i16,
         };
         Constant::Short(val)
     }
-
     pub fn to_ushort(&self) -> Constant {
         let val = match self {
             Constant::Integer(i) => *i as u16,
@@ -305,8 +332,44 @@ impl Constant {
             Constant::UnsignedChar(i) => *i as u16,
             Constant::Short(i) => *i as u16,
             Constant::UnsignedShort(i) => *i,
+            Constant::LongLong(i) => *i as u16,
+            Constant::UnsignedLongLong(i) => *i as u16,
         };
         Constant::UnsignedShort(val)
+    }
+    pub fn to_long_long(&self) -> Constant {
+        let val = match self {
+            Constant::Integer(i) => *i as i64,
+            Constant::Long(i) => *i,
+            Constant::UnsignedInteger(i) => *i as i64,
+            Constant::UnsignedLong(i) => *i as i64,
+            Constant::Float(i) => *i as i64,
+            Constant::Double(i) => *i as i64,
+            Constant::Char(i) => *i as i64,
+            Constant::UnsignedChar(i) => *i as i64,
+            Constant::Short(i) => *i as i64,
+            Constant::UnsignedShort(i) => *i as i64,
+            Constant::LongLong(i) => *i,
+            Constant::UnsignedLongLong(i) => *i as i64,
+        };
+        Constant::LongLong(val)
+    }
+    pub fn to_ulong_long(&self) -> Constant {
+        let val = match self {
+            Constant::Integer(i) => *i as u64,
+            Constant::Long(i) => *i as u64,
+            Constant::UnsignedInteger(i) => *i as u64,
+            Constant::UnsignedLong(i) => *i,
+            Constant::Float(i) => *i as u64,
+            Constant::Double(i) => *i as u64,
+            Constant::Char(i) => *i as u64,
+            Constant::UnsignedChar(i) => *i as u64,
+            Constant::Short(i) => *i as u64,
+            Constant::UnsignedShort(i) => *i as u64,
+            Constant::LongLong(i) => *i as u64,
+            Constant::UnsignedLongLong(i) => *i,
+        };
+        Constant::UnsignedLongLong(val)
     }
 
     // used to un-override the equality behaviour of nan operands during constant folding
@@ -351,6 +414,8 @@ impl PartialEq for Constant {
             (Self::UnsignedChar(a), Self::UnsignedChar(b)) => a == b,
             (Self::Short(a), Self::Short(b)) => a == b,
             (Self::UnsignedShort(a), Self::UnsignedShort(b)) => a == b,
+            (Self::LongLong(a), Self::LongLong(b)) => a == b,
+            (Self::UnsignedLongLong(a), Self::UnsignedLongLong(b)) => a == b,
             _ => false,
         }
     }
@@ -375,6 +440,10 @@ impl Add for Constant {
                 Constant::UnsignedShort(a + b)
             }
             (Constant::Float(a), Constant::Float(b)) => Constant::Float(a + b),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a + b),
+            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
+                Constant::UnsignedLongLong(a + b)
+            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -399,6 +468,10 @@ impl Sub for Constant {
                 Constant::UnsignedShort(a - b)
             }
             (Constant::Float(a), Constant::Float(b)) => Constant::Float(a - b),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a - b),
+            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
+                Constant::UnsignedLongLong(a - b)
+            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -423,6 +496,10 @@ impl Mul for Constant {
                 Constant::UnsignedShort(a * b)
             }
             (Constant::Float(a), Constant::Float(b)) => Constant::Float(a * b),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a * b),
+            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
+                Constant::UnsignedLongLong(a * b)
+            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -458,6 +535,10 @@ impl Div for Constant {
                 Constant::UnsignedShort(a / b)
             }
             (Constant::Float(a), Constant::Float(b)) => Constant::Float(a / b),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a / b),
+            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
+                Constant::UnsignedLongLong(a / b)
+            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -486,6 +567,10 @@ impl Rem for Constant {
                 Constant::UnsignedShort(a % b)
             }
             (Constant::Float(a), Constant::Float(b)) => Constant::Float(a % b),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a % b),
+            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
+                Constant::UnsignedLongLong(a % b)
+            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -505,6 +590,8 @@ impl PartialOrd for Constant {
             (Constant::Short(a), Constant::Short(b)) => Some(a.cmp(b)),
             (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => Some(a.cmp(b)),
             (Constant::Float(a), Constant::Float(b)) => a.partial_cmp(b),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Some(a.cmp(b)),
+            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => Some(a.cmp(b)),
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -529,6 +616,10 @@ impl BitAnd for Constant {
                 Constant::UnsignedShort(a & b)
             }
             (Constant::Float(_a), Constant::Float(_b)) => unreachable!(),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a & b),
+            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
+                Constant::UnsignedLongLong(a & b)
+            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -553,6 +644,10 @@ impl BitOr for Constant {
                 Constant::UnsignedShort(a | b)
             }
             (Constant::Float(_a), Constant::Float(_b)) => unreachable!(),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a | b),
+            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
+                Constant::UnsignedLongLong(a | b)
+            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -577,6 +672,10 @@ impl BitXor for Constant {
                 Constant::UnsignedShort(a ^ b)
             }
             (Constant::Float(_a), Constant::Float(_b)) => unreachable!(),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a ^ b),
+            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
+                Constant::UnsignedLongLong(a ^ b)
+            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -612,6 +711,10 @@ impl Shl for Constant {
             (Constant::Short(a), Constant::Integer(b)) => Constant::Short(a << b),
             (Constant::UnsignedShort(a), Constant::Integer(b)) => Constant::UnsignedShort(a << b),
             (Constant::Float(_a), Constant::Integer(_b)) => unreachable!(),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a << b),
+            (Constant::UnsignedLongLong(a), Constant::Integer(b)) => {
+                Constant::UnsignedLongLong(a << b)
+            }
             _ => unreachable!(), // can only do shl with integers as the second arg
         }
     }
@@ -647,6 +750,10 @@ impl Shr for Constant {
             (Constant::Short(a), Constant::Integer(b)) => Constant::Short(a >> b),
             (Constant::UnsignedShort(a), Constant::Integer(b)) => Constant::UnsignedShort(a >> b),
             (Constant::Float(_a), Constant::Integer(_b)) => unreachable!(),
+            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a >> b),
+            (Constant::UnsignedLongLong(a), Constant::Integer(b)) => {
+                Constant::UnsignedLongLong(a >> b)
+            }
             _ => unreachable!(), // can only do shr with integers as the second arg
         }
     }
@@ -675,6 +782,8 @@ impl Neg for Constant {
             Constant::UnsignedChar(i) => Constant::UnsignedChar(!i + 1), // undefined behaviour
             Constant::Short(i) => Constant::Short(!i),
             Constant::UnsignedShort(i) => Constant::UnsignedShort(!i + 1), // undefined behaviour
+            Constant::LongLong(i) => Constant::LongLong(!i),
+            Constant::UnsignedLongLong(i) => Constant::UnsignedLongLong(!i + 1), // undefined behaviour
         }
     }
 }

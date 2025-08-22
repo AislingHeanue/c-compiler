@@ -126,6 +126,8 @@ impl CheckTypes for ExpressionNode {
                 Constant::UnsignedChar(_) => Type::UnsignedChar,
                 Constant::Short(_) => unreachable!(), // parsed doubles don't actually exist
                 Constant::UnsignedShort(_) => unreachable!(),
+                Constant::LongLong(_) => Type::Long,
+                Constant::UnsignedLongLong(_) => Type::UnsignedLongLong,
             },
             ExpressionWithoutType::Unary(ref op, ref mut src) => {
                 src.check_types_and_convert(context)?;
@@ -426,7 +428,7 @@ impl ExpressionNode {
             t1.clone()
         } else if t1.is_float() {
             if t2.is_float() {
-                if t1.get_size(structs) > t2.get_size(structs) {
+                if t1.get_size_for_common_type(structs) > t2.get_size_for_common_type(structs) {
                     t1.clone()
                 } else {
                     t2.clone()
@@ -436,13 +438,13 @@ impl ExpressionNode {
             }
         } else if t2.is_float() {
             t2.clone()
-        } else if t1.get_size(structs) == t2.get_size(structs) {
+        } else if t1.get_size_for_common_type(structs) == t2.get_size_for_common_type(structs) {
             if t1.is_signed() {
                 t2.clone()
             } else {
                 t1.clone()
             }
-        } else if t1.get_size(structs) > t2.get_size(structs) {
+        } else if t1.get_size_for_common_type(structs) > t2.get_size_for_common_type(structs) {
             t1.clone()
         } else {
             t2.clone()
@@ -485,8 +487,10 @@ impl ExpressionNode {
             self.0,
             ExpressionWithoutType::Constant(Constant::Integer(0))
                 | ExpressionWithoutType::Constant(Constant::Long(0))
+                | ExpressionWithoutType::Constant(Constant::LongLong(0))
                 | ExpressionWithoutType::Constant(Constant::UnsignedInteger(0))
                 | ExpressionWithoutType::Constant(Constant::UnsignedLong(0))
+                | ExpressionWithoutType::Constant(Constant::UnsignedLongLong(0))
         )
     }
 
