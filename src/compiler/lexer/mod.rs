@@ -90,6 +90,9 @@ pub enum Token {
     KeywordSizeof,
     KeywordStruct,
     KeywordUnion,
+    KeywordConst,
+    DirectiveAttribute,
+    DirectiveExtension,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
@@ -197,7 +200,10 @@ lazy_static! {
                 Token::KeywordTypedef =>r"typedef\b",
                 Token::KeywordSizeof => r"sizeof\b",
                 Token::KeywordStruct => r"struct\b",
-                Token::KeywordUnion => r"union\b"
+                Token::KeywordUnion => r"union\b",
+                Token::KeywordConst => r"const\b",
+                Token::DirectiveAttribute => r"__attribute__\b",
+                Token::DirectiveExtension => r"__extension__\b"
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;

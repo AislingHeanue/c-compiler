@@ -10,6 +10,66 @@ use std::{collections::VecDeque, error::Error};
 
 impl Parse<Declarator> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Declarator, Box<dyn Error>> {
+        let declarator = self.parse_full_declarator(context)?;
+
+        while !self.is_empty() && self.peek()? == Token::DirectiveAttribute {
+            println!("Unrecognised compiler directive detected. Ignoring everything it says.");
+            self.expect(Token::DirectiveAttribute)?;
+            self.expect(Token::OpenParen)?;
+            let mut nesting_count = 1;
+            while nesting_count != 0 {
+                match self.read()? {
+                    Token::OpenParen => nesting_count += 1,
+                    Token::CloseParen => nesting_count -= 1,
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(declarator)
+    }
+}
+
+#[derive(Debug)]
+pub struct DeclaratorApplicationOutput {
+    pub name: String,
+    pub out_type: Type,
+    pub param_names: Option<Vec<String>>,
+    pub struct_declarations: Vec<StructDeclaration>,
+}
+
+pub type OutputWithStruct = (Type, Declarator, Option<StructDeclaration>);
+
+trait ParseDeclarator {
+    fn parse_full_declarator(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<Declarator, Box<dyn Error>>;
+    fn parse_simple_declarator(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<Declarator, Box<dyn Error>>;
+
+    fn parse_param_list(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<Vec<OutputWithStruct>, Box<dyn Error>>;
+    fn parse_param(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<OutputWithStruct, Box<dyn Error>>;
+    fn parse_array(
+        &mut self,
+        declarator: Declarator,
+        context: &mut ParseContext,
+    ) -> Result<Declarator, Box<dyn Error>>;
+}
+
+impl ParseDeclarator for VecDeque<Token> {
+    fn parse_full_declarator(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<Declarator, Box<dyn Error>> {
         match self.peek()? {
             Token::Star => {
                 self.expect(Token::Star)?;
@@ -39,40 +99,6 @@ impl Parse<Declarator> for VecDeque<Token> {
             }
         }
     }
-}
-
-#[derive(Debug)]
-pub struct DeclaratorApplicationOutput {
-    pub name: String,
-    pub out_type: Type,
-    pub param_names: Option<Vec<String>>,
-    pub struct_declarations: Vec<StructDeclaration>,
-}
-
-pub type OutputWithStruct = (Type, Declarator, Option<StructDeclaration>);
-
-trait ParseDeclarator {
-    fn parse_simple_declarator(
-        &mut self,
-        context: &mut ParseContext,
-    ) -> Result<Declarator, Box<dyn Error>>;
-
-    fn parse_param_list(
-        &mut self,
-        context: &mut ParseContext,
-    ) -> Result<Vec<OutputWithStruct>, Box<dyn Error>>;
-    fn parse_param(
-        &mut self,
-        context: &mut ParseContext,
-    ) -> Result<OutputWithStruct, Box<dyn Error>>;
-    fn parse_array(
-        &mut self,
-        declarator: Declarator,
-        context: &mut ParseContext,
-    ) -> Result<Declarator, Box<dyn Error>>;
-}
-
-impl ParseDeclarator for VecDeque<Token> {
     fn parse_simple_declarator(
         &mut self,
         context: &mut ParseContext,
@@ -122,9 +148,14 @@ impl ParseDeclarator for VecDeque<Token> {
         &mut self,
         context: &mut ParseContext,
     ) -> Result<OutputWithStruct, Box<dyn Error>> {
-        let (base_type, declarator, struct_declaration) = self.parse(context)?;
+        if let Ok((_, _, _)) = self.clone().parse(context) {
+            self.parse(context)
+        } else {
+            let (t, s): (Type, Option<StructDeclaration>) = self.parse(context)?;
+            let declarator = Declarator::Name("anonymous.parameter".to_string());
+            Ok((t, declarator, s))
+        }
         // function params never have static or extern storage
-        Ok((base_type, declarator, struct_declaration))
     }
 
     fn parse_array(

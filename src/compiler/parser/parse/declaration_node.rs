@@ -17,19 +17,45 @@ use std::{collections::VecDeque, error::Error};
 
 impl Parse<DeclarationNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<DeclarationNode, Box<dyn Error>> {
+        // kill any top-level references to compiler extensions that we don't know how to handle
+        while !self.is_empty() && self.peek()? == Token::DirectiveExtension {
+            println!("Ignoring an 'extension' directive");
+            self.read()?;
+        }
+
         // take the storage class out of the type definition (assuming there is only one, since
         // otherwise that's an error)
-        let specifier_loc = self.clone().pop_tokens_for_type(context)?.1;
+        let (_, specifier_loc, constant_loc) = self.clone().pop_tokens_for_type(context)?;
 
-        let storage_class = match specifier_loc {
-            None => None,
-            Some(i) => {
-                let removed = self.remove(i);
-                match removed.unwrap() {
-                    Token::KeywordStatic => Some(StorageClass::Static),
-                    Token::KeywordExtern => Some(StorageClass::Extern),
+        let (storage_class, _is_constant) = match (specifier_loc, constant_loc) {
+            (None, None) => (None, false),
+            (Some(i), Some(j)) => {
+                let removed_storage;
+                // have to remove the higher index first
+                if i < j {
+                    self.remove(j);
+                    removed_storage = self.remove(i);
+                } else {
+                    removed_storage = self.remove(i);
+                    self.remove(j);
+                }
+                match removed_storage.unwrap() {
+                    Token::KeywordStatic => (Some(StorageClass::Static), true),
+                    Token::KeywordExtern => (Some(StorageClass::Extern), true),
                     _ => unreachable!(),
                 }
+            }
+            (Some(i), None) => {
+                let removed_storage = self.remove(i);
+                match removed_storage.unwrap() {
+                    Token::KeywordStatic => (Some(StorageClass::Static), false),
+                    Token::KeywordExtern => (Some(StorageClass::Extern), false),
+                    _ => unreachable!(),
+                }
+            }
+            (None, Some(j)) => {
+                self.remove(j);
+                (None, true)
             }
         };
 

@@ -89,12 +89,23 @@ fn main() {
         let asm_filename = stripped_filename.clone() + ".s";
         asm_filenames.push(asm_filename.clone());
         // println!("Preprocessing...");
-        let mut args = vec!["-E", "-P", &filename, "-o", &preprocessed_filename];
+        let mut args = vec![
+            "-E",
+            "-P",
+            &filename,
+            "-std=c11",
+            "-o",
+            &preprocessed_filename,
+        ];
         args.append(&mut preprocessor_args.iter().map(|s| s.as_str()).collect());
         let res = Command::new("gcc").args(args.clone()).output().unwrap();
         if res.status.code() != Some(0) {
             panic!("Preprocessor failed: with args: '{:?}': {:?}", args, res);
         }
+        println!(
+            "{}",
+            fs::read_to_string(preprocessed_filename.clone()).unwrap()
+        );
 
         // println!("Compiling...");
         let res = compile(

@@ -243,7 +243,7 @@ impl Parse<StructMember> for VecDeque<Token> {
 
 impl Parse<OutputWithStruct> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<OutputWithStruct, Box<dyn Error>> {
-        let (mut types_deque, storage) = self.pop_tokens_for_type(context)?;
+        let (mut types_deque, storage, constant_location) = self.pop_tokens_for_type(context)?;
 
         // DeclarationNode should already filter out any instances of static and extern from this
         // list. Otherwise thrown an error here since that means there are either too many
@@ -251,6 +251,12 @@ impl Parse<OutputWithStruct> for VecDeque<Token> {
         if storage.is_some() {
             return Err("Illegal use of storage specifiers in this type".into());
         }
+        let _is_constant = if let Some(loc) = constant_location {
+            types_deque.remove(loc);
+            true
+        } else {
+            false
+        };
 
         let mut declarator_deque = VecDeque::new();
         let mut paren_nesting = 0;
@@ -288,8 +294,8 @@ impl Parse<OutputWithStruct> for VecDeque<Token> {
             // declarator, so try again with a different split
 
             println!(
-                "Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?}",
-                types_deque,type_result, declarator_deque, declarator
+                "Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?} and {:?}",
+                types_deque,type_result, declarator_deque, declarator, new_declarator_deque
             );
             let move_this_to_the_declarator = types_deque.pop_back().unwrap();
             declarator_deque.push_front(move_this_to_the_declarator);
@@ -300,21 +306,24 @@ impl Parse<OutputWithStruct> for VecDeque<Token> {
     }
 }
 
+pub type TypeResults = (VecDeque<Token>, Option<usize>, Option<usize>);
+
 pub trait PopForType {
     fn pop_tokens_for_type(
         &mut self,
         context: &mut ParseContext,
         // type tokens and storage class tokens
-    ) -> Result<(VecDeque<Token>, Option<usize>), Box<dyn Error>>;
+    ) -> Result<TypeResults, Box<dyn Error>>;
 }
 
 impl PopForType for VecDeque<Token> {
     fn pop_tokens_for_type(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(VecDeque<Token>, Option<usize>), Box<dyn Error>> {
+    ) -> Result<TypeResults, Box<dyn Error>> {
         let mut types_deque = VecDeque::new();
         let mut storage_loc = None;
+        let mut const_loc = None;
         while self.peek()?.is_start_of_declaration(context) {
             match self.peek()? {
                 Token::KeywordStruct | Token::KeywordUnion => {
@@ -351,12 +360,20 @@ impl PopForType for VecDeque<Token> {
                     }
                     types_deque.push_back(self.read()?);
                 }
+                Token::KeywordConst => {
+                    if const_loc.is_some() {
+                        return Err("Encountered more than one storage specifier in a type".into());
+                    } else {
+                        const_loc = Some(types_deque.len());
+                    }
+                    types_deque.push_back(self.read()?);
+                }
                 _ => {
                     types_deque.push_back(self.read()?);
                 }
             }
         }
-        Ok((types_deque, storage_loc))
+        Ok((types_deque, storage_loc, const_loc))
     }
 }
 
@@ -381,7 +398,11 @@ impl Token {
     }
 
     pub fn is_specifier(&self, context: &mut ParseContext) -> bool {
-        self.is_type(context) || matches!(self, Token::KeywordStatic | Token::KeywordExtern)
+        self.is_type(context)
+            || matches!(
+                self,
+                Token::KeywordStatic | Token::KeywordExtern | Token::KeywordConst
+            )
     }
 
     pub fn is_start_of_declaration(&self, context: &mut ParseContext) -> bool {
