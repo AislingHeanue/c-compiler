@@ -10,6 +10,10 @@ pub enum Token {
     CloseParen,
     OpenBrace,
     CloseBrace,
+    OpenSquareBracket,
+    CloseSquareBracket,
+    Comma,
+
     SemiColon,
     Tilde,
     Plus,
@@ -34,6 +38,11 @@ pub enum Token {
     Assignment,
     Decrement,
     Increment,
+    Question,
+    Colon,
+    Arrow,
+    Dot,
+
     AddAssign,
     SubtractAssign,
     MultiplyAssign,
@@ -44,13 +53,7 @@ pub enum Token {
     BitwiseOrAssign,
     ShiftLeftAssign,
     ShiftRightAssign,
-    Question,
-    Colon,
-    Comma,
-    OpenSquareBracket,
-    CloseSquareBracket,
-    Dot,
-    Arrow,
+
     Identifier(String),
     IntegerConstant(i64),
     LongConstant(i64),
@@ -63,6 +66,7 @@ pub enum Token {
     UnsignedLongLongConstant(u64),
     CharacterConstant(i8),
     StringLiteral(Vec<i8>),
+
     KeywordInt,
     KeywordVoid,
     KeywordReturn,
@@ -91,16 +95,9 @@ pub enum Token {
     KeywordStruct,
     KeywordUnion,
     KeywordConst,
+
     DirectiveAttribute,
     DirectiveExtension,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Default, EnumIter)]
-pub enum Keyword {
-    Int,
-    Return,
-    #[default]
-    Void,
 }
 
 lazy_static! {

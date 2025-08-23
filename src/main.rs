@@ -1,7 +1,9 @@
 use compiler::compile;
+use preprocessor::{preprocess, PreprocessorConfig};
 use std::{env, fs, process::Command};
 
 mod compiler;
+mod preprocessor;
 
 struct CompileConfig {
     only_lex: bool,
@@ -28,6 +30,7 @@ fn main() {
     let mut asm_input_names = Vec::new();
     let mut linker_args = Vec::new();
     let mut preprocessor_args = Vec::new();
+    let mut only_preprocess = false;
     let mut only_lex = false;
     let mut only_parse = false;
     let mut only_validate = false;
@@ -43,6 +46,7 @@ fn main() {
     let mut ignore_stack_gaps = false;
     for arg in &args[1..] {
         match arg.as_str() {
+            "--preprocess" => only_preprocess = true,
             "--lex" => only_lex = true,
             "--parse" => only_parse = true,
             "--validate" => only_validate = true,
@@ -88,24 +92,33 @@ fn main() {
         let preprocessed_filename = stripped_filename.clone() + ".i";
         let asm_filename = stripped_filename.clone() + ".s";
         asm_filenames.push(asm_filename.clone());
-        // println!("Preprocessing...");
-        let mut args = vec![
-            "-E",
-            "-P",
-            &filename,
-            "-std=c11",
-            "-o",
-            &preprocessed_filename,
-        ];
-        args.append(&mut preprocessor_args.iter().map(|s| s.as_str()).collect());
-        let res = Command::new("gcc").args(args.clone()).output().unwrap();
-        if res.status.code() != Some(0) {
-            panic!("Preprocessor failed: with args: '{:?}': {:?}", args, res);
+        // // println!("Preprocessing...");
+        // let mut args = vec![
+        //     "-E",
+        //     "-P",
+        //     &filename,
+        //     "-std=c11",
+        //     "-o",
+        //     &preprocessed_filename,
+        // ];
+        // args.append(&mut preprocessor_args.iter().map(|s| s.as_str()).collect());
+        // let res = Command::new("gcc").args(args.clone()).output().unwrap();
+        // if res.status.code() != Some(0) {
+        //     panic!("Preprocessor failed: with args: '{:?}': {:?}", args, res);
+        // }
+        //
+        let res = preprocess(&filename, &preprocessed_filename, PreprocessorConfig {});
+
+        if res.is_err() {
+            panic!("Preprocessor failed: {:?}", res);
         }
-        println!(
-            "{}",
-            fs::read_to_string(preprocessed_filename.clone()).unwrap()
-        );
+        if only_preprocess {
+            println!(
+                "{}",
+                fs::read_to_string(preprocessed_filename.clone()).unwrap()
+            );
+            continue;
+        }
 
         // println!("Compiling...");
         let res = compile(
@@ -133,7 +146,7 @@ fn main() {
 
         let _ = fs::remove_file(&preprocessed_filename);
     }
-    if only_lex || only_parse || only_validate || only_birds || only_codegen {
+    if only_preprocess || only_lex || only_parse || only_validate || only_birds || only_codegen {
         // a flag signalling an early exit was passed, so exit here without an error
         return;
     }
