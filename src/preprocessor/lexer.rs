@@ -148,15 +148,18 @@ impl PreprocessorToken {
     fn display_character(c: &i8) -> String {
         char::from_u32(*c as u32)
             .map(|c| match c {
-                '\n' => r"\n".to_string(),
-                '\r' => r"\r".to_string(),
-                '\\' => r"\\".to_string(),
+                '\'' => r#"\'"#.to_string(),
                 '\"' => r#"\""#.to_string(),
+                '?' => r#"\?"#.to_string(),
+                '\\' => r"\\".to_string(),
+                '\r' => r"\r".to_string(),
+                '\n' => r"\n".to_string(),
+                '\t' => r#"\t"#.to_string(),
                 _ => match c as u32 {
                     7 => r"\a".to_string(),
                     8 => r"\b".to_string(),
-                    11 => r"\f".to_string(),
-                    12 => r"\v".to_string(),
+                    11 => r"\v".to_string(),
+                    12 => r"\f".to_string(),
                     _ => c.to_string(),
                 },
             })
