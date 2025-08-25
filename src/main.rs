@@ -107,7 +107,13 @@ fn main() {
         //     panic!("Preprocessor failed: with args: '{:?}': {:?}", args, res);
         // }
         //
-        let res = preprocess(&filename, &preprocessed_filename, PreprocessorConfig {});
+        let res = preprocess(
+            &filename,
+            &preprocessed_filename,
+            PreprocessorConfig {
+                // extra_system_directories: Vec::new(),
+            },
+        );
 
         if res.is_err() {
             panic!("Preprocessor failed: {:?}", res);

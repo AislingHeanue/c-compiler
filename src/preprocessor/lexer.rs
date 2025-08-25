@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::{collections::VecDeque, error::Error, fmt::Display};
+use std::{error::Error, fmt::Display};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -13,29 +13,37 @@ pub enum PreprocessorToken {
 
     CharacterConstant(i8),
     StringLiteral(Vec<i8>),
-    HeaderFilename(String),
-    HeaderFilenameAngleBrackets(String),
 
     Punctuator(String),
+    WidePunctuator(String),
     WhiteSpace(String),
 
     KeywordDefined,
 
     DirectiveDefine,
-    DirectiveInclude,
+    DirectiveUndef,
+    // "#include" lexer also parses the <> or "" after it.
+    // filename, uses_angle_brackets
+    DirectiveInclude(String, bool),
+    // if #include is not followed by a < or ", then it must be followed by a macro which needs to
+    // be expanded at some point later. Not the "string" or <string> contents of a macro are
+    // treated like normal StringLiterals or Punctuation-Identifier-Punctuation etc, which may lead
+    // to inconsistencies in some C code.
+    DirectiveIncludeWithMacro,
     DirectiveIfdef,
     DirectiveIfndef,
     DirectiveIf,
     DirectiveElse,
     DirectiveElif,
-    DirectiveUndef,
+    DirectiveEndif,
     DirectiveLine,
     DirectiveError,
-    DirectivePragma,
     DirectiveWarning,
+    DirectivePragma,
 }
 
-pub struct Tokens(Vec<VecDeque<PreprocessorToken>>);
+#[derive(Debug)]
+pub struct Tokens(pub Vec<Vec<PreprocessorToken>>);
 
 lazy_static! {
     // format is (Token, Regex, Precedence). Higher precedence regexes are taken over lower ones.
@@ -45,31 +53,32 @@ lazy_static! {
         for token in PreprocessorToken::iter() {
             let entry:&str = match token {
                 PreprocessorToken::Identifier(_) => r"^[a-zA-Z_]\w*\b",
-                PreprocessorToken::Number(_) => r#"\.?[0-9][a-zA-Z0-9(?:[eEpP][+-])]*"#,
+                PreprocessorToken::Number(_) => r#"\.?[0-9](?:[0-9]|[eEpP][\+\-])*"#,
                 PreprocessorToken::CharacterConstant(_) => r#"'(?:[^'\\\n]|\\['"?\\abfnrtv])'"#,
                 PreprocessorToken::StringLiteral(_) => r#""(?:[^"\\\n]|\\['"?\\abfnrtv])*""#,
-                PreprocessorToken::HeaderFilename(_) => r#""([^"\n]*)""#,
-                PreprocessorToken::HeaderFilenameAngleBrackets(_) => r#"<([^"\n]*)>"#,
                 PreprocessorToken::KeywordDefined => r"defined\b",
 
                 // every punctuation character in ASCII except `, \, $ and @
-                // maybe # should also be moved out of here (preprocessor needs if for
-                // concatenation)
                 PreprocessorToken::Punctuator(_) => r#"[!"%#&'\(\)\*\+,\-\./:;<=>\[\]\?\^_\{\|\}~]"#,
-                PreprocessorToken::WhiteSpace(_) => r#"\s+"#,
+                PreprocessorToken::WidePunctuator(_) => r"##|^==|^!=|^>=|^<=|^>>|^<<|^>>=|^<<=|^\->|^\+=|^\-=|^\*=|^/=|^%=|^\&=|^\|=|^\^=|^\+\+|^\-\-",
+                PreprocessorToken::WhiteSpace(_) => r#"[^\S\n]+"#,
 
-                PreprocessorToken::DirectiveDefine => r"define\b",
-                PreprocessorToken::DirectiveInclude => r"#\s*include\b",
-                PreprocessorToken::DirectiveIfdef => r"#\s*ifdef\b",
-                PreprocessorToken::DirectiveIfndef => r"#\s*ifndef\b",
-                PreprocessorToken::DirectiveIf => r"#\s*if\b",
-                PreprocessorToken::DirectiveElse => r"#\s*else\b",
-                PreprocessorToken::DirectiveElif => r"#\s*elif\b",
+                PreprocessorToken::DirectiveDefine => r"\s*#\s*define\s*\b",
                 PreprocessorToken::DirectiveUndef => r"#\s*undef\b",
-                PreprocessorToken::DirectiveLine => r"#\s*line\b",
-                PreprocessorToken::DirectiveError => r"#\s*error\b",
-                PreprocessorToken::DirectivePragma => r"#\s*pragma\b",
-                PreprocessorToken::DirectiveWarning => r"#\s*warning\b",
+                // interpret the full include line here, accounting for the fact that escape
+                // sequences and comments in "" and <> are not processed here.
+                PreprocessorToken::DirectiveInclude(_,_) => r#"#\s*include\s+("[^\n"]*"|<[^\n>]*>)\s*$"#,
+                PreprocessorToken::DirectiveIncludeWithMacro => r#"#\s*include\s*"#,
+                PreprocessorToken::DirectiveIfdef => r"\s*#\s*ifdef\s*",
+                PreprocessorToken::DirectiveIfndef => r"\s*#\s*ifndef\s*",
+                PreprocessorToken::DirectiveIf => r"\s*#\s*if\s*",
+                PreprocessorToken::DirectiveElse => r"\s*#\s*else\s*",
+                PreprocessorToken::DirectiveElif => r"\s*#\s*elif\s*",
+                PreprocessorToken::DirectiveEndif => r"\s*#\s*endif\s*",
+                PreprocessorToken::DirectiveLine => r"\s*#\s*line\s*",
+                PreprocessorToken::DirectiveError => r"\s*#\s*error\s*",
+                PreprocessorToken::DirectivePragma => r"\s*#\s*pragma\s*",
+                PreprocessorToken::DirectiveWarning => r"\s*#\s*warning\s*",
             };
             if !entry.is_empty() {
                 let entry = "^".to_string() + entry;
@@ -96,14 +105,22 @@ impl PreprocessorToken {
             PreprocessorToken::StringLiteral(_) => PreprocessorToken::StringLiteral(
                 PreprocessorToken::parse_string(text[1..text.len() - 1].to_string()),
             ),
-            PreprocessorToken::HeaderFilename(_) => {
-                PreprocessorToken::HeaderFilename(text.to_string())
-            }
-            PreprocessorToken::HeaderFilenameAngleBrackets(_) => {
-                PreprocessorToken::HeaderFilenameAngleBrackets(text.to_string())
-            }
             PreprocessorToken::Punctuator(_) => PreprocessorToken::Punctuator(text.to_string()),
+            PreprocessorToken::WidePunctuator(_) => {
+                PreprocessorToken::WidePunctuator(text.to_string())
+            }
             PreprocessorToken::WhiteSpace(_) => PreprocessorToken::WhiteSpace(text.to_string()),
+            PreprocessorToken::DirectiveInclude(_, _) => {
+                let inner_text = &text
+                    .trim_start()
+                    .trim_start_matches("#")
+                    .trim_start()
+                    .trim_start_matches("include")
+                    .trim();
+                let uses_angle_brackets = inner_text.starts_with("<");
+                let inner_text = &inner_text[1..inner_text.len() - 1];
+                PreprocessorToken::DirectiveInclude(inner_text.to_string(), uses_angle_brackets)
+            }
 
             _ => self.clone(),
         }
@@ -146,7 +163,7 @@ impl PreprocessorToken {
             .unwrap_or("NULL".to_string())
     }
 
-    fn parse_string(mut text: String) -> Vec<i8> {
+    pub fn parse_string(mut text: String) -> Vec<i8> {
         let mut out = Vec::new();
         while !text.is_empty() {
             if text.starts_with(r"\") {
@@ -162,18 +179,25 @@ impl PreprocessorToken {
         out
     }
 
-    fn find_next(text: &str) -> Result<(PreprocessorToken, usize), Box<dyn Error>> {
+    fn find_next(
+        text: &str,
+        current_line_can_have_directive: bool,
+    ) -> Result<(PreprocessorToken, usize), Box<dyn Error>> {
         ALL_TOKENS
             .iter()
             .map(|(possible_token, regex)| (possible_token, regex.captures(text)))
             // filter out non-matching patterns
             .filter_map(|(possible_token, maybe_captures)| {
-                maybe_captures.map(|captures| {
-                    (
-                        possible_token.clone(),
-                        captures.get(captures.len() - 1).unwrap().end(),
-                    ) // read the last capture group
-                })
+                maybe_captures
+                    .map(|captures| {
+                        (
+                            possible_token.clone(),
+                            captures.get(captures.len() - 1).unwrap().end(),
+                        ) // read the last capture group
+                    })
+                    // only capture directives if they are allowed on this line.
+                    // This means they must be on a line preceded only by whitespace.
+                    .filter(|(t, _)| current_line_can_have_directive || !t.is_directive())
             })
             .max_by(|(token_a, end_a), (token_b, end_b)| {
                 end_a.cmp(end_b).then_with(|| {
@@ -184,7 +208,26 @@ impl PreprocessorToken {
                     token_a_precedence.cmp(&token_b_precedence)
                 })
             })
-            .ok_or::<Box<dyn Error>>(format!("Invalid token detected: {:?}", text).into())
+            .ok_or::<Box<dyn Error>>(format!("Invalid token detected: {}", text).into())
+    }
+
+    fn is_directive(&self) -> bool {
+        matches!(
+            self,
+            PreprocessorToken::DirectiveIf
+                | PreprocessorToken::DirectiveIncludeWithMacro
+                | PreprocessorToken::DirectiveInclude(_, _)
+                | PreprocessorToken::DirectiveElse
+                | PreprocessorToken::DirectiveElif
+                | PreprocessorToken::DirectiveLine
+                | PreprocessorToken::DirectiveIfdef
+                | PreprocessorToken::DirectiveIfndef
+                | PreprocessorToken::DirectiveUndef
+                | PreprocessorToken::DirectiveError
+                | PreprocessorToken::DirectiveWarning
+                | PreprocessorToken::DirectiveDefine
+                | PreprocessorToken::DirectivePragma
+        )
     }
 }
 
@@ -192,21 +235,23 @@ pub fn lex(lines: Vec<String>) -> Result<Tokens, Box<dyn Error>> {
     let mut tokens = Vec::new();
 
     for mut contents in lines.into_iter() {
-        let mut tokens_for_line = VecDeque::new();
-        // contents = contents.trim_start().into();
+        let mut current_line_can_have_directive = true;
+        let mut tokens_for_line = Vec::new();
         while !contents.is_empty() {
             let (possible_token, end): (PreprocessorToken, usize) =
-                PreprocessorToken::find_next(&contents)?;
+                PreprocessorToken::find_next(&contents, current_line_can_have_directive)?;
             let (substring, remainder) = contents.split_at(end);
             let substring = substring.to_string();
             contents = remainder.to_string();
 
-            tokens_for_line.push_back(possible_token.instantiate(&substring));
-            // contents = contents.trim_start().to_string();
+            tokens_for_line.push(possible_token.instantiate(&substring));
+            // directives can only be the first tokens on a line
+            current_line_can_have_directive = false;
         }
         tokens.push(tokens_for_line);
     }
 
+    // println!("{:?}", tokens);
     Ok(Tokens(tokens))
 }
 
@@ -214,40 +259,51 @@ impl Display for Tokens {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for line in self.0.iter() {
             for token in line.iter() {
-                let str = match token {
-                    PreprocessorToken::Identifier(ref s) | PreprocessorToken::Number(ref s) => {
-                        s.to_string()
-                    }
-                    PreprocessorToken::CharacterConstant(ref c) => {
-                        PreprocessorToken::display_character(c)
-                    }
-                    PreprocessorToken::StringLiteral(ref cs) => {
-                        cs.iter().map(PreprocessorToken::display_character).join("")
-                    }
-                    PreprocessorToken::Punctuator(ref s) => s.to_string(),
-                    PreprocessorToken::WhiteSpace(ref s) => s.to_string(),
-                    PreprocessorToken::KeywordDefined => "defined".to_string(),
-                    PreprocessorToken::HeaderFilename(_)
-                    | PreprocessorToken::HeaderFilenameAngleBrackets(_)
-                    | PreprocessorToken::DirectiveDefine
-                    | PreprocessorToken::DirectiveInclude
-                    | PreprocessorToken::DirectiveIfdef
-                    | PreprocessorToken::DirectiveIfndef
-                    | PreprocessorToken::DirectiveIf
-                    | PreprocessorToken::DirectiveElse
-                    | PreprocessorToken::DirectiveElif
-                    | PreprocessorToken::DirectiveUndef
-                    | PreprocessorToken::DirectiveLine
-                    | PreprocessorToken::DirectiveError
-                    | PreprocessorToken::DirectivePragma
-                    | PreprocessorToken::DirectiveWarning => {
-                        panic!("Invalid token in output: {:?}", token);
-                    }
-                };
-                write!(f, "{}", str)?;
+                write!(f, "{}", token)?;
             }
             writeln!(f)?;
         }
         Ok(())
+    }
+}
+
+impl Display for PreprocessorToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            PreprocessorToken::Identifier(ref s) | PreprocessorToken::Number(ref s) => {
+                s.to_string()
+            }
+            PreprocessorToken::CharacterConstant(ref c) => {
+                format!("\'{}\'", PreprocessorToken::display_character(c))
+            }
+            PreprocessorToken::StringLiteral(ref cs) => {
+                format!(
+                    "\"{}\"",
+                    cs.iter().map(PreprocessorToken::display_character).join("")
+                )
+            }
+            PreprocessorToken::Punctuator(ref s) => s.to_string(),
+            PreprocessorToken::WidePunctuator(ref s) => s.to_string(),
+            PreprocessorToken::WhiteSpace(ref s) => s.to_string(),
+            PreprocessorToken::KeywordDefined => "defined".to_string(),
+            PreprocessorToken::DirectiveDefine
+            | PreprocessorToken::DirectiveInclude(_, _)
+            | PreprocessorToken::DirectiveIncludeWithMacro
+            | PreprocessorToken::DirectiveIfdef
+            | PreprocessorToken::DirectiveIfndef
+            | PreprocessorToken::DirectiveIf
+            | PreprocessorToken::DirectiveElse
+            | PreprocessorToken::DirectiveElif
+            | PreprocessorToken::DirectiveEndif
+            | PreprocessorToken::DirectiveUndef
+            | PreprocessorToken::DirectiveLine
+            | PreprocessorToken::DirectiveError
+            | PreprocessorToken::DirectivePragma
+            | PreprocessorToken::DirectiveWarning => {
+                // format!("{:?}", self)
+                panic!("Invalid token in output: {:?}", self);
+            }
+        };
+        write!(f, "{}", str)
     }
 }
