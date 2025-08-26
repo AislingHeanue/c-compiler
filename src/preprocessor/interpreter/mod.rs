@@ -8,7 +8,7 @@ use std::{
 use chrono::Local;
 use conditional::resolve_number;
 use lazy_static::lazy_static;
-use resolve_identifier::do_resolve_identifier;
+use macros::resolve_identifier;
 
 use super::{
     internal_preprocess,
@@ -16,7 +16,7 @@ use super::{
 };
 
 mod conditional;
-mod resolve_identifier;
+mod macros;
 
 lazy_static! {
     static ref PREDEFINED_MACROS: HashMap<String,Macro> = HashMap::from([
@@ -103,32 +103,32 @@ lazy_static! {
         ("__WINT_MIN__".to_string(),                Macro::from_number(i32::MIN.into())),
         ("__SIG_ATOMIC_MIN__".to_string(),          Macro::from_number(i32::MIN.into())),
         // TODO: These are functions that return constants of that type
-        ("__INT8_C".to_string(),                    Macro::Function(vec!["c".to_string()], vec![PreprocessorToken::Identifier("c".to_string())])),
-        ("__INT16_C".to_string(),                   Macro::Function(vec!["c".to_string()], vec![PreprocessorToken::Identifier("c".to_string())])),
-        ("__INT32_C".to_string(),                   Macro::Function(vec!["c".to_string()], vec![PreprocessorToken::Identifier("c".to_string())])),
-        ("__INT64_C".to_string(),                   Macro::Function(vec!["c".to_string()], vec![
+        ("__INT8_C".to_string(),                    Macro::Function(vec![("c".to_string(),true)], vec![PreprocessorToken::Identifier("c".to_string())])),
+        ("__INT16_C".to_string(),                   Macro::Function(vec![("c".to_string(), true)], vec![PreprocessorToken::Identifier("c".to_string())])),
+        ("__INT32_C".to_string(),                   Macro::Function(vec![("c".to_string(), true)], vec![PreprocessorToken::Identifier("c".to_string())])),
+        ("__INT64_C".to_string(),                   Macro::Function(vec![("c".to_string(), false)], vec![
             PreprocessorToken::Identifier("c".to_string()),
             PreprocessorToken::WidePunctuator("##".to_string()),
             PreprocessorToken::Identifier("L".to_string()),
         ])),
-        ("__UINT8_C".to_string(),                   Macro::Function(vec!["c".to_string()], vec![PreprocessorToken::Identifier("c".to_string())])),
-        ("__UINT16_C".to_string(),                  Macro::Function(vec!["c".to_string()], vec![PreprocessorToken::Identifier("c".to_string())])),
-        ("__UINT32_C".to_string(),                  Macro::Function(vec!["c".to_string()], vec![
+        ("__UINT8_C".to_string(),                   Macro::Function(vec![("c".to_string(), true)], vec![PreprocessorToken::Identifier("c".to_string())])),
+        ("__UINT16_C".to_string(),                  Macro::Function(vec![("c".to_string(), true)], vec![PreprocessorToken::Identifier("c".to_string())])),
+        ("__UINT32_C".to_string(),                  Macro::Function(vec![("c".to_string(), false)], vec![
             PreprocessorToken::Identifier("c".to_string()),
             PreprocessorToken::WidePunctuator("##".to_string()),
             PreprocessorToken::Identifier("U".to_string()),
         ])),
-        ("__UINT64_C".to_string(),                  Macro::Function(vec!["c".to_string()], vec![
+        ("__UINT64_C".to_string(),                  Macro::Function(vec![("c".to_string(), false)], vec![
             PreprocessorToken::Identifier("c".to_string()),
             PreprocessorToken::WidePunctuator("##".to_string()),
             PreprocessorToken::Identifier("UL".to_string()),
         ])),
-        ("__INTMAX_C".to_string(),                  Macro::Function(vec!["c".to_string()], vec![
+        ("__INTMAX_C".to_string(),                  Macro::Function(vec![("c".to_string(), false)], vec![
             PreprocessorToken::Identifier("c".to_string()),
             PreprocessorToken::WidePunctuator("##".to_string()),
             PreprocessorToken::Identifier("L".to_string()),
         ])),
-        ("__UINTMAX_C".to_string(),                 Macro::Function(vec!["c".to_string()], vec![
+        ("__UINTMAX_C".to_string(),                 Macro::Function(vec![("c".to_string(), false)], vec![
             PreprocessorToken::Identifier("c".to_string()),
             PreprocessorToken::WidePunctuator("##".to_string()),
             PreprocessorToken::Identifier("UL".to_string()),
@@ -192,7 +192,7 @@ struct InterpreterContext {
 pub enum Macro {
     Plain(Vec<PreprocessorToken>),
     // function name, param names, tokens in function body (maybe could be string?)
-    Function(Vec<String>, Vec<PreprocessorToken>),
+    Function(Vec<(String, bool)>, Vec<PreprocessorToken>),
     Undef,
 }
 
@@ -261,9 +261,9 @@ pub fn interpret(
     let mut jump_to_end = false;
     let mut current_if_nesting = 0;
     let mut out = "".to_string();
-    let mut lines_iter = tokens.0.iter().peekable();
+    let mut line_iter = tokens.0.iter().peekable();
     let mut current_running_blank_lines = 1;
-    while let Some(line) = lines_iter.next() {
+    while let Some(line) = line_iter.next() {
         // lines are 1-indexed
         context.line_num += 1;
 
@@ -331,9 +331,9 @@ pub fn interpret(
         jump_to_end = false;
 
         let mut expect_end_of_line = false;
-        let mut tokens_iter = line.iter().peekable();
+        let mut token_iter = line.iter().peekable();
         let mut line_text = "".to_string();
-        while let Some(token) = tokens_iter.next() {
+        while let Some(token) = token_iter.next() {
             if !matches!(token, PreprocessorToken::WhiteSpace(_)) && expect_end_of_line {
                 return Err(format!("Extra token found after directive: {}", token).into());
             }
@@ -361,10 +361,10 @@ pub fn interpret(
                         // may need to pop further tokens off the iterator to resolve function
                         // calls, which for SOME GODFORSAKEN REASON can span multiple lines despite
                         // almost nothing else allowing it.
-                        (new_tokens, tokens_iter, lines_iter) = do_resolve_identifier(
+                        (new_tokens, token_iter, line_iter) = resolve_identifier(
                             vec![token.clone()].into(),
-                            tokens_iter,
-                            lines_iter,
+                            token_iter,
+                            line_iter,
                             HashSet::new(),
                             &mut context,
                         )?;
@@ -377,25 +377,25 @@ pub fn interpret(
                 }
 
                 PreprocessorToken::DirectiveDefine => {
-                    let k = if let Some(PreprocessorToken::Identifier(s)) = tokens_iter.next() {
+                    let k = if let Some(PreprocessorToken::Identifier(s)) = token_iter.next() {
                         s
                     } else {
                         return Err("#define must be followed by an identifier".into());
                     };
-                    match tokens_iter.peek() {
+                    match token_iter.peek() {
                         Some(PreprocessorToken::Punctuator(s)) if s == "(" => {
                             // TODO: function-like macro definitions and evaluation (several
                             // non-intuitive steps involved)
 
                             // consume the ( token
-                            tokens_iter.next();
+                            token_iter.next();
                             let mut params = Vec::new();
                             let mut body_tokens = Vec::new();
 
                             let mut parsing_params = true;
                             let mut expecting_identifier = true;
                             let mut trailing_comma = false;
-                            for t in tokens_iter.by_ref() {
+                            for t in token_iter.by_ref() {
                                 if parsing_params {
                                     match t {
                                         PreprocessorToken::Punctuator(s)
@@ -408,7 +408,11 @@ pub fn interpret(
                                         {
                                             expecting_identifier = false;
                                             trailing_comma = false;
-                                            params.push(s.clone());
+                                            let new_param = (s.clone(), true);
+                                            if params.contains(&new_param) {
+                                                return Err(format!("Duplicate parameter name in macro definition: {}", new_param.0).into());
+                                            }
+                                            params.push(new_param);
                                         }
                                         PreprocessorToken::Punctuator(s)
                                             if *s == "," && !expecting_identifier =>
@@ -425,6 +429,7 @@ pub fn interpret(
                                         }
                                     }
                                 } else {
+                                    // trim whitespace from start of body
                                     if body_tokens.is_empty()
                                         && matches!(t, PreprocessorToken::WhiteSpace(_))
                                     {
@@ -433,17 +438,77 @@ pub fn interpret(
                                     body_tokens.push(t.clone());
                                 }
                             }
+                            // if the body contains any #params or _ ## _, mark should_prescan for
+                            // those params to be false
+                            for i in 0..body_tokens.len() {
+                                match body_tokens.get(i).unwrap() {
+                                    PreprocessorToken::Punctuator(s) if s == "#" => {
+                                        if let Some(PreprocessorToken::Identifier(s)) =
+                                            body_tokens.get(i + 1)
+                                        {
+                                            if !params.iter().any(|(p, _)| p == s) {
+                                                return Err("# in function-like macro body should be a parameter name".into());
+                                            }
+                                            do_not_prescan(&mut params, s);
+                                        } else {
+                                            return Err("# in function-like macro body should be followed by an identifier".into());
+                                        }
+                                    }
+                                    PreprocessorToken::WidePunctuator(s) if s == "##" => {
+                                        let mut previous_index = i - 1;
+                                        while let Some(PreprocessorToken::WhiteSpace(_)) =
+                                            body_tokens.get(previous_index)
+                                        {
+                                            previous_index -= 1;
+                                        }
+                                        if body_tokens.get(previous_index).is_none() {
+                                            return Err("## cannot appear at the start of a function-like macro body".into());
+                                        }
+                                        if let Some(PreprocessorToken::Identifier(s)) =
+                                            body_tokens.get(previous_index)
+                                        {
+                                            do_not_prescan(&mut params, s);
+                                        }
+
+                                        let mut next_index = i + 1;
+                                        while let Some(PreprocessorToken::WhiteSpace(_)) =
+                                            body_tokens.get(next_index)
+                                        {
+                                            next_index += 1;
+                                        }
+                                        if body_tokens.get(next_index).is_none() {
+                                            return Err("## cannot appear at the end of a function-like macro body".into());
+                                        }
+                                        if let Some(PreprocessorToken::Identifier(s)) =
+                                            body_tokens.get(next_index)
+                                        {
+                                            do_not_prescan(&mut params, s);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+
+                            // TODO: this warning should only occur if the replacement
+                            // tokens/params differ, not counting variable whitespace sizes
+                            // see section 3.8 of https://gcc.gnu.org/onlinedocs/cpp.pdf
+                            if context.macros.contains_key(k) {
+                                println!("WARNING: Macro '{}' was re-defined", k);
+                            }
                             context
                                 .macros
                                 .insert(k.clone(), Macro::Function(params, body_tokens));
                         }
                         Some(_) => {
                             let mut v = Vec::new();
-                            for t in tokens_iter.by_ref() {
+                            for t in token_iter.by_ref() {
                                 if v.is_empty() && matches!(t, PreprocessorToken::WhiteSpace(_)) {
                                     continue;
                                 }
                                 v.push(t.clone())
+                            }
+                            if context.macros.contains_key(k) {
+                                println!("WARNING: Macro '{}' was re-defined", k);
                             }
                             context.macros.insert(k.clone(), Macro::Plain(v));
                         }
@@ -452,7 +517,7 @@ pub fn interpret(
                     expect_end_of_line = true;
                 }
                 PreprocessorToken::DirectiveUndef => {
-                    if let Some(PreprocessorToken::Identifier(s)) = tokens_iter.next() {
+                    if let Some(PreprocessorToken::Identifier(s)) = token_iter.next() {
                         if let Some(m) = context.macros.get_mut(s) {
                             *m = Macro::Undef;
                         }
@@ -472,14 +537,14 @@ pub fn interpret(
                     expect_end_of_line = true;
                 }
                 PreprocessorToken::DirectiveIncludeWithMacro => {
-                    if let Some(PreprocessorToken::Identifier(_)) = tokens_iter.next() {
+                    if let Some(PreprocessorToken::Identifier(_)) = token_iter.next() {
                         // get the string representation of the tokens here because we can't treat
                         // "" as a plain string literal any more
                         let new_tokens;
-                        (new_tokens, tokens_iter, lines_iter) = do_resolve_identifier(
+                        (new_tokens, token_iter, line_iter) = resolve_identifier(
                             vec![token.clone()].into(),
-                            tokens_iter,
-                            lines_iter,
+                            token_iter,
+                            line_iter,
                             HashSet::new(),
                             &mut context,
                         )?;
@@ -509,7 +574,7 @@ pub fn interpret(
 
                 PreprocessorToken::DirectiveIfdef => {
                     current_if_nesting = 1;
-                    if let Some(PreprocessorToken::Identifier(s)) = tokens_iter.next() {
+                    if let Some(PreprocessorToken::Identifier(s)) = token_iter.next() {
                         if let Some(Macro::Undef) | None = context.macros.get(s) {
                             jump_to_else = true;
                         }
@@ -523,7 +588,7 @@ pub fn interpret(
                 }
                 PreprocessorToken::DirectiveIfndef => {
                     current_if_nesting = 1;
-                    if let Some(PreprocessorToken::Identifier(s)) = tokens_iter.next() {
+                    if let Some(PreprocessorToken::Identifier(s)) = token_iter.next() {
                         if let Some(Macro::Function(_, _) | Macro::Plain(_)) = context.macros.get(s)
                         {
                             jump_to_else = true;
@@ -537,13 +602,29 @@ pub fn interpret(
                     expect_end_of_line = true;
                 }
                 PreprocessorToken::DirectiveIf => {
-                    let number = resolve_number(&tokens_iter.by_ref().cloned().collect());
+                    let if_tokens;
+                    (if_tokens, token_iter, line_iter) = resolve_identifier(
+                        token_iter.by_ref().cloned().collect(),
+                        token_iter,
+                        line_iter,
+                        HashSet::new(),
+                        &mut context,
+                    )?;
+                    let number = resolve_number(&if_tokens);
                     if number == 0 {
                         jump_to_else = true;
                     }
                 }
                 PreprocessorToken::DirectiveElif => {
-                    let number = resolve_number(&tokens_iter.by_ref().cloned().collect());
+                    let if_tokens;
+                    (if_tokens, token_iter, line_iter) = resolve_identifier(
+                        token_iter.by_ref().cloned().collect(),
+                        token_iter,
+                        line_iter,
+                        HashSet::new(),
+                        &mut context,
+                    )?;
+                    let number = resolve_number(&if_tokens);
                     if number == 0 {
                         jump_to_else = true;
                     }
@@ -556,7 +637,7 @@ pub fn interpret(
                 }
                 PreprocessorToken::DirectiveLine => {
                     let mut tokens = Vec::new();
-                    for t in tokens_iter.by_ref() {
+                    for t in token_iter.by_ref() {
                         tokens.push(t.clone());
                     }
                     let mut number = None;
@@ -582,10 +663,10 @@ pub fn interpret(
                         //= resolve_identifier(tokens.clone(), HashSet::new(), &mut context)?;
 
                         let new_tokens;
-                        (new_tokens, tokens_iter, lines_iter) = do_resolve_identifier(
+                        (new_tokens, token_iter, line_iter) = resolve_identifier(
                             vec![token.clone()].into(),
-                            tokens_iter,
-                            lines_iter,
+                            token_iter,
+                            line_iter,
                             HashSet::new(),
                             &mut context,
                         )?;
@@ -625,7 +706,7 @@ pub fn interpret(
                 }
                 PreprocessorToken::DirectiveError => {
                     let mut out_string = "".to_string();
-                    for t in tokens_iter.by_ref() {
+                    for t in token_iter.by_ref() {
                         out_string += format!("{}", t).as_str();
                     }
 
@@ -633,14 +714,14 @@ pub fn interpret(
                 }
                 PreprocessorToken::DirectiveWarning => {
                     let mut out_string = "".to_string();
-                    for t in tokens_iter.by_ref() {
+                    for t in token_iter.by_ref() {
                         out_string += format!("{}", t).as_str();
                     }
                     println!("WARNING: {}", out_string);
                 }
                 PreprocessorToken::DirectivePragma => {
                     let mut out_string = "".to_string();
-                    for t in tokens_iter.by_ref() {
+                    for t in token_iter.by_ref() {
                         out_string += format!("{}", t).as_str();
                     }
                     println!(
@@ -742,4 +823,17 @@ fn next_token_is_concatenation(tokens: &VecDeque<PreprocessorToken>) -> bool {
         }
     }
     false
+}
+
+fn do_not_prescan(params: &mut Vec<(String, bool)>, name: &str) {
+    *params = params
+        .iter_mut()
+        .map(|(p, should_prescan)| {
+            if p == name {
+                (p.clone(), false)
+            } else {
+                (p.clone(), *should_prescan)
+            }
+        })
+        .collect();
 }

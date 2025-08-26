@@ -17,7 +17,7 @@ type ResolveReturn<'a, 'b> = (
     Peekable<Iter<'b, Vec<PreprocessorToken>>>,
 );
 
-pub fn do_resolve_identifier<'a, 'b: 'a>(
+pub fn resolve_identifier<'a, 'b: 'a>(
     mut tokens: VecDeque<PreprocessorToken>,
     mut token_iter: Peekable<Iter<'a, PreprocessorToken>>,
     mut line_iter: Peekable<Iter<'b, Vec<PreprocessorToken>>>,
@@ -33,6 +33,9 @@ pub fn do_resolve_identifier<'a, 'b: 'a>(
                     if seen_identifiers.contains(identifier) {
                         // TODO: need some way to signal that if we enter this block, then we can't expand this
                         // again when we send it to a functional macro (see 3.10.6)
+                        //
+                        // maybe that's already covered here actually? hard to tell without testing
+                        // TODO: test
                         new_tokens.push(token);
                         continue;
                     }
@@ -41,7 +44,7 @@ pub fn do_resolve_identifier<'a, 'b: 'a>(
                             seen_identifiers.insert(identifier.to_string());
 
                             let resolved_inner_tokens;
-                            (resolved_inner_tokens, token_iter, line_iter) = do_resolve_identifier(
+                            (resolved_inner_tokens, token_iter, line_iter) = resolve_identifier(
                                 inner_tokens.clone().into(),
                                 token_iter,
                                 line_iter,
@@ -131,20 +134,27 @@ pub fn do_resolve_identifier<'a, 'b: 'a>(
                                             .into(),
                                     );
                                 }
-                                // resolve the args before passing them to the function.
-                                for arg in args.iter_mut() {
-                                    (*arg, token_iter, line_iter) = do_resolve_identifier(
-                                        arg.clone().into(),
-                                        token_iter,
-                                        line_iter,
-                                        seen_identifiers.clone(),
-                                        context,
-                                    )?;
+                                // PRESCAN the args before passing them to the function.
+                                for (arg, (_, should_prescan)) in args.iter_mut().zip(params.iter())
+                                {
+                                    if *should_prescan {
+                                        (*arg, token_iter, line_iter) = resolve_identifier(
+                                            arg.clone().into(),
+                                            token_iter,
+                                            line_iter,
+                                            seen_identifiers.clone(),
+                                            context,
+                                        )?;
+                                    }
                                 }
 
                                 let mut arg_map = HashMap::new();
-                                for (k, v) in
-                                    params.iter().cloned().zip(args.into_iter()).collect_vec()
+                                for (k, v) in params
+                                    .iter()
+                                    // ignore should_prescan
+                                    .map(|p| p.0.clone())
+                                    .zip(args.into_iter())
+                                    .collect_vec()
                                 {
                                     arg_map.insert(k.clone(), v.clone());
                                 }
@@ -192,8 +202,9 @@ pub fn do_resolve_identifier<'a, 'b: 'a>(
                                 }
                                 println!("{:?}", new_body);
 
+                                // re-scan the body to expand any further macros
                                 seen_identifiers.insert(identifier.to_string());
-                                (new_body, token_iter, line_iter) = do_resolve_identifier(
+                                (new_body, token_iter, line_iter) = resolve_identifier(
                                     new_body.into(),
                                     token_iter,
                                     line_iter,
