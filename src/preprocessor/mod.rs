@@ -18,7 +18,7 @@ pub fn preprocess(
     _config: PreprocessorConfig,
 ) -> Result<(), Box<dyn Error>> {
     let (code, _new_map) = internal_preprocess(filename, 0, HashMap::new())?;
-    println!("{}", code);
+    // println!("{}", code);
 
     fs::write(preprocessed_filename, &code)?;
 

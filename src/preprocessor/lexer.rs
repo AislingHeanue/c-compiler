@@ -54,7 +54,7 @@ lazy_static! {
             let entry:&str = match token {
                 PreprocessorToken::Identifier(_) => r"^[a-zA-Z_]\w*\b",
                 PreprocessorToken::Number(_) => r#"\.?[0-9](?:[0-9]|[eEpP][\+\-])*(?:[lL]?[lL]?[uU]?|[uU][lL]?[lL]?)"#,
-                PreprocessorToken::CharacterConstant(_) => r#"'(?:[^'\\\n]|\\['"?\\abfnrtv])'"#,
+                PreprocessorToken::CharacterConstant(_) => r#"'(?:[^'\\\n]|\\['"?\\abfnrtv0-9]+)'"#,
                 PreprocessorToken::StringLiteral(_) => r#""(?:[^"\\\n]|\\['"?\\abfnrtv])*""#,
                 PreprocessorToken::KeywordDefined => r"defined\b",
 
@@ -140,7 +140,13 @@ impl PreprocessorToken {
             r"\r" => '\r'.into(),
             r"\t" => '\t'.into(),
             r"\v" => 11, //vertical tab
-            _ => panic!("Char must be a valid ASCII 7-bit value"),
+            _ => {
+                if let Ok(num) = text[1..].parse::<i8>() {
+                    num.try_into().unwrap()
+                } else {
+                    panic!("Char must be a valid ASCII 7-bit value")
+                }
+            }
         };
         code as i8
     }

@@ -179,7 +179,6 @@ lazy_static! {
         // signifies this is compiling for unix
         ("__unix__".to_string(),                    Macro::from_number(1)),
         ("__x86_64__".to_string(),                  Macro::from_number(1)),
-        ("__x86_64__".to_string(),                  Macro::from_number(1)),
         // _ on mac
         ("__USER_LABEL_PREFIX__".to_string(),       Macro::Plain(vec![])),
     ]);
