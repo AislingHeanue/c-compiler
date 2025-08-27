@@ -37,6 +37,7 @@ pub struct ParseContext {
     // all_struct_types: HashMap<String, StructTypeEntry>,
     num_variables: usize,
     num_structs: usize,
+    num_anonymous_params: usize,
     do_not_validate: bool,
     // this prevent creating an extra new scope entering function bodies
     current_block_is_function_body: bool,
@@ -70,6 +71,7 @@ pub fn do_parse(
         // all_struct_types: HashMap::new(),
         num_variables: 0,
         num_structs: 0,
+        num_anonymous_params: 0,
         do_not_validate,
         current_block_is_function_body: false,
         current_scope_is_file: true,
@@ -175,6 +177,7 @@ impl Parse<UnaryOperatorNode> for VecDeque<Token> {
             Token::Hyphen => Ok(UnaryOperatorNode::Negate),
             Token::Tilde => Ok(UnaryOperatorNode::Complement),
             Token::Not => Ok(UnaryOperatorNode::Not),
+            Token::Plus => Ok(UnaryOperatorNode::Identity),
             Token::Increment => Ok(UnaryOperatorNode::PrefixIncrement),
             Token::Decrement => Ok(UnaryOperatorNode::PrefixDecrement),
             t => Err(format!(

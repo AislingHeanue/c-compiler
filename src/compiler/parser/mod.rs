@@ -185,6 +185,7 @@ pub enum ExpressionWithoutType {
 pub enum UnaryOperatorNode {
     Complement,
     Negate,
+    Identity,
     Not,
     PrefixIncrement,
     PrefixDecrement,

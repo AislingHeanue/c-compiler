@@ -1,6 +1,6 @@
 use itertools::process_results;
 
-use super::{Declarator, Parse, ParseContext, Type};
+use super::{parsed_types::PopForType, Declarator, Parse, ParseContext, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::StructDeclaration,
@@ -148,11 +148,24 @@ impl ParseDeclarator for VecDeque<Token> {
         &mut self,
         context: &mut ParseContext,
     ) -> Result<OutputWithStruct, Box<dyn Error>> {
-        if let Ok((_, _, _)) = self.clone().parse(context) {
+        // check whether there is a declarator present in this param
+        let mut copy_remaining_tokens_after_type = self.clone();
+        copy_remaining_tokens_after_type.pop_tokens_for_type(context)?;
+
+        let is_anonymous = matches!(
+            copy_remaining_tokens_after_type.front(),
+            None | Some(Token::Comma | Token::CloseParen)
+        );
+
+        if !is_anonymous {
             self.parse(context)
         } else {
             let (t, s): (Type, Option<StructDeclaration>) = self.parse(context)?;
-            let declarator = Declarator::Name("anonymous.parameter".to_string());
+            context.num_anonymous_params += 1;
+            let declarator = Declarator::Name(format!(
+                "anonymous.parameter.{}",
+                context.num_anonymous_params
+            ));
             Ok((t, declarator, s))
         }
         // function params never have static or extern storage

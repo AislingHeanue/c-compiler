@@ -24,18 +24,14 @@ pub fn resolve_identifier<'a, 'b: 'a>(
     mut seen_identifiers: HashSet<String>,
     context: &mut InterpreterContext,
 ) -> Result<ResolveReturn<'a, 'b>, Box<dyn Error>> {
+    // println!("resolving {:?}", tokens);
     let mut new_tokens = Vec::new();
     while let Some(token) = tokens.pop_front() {
-        let next_token_is_concatenation = next_token_is_concatenation(&tokens);
+        let next_is_concatenation = next_token_is_concatenation(&tokens);
         match token {
-            PreprocessorToken::Identifier(ref identifier) if !next_token_is_concatenation => {
+            PreprocessorToken::Identifier(ref identifier) if !next_is_concatenation => {
                 if let Some(m) = context.macros.get(identifier) {
                     if seen_identifiers.contains(identifier) {
-                        // TODO: need some way to signal that if we enter this block, then we can't expand this
-                        // again when we send it to a functional macro (see 3.10.6)
-                        //
-                        // maybe that's already covered here actually? hard to tell without testing
-                        // TODO: test
                         new_tokens.push(token);
                         continue;
                     }
@@ -52,12 +48,29 @@ pub fn resolve_identifier<'a, 'b: 'a>(
                                 context,
                             )?;
                             seen_identifiers.remove(identifier);
+
                             resolved_inner_tokens
                         }
                         Macro::Function(params, body) => {
+                            // println!("resolved to function with {:?}, {:?}", params, body);
                             let treat_as_function = if !tokens.is_empty() {
+                                while !tokens.is_empty()
+                                    && matches!(
+                                        tokens.front(),
+                                        Some(PreprocessorToken::WhiteSpace(_))
+                                    )
+                                {
+                                    tokens.pop_front();
+                                }
+
                                 matches!(tokens.front(), Some(PreprocessorToken::Punctuator(s)) if s == "(")
                             } else {
+                                while matches!(
+                                    token_iter.peek(),
+                                    Some(PreprocessorToken::WhiteSpace(_))
+                                ) {
+                                    token_iter.next();
+                                }
                                 matches!(token_iter.peek(), Some(PreprocessorToken::Punctuator(s)) if s == "(")
                             };
                             if treat_as_function {
@@ -200,7 +213,7 @@ pub fn resolve_identifier<'a, 'b: 'a>(
                                     }
                                     new_body.push(body_token);
                                 }
-                                println!("{:?}", new_body);
+                                // println!("{:?}", new_body);
 
                                 // re-scan the body to expand any further macros
                                 seen_identifiers.insert(identifier.to_string());
@@ -220,60 +233,89 @@ pub fn resolve_identifier<'a, 'b: 'a>(
                         }
                         Macro::Undef => vec![token],
                     };
-                    new_tokens.append(&mut tokens_from_inner);
+                    // if the macro resolves to nothing, clear the next whitespace
+                    if tokens_from_inner
+                        .iter()
+                        .all(|t| matches!(t, PreprocessorToken::WhiteSpace(_)))
+                    {
+                        while matches!(tokens.front(), Some(PreprocessorToken::WhiteSpace(_))) {
+                            tokens.pop_front();
+                        }
+                    } else {
+                        new_tokens.append(&mut tokens_from_inner);
+                    }
                 } else {
                     new_tokens.push(token);
                 }
             }
-            t if next_token_is_concatenation => {
-                let left = t.to_string();
+            t if next_is_concatenation => {
+                let mut concatenate = next_is_concatenation;
+                let mut this_token = t;
+                let mut inner_tokens = VecDeque::new();
+                while concatenate {
+                    let left = this_token.to_string();
 
-                let mut next = tokens.pop_front();
-                while let Some(PreprocessorToken::WhiteSpace(_)) = next {
-                    next = tokens.pop_front();
-                }
-                next = tokens.pop_front(); // pop the ## we've detected
-                while let Some(PreprocessorToken::WhiteSpace(_)) = next {
-                    next = tokens.pop_front();
-                }
-                if next.is_none() {
-                    return Err("## cannot be at the end of an expression".into());
-                }
-                let right = next.unwrap().to_string();
+                    let mut next = tokens.pop_front();
+                    while let Some(PreprocessorToken::WhiteSpace(_)) = next {
+                        next = tokens.pop_front();
+                    }
+                    next = tokens.pop_front(); // pop the ## we've detected
+                    while let Some(PreprocessorToken::WhiteSpace(_)) = next {
+                        next = tokens.pop_front();
+                    }
+                    // if next.is_none() {
+                    //     return Err("## cannot be at the end of an expression".into());
+                    // }
+                    let right = next
+                        .unwrap_or(PreprocessorToken::WhiteSpace("".to_string()))
+                        .to_string();
 
-                let new_s = format!("{}{}", left, right);
-                let lexed = lex(vec![new_s])?;
-                if lexed.0.len() != 1 {
-                    unreachable!()
+                    concatenate = next_token_is_concatenation(&tokens);
+
+                    let new_s = format!("{}{}", left, right);
+                    let lexed = lex(vec![new_s])?;
+                    if lexed.0.len() != 1 {
+                        unreachable!()
+                    }
+                    if lexed.0[0].len() == 1 {
+                        this_token = lexed.0[0][0].clone()
+                    } else if lexed.0.len() == 2 {
+                        println!(
+                            "WARNING: {} could not be resolved to a single token, returning both",
+                            lexed
+                        );
+                        inner_tokens.push_back(lexed.0[0][0].clone());
+                        this_token = lexed.0[0][1].clone();
+                    } else {
+                        unreachable!()
+                    }
                 }
-                if lexed.0[0].len() == 1 {
-                    new_tokens.push(lexed.0[0][0].clone());
-                } else if lexed.0.len() == 2 {
-                    println!(
-                        "WARNING: {} could not be resolved to a single token, returning both",
-                        lexed
-                    );
-                    new_tokens.push(lexed.0[0][0].clone());
-                    new_tokens.push(lexed.0[0][1].clone());
+                inner_tokens.push_back(this_token);
+
+                // seen_identifiers.insert(identifier.to_string());
+
+                let mut resolved_inner_tokens;
+                (resolved_inner_tokens, token_iter, line_iter) = resolve_identifier(
+                    inner_tokens,
+                    token_iter,
+                    line_iter,
+                    seen_identifiers.clone(),
+                    context,
+                )?;
+                // seen_identifiers.remove(identifier);
+
+                // ignore any whitespace after concatenations that only result in whitespace
+                if resolved_inner_tokens
+                    .iter()
+                    .all(|t| matches!(t, PreprocessorToken::WhiteSpace(_)))
+                {
+                    while matches!(tokens.front(), Some(PreprocessorToken::WhiteSpace(_))) {
+                        tokens.pop_front();
+                    }
                 } else {
-                    unreachable!()
+                    new_tokens.append(&mut resolved_inner_tokens);
                 }
             }
-            // PreprocessorToken::Punctuator(p) if p == "#" => {
-            //     let next = tokens.pop_front();
-            //     if let Some(PreprocessorToken::WhiteSpace(_)) = next {
-            //         // return Err("# cannot be followed by whitespace".into());
-            //         continue;
-            //     }
-            //     if next.is_none() {
-            //         // return Err("# cannot be at the end of an expression".into());
-            //         continue;
-            //     }
-            //     let right = next.unwrap().to_string();
-            //     new_tokens.push(PreprocessorToken::StringLiteral(
-            //         PreprocessorToken::parse_string(right),
-            //     ))
-            // }
             _ => {
                 new_tokens.push(token);
             }

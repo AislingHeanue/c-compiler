@@ -17,8 +17,9 @@
 
 // Function-like macros
 #define FOO(x) (x + 1)
-#define BAR(x,y) x##y   // token pasting
-#define STR(x) #x       // stringification
+#define BAR(x,y) x##y           // token pasting
+#define STR(x) LITERAL_STR(x)   // stringification
+#define LITERAL_STR(x) #x       // stringification but actually (need a level of indirections so macros get resolved)
 #define EMPTY()
 
 // Recursive-like macro (should stop expanding eventually)
@@ -90,7 +91,7 @@ int puts(char *c);
 int main(void) {
     // Expand macros and show as string literals via puts
     puts("Macro expansion check: x = " STR(A) " + " STR(B) " + " STR(C) " (should be 1+2+(1+2))");
-    puts("Macro expansion check: FOO(10) = " STR(FOO(10)) " (expected 11)");
+    puts("Macro expansion check: FOO(10) = " STR(FOO(10)) " (expected (10 + 1))");
     puts("Macro expansion check: NESTED(3) = " STR(NESTED(3)) " (expected 2*(3+1))");
 
     // Token pasting

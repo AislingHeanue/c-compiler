@@ -520,6 +520,7 @@ impl CodeDisplay for UnaryOperatorNode {
             UnaryOperatorNode::Complement => "~",
             UnaryOperatorNode::Negate => "-",
             UnaryOperatorNode::Not => "!",
+            UnaryOperatorNode::Identity => "+",
             UnaryOperatorNode::PrefixIncrement => "++",
             UnaryOperatorNode::PrefixDecrement => "--",
             UnaryOperatorNode::SuffixIncrement => "(this is a suffix)++",

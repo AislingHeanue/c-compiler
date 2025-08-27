@@ -166,6 +166,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
 
                 Ok((instructions, new_dst.into()))
             }
+            ExpressionWithoutType::Unary(UnaryOperatorNode::Identity, src) => src.convert(context),
             ExpressionWithoutType::Unary(op, src) => {
                 let (mut instructions, new_src): E = src.convert(context)?;
 
@@ -173,7 +174,8 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     UnaryOperatorNode::Complement => BirdsUnaryOperatorNode::Complement,
                     UnaryOperatorNode::Negate => BirdsUnaryOperatorNode::Negate,
                     UnaryOperatorNode::Not => BirdsUnaryOperatorNode::Not,
-                    UnaryOperatorNode::PrefixIncrement
+                    UnaryOperatorNode::Identity
+                    | UnaryOperatorNode::PrefixIncrement
                     | UnaryOperatorNode::PrefixDecrement
                     | UnaryOperatorNode::SuffixIncrement
                     | UnaryOperatorNode::SuffixDecrement => unreachable!(),

@@ -87,6 +87,14 @@ impl AssemblyType {
         }
     }
 
+    pub fn get_sse_eightbyte(offset: i32, total_size: i32) -> AssemblyType {
+        match total_size - offset {
+            8.. => AssemblyType::Double,
+            4 => AssemblyType::Float,
+            i => AssemblyType::ByteArray(i as u64, 8),
+        }
+    }
+
     pub fn get_alignment(&self) -> u32 {
         match self {
             AssemblyType::Byte => 1,

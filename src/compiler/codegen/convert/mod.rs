@@ -59,7 +59,7 @@ impl ConvertContext {
 }
 
 struct Args {
-    double: Vec<Operand>,
+    double: Vec<(Operand, AssemblyType)>,
     integer: Vec<(Operand, bool, AssemblyType)>,
     stack: Vec<(Operand, bool, AssemblyType)>,
 }
@@ -88,7 +88,7 @@ fn pass_args_to_callee(
         let (t, is_signed, is_scalar) = AssemblyType::infer(&v, context)?;
         if t == AssemblyType::Double {
             if args.double.len() < 8 {
-                args.double.push(v.convert(context)?);
+                args.double.push((v.convert(context)?, t));
             } else {
                 args.stack.push((v.convert(context)?, is_signed, t));
             }
@@ -115,7 +115,10 @@ fn pass_args_to_callee(
                 let mut maybe_doubles = Vec::new();
                 for i in 0_i32..classes.len() as i32 {
                     if *classes.get(i as usize).unwrap() == Class::Sse {
-                        maybe_doubles.push(Operand::MockMemory(var_name.clone(), i * 8))
+                        maybe_doubles.push((
+                            Operand::MockMemory(var_name.clone(), i * 8),
+                            AssemblyType::get_sse_eightbyte(i * 8, size as i32),
+                        ))
                     } else {
                         maybe_ints.push((
                             Operand::MockMemory(var_name.clone(), i * 8),

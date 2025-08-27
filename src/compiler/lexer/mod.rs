@@ -336,7 +336,12 @@ impl Token {
     pub fn is_unary_operator(&self) -> bool {
         matches!(
             self,
-            Token::Hyphen | Token::Tilde | Token::Not | Token::Increment | Token::Decrement
+            Token::Hyphen
+                | Token::Tilde
+                | Token::Not
+                | Token::Increment
+                | Token::Decrement
+                | Token::Plus
         )
     }
 

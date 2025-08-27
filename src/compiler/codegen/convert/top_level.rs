@@ -79,9 +79,9 @@ impl BirdsTopLevel {
             }
         }
 
-        for (i, param) in params.double.into_iter().enumerate() {
+        for (i, (param, param_type)) in params.double.into_iter().enumerate() {
             instructions.push(Instruction::Mov(
-                AssemblyType::Double,
+                param_type,
                 Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
                 param,
             ));

@@ -569,12 +569,32 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     }
                 }
 
-                for (i, arg) in args.double.into_iter().enumerate() {
-                    instructions.push(Instruction::Mov(
-                        AssemblyType::Double,
-                        arg,
-                        Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
-                    ));
+                for (i, (arg, arg_type)) in args.double.into_iter().enumerate() {
+                    match arg_type {
+                        AssemblyType::Float => {
+                            // zero out the register we're putting this float into
+                            instructions.push(Instruction::Binary(
+                                BinaryOperator::Xor,
+                                AssemblyType::Double,
+                                Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
+                                Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
+                            ));
+
+                            instructions.push(Instruction::Mov(
+                                AssemblyType::Float,
+                                arg,
+                                Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
+                            ));
+                        }
+                        AssemblyType::Double => {
+                            instructions.push(Instruction::Mov(
+                                AssemblyType::Double,
+                                arg,
+                                Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
+                            ));
+                        }
+                        _ => return Err("Invalid type stored in SSE register".into()),
+                    }
                 }
 
                 for (arg, _is_signed, arg_type) in args.stack.into_iter().rev() {

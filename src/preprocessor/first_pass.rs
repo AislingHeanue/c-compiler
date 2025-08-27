@@ -21,7 +21,7 @@ pub fn do_first_pass(contents: &str) -> Result<Vec<String>, Box<dyn Error>> {
             if let Some(next_line_unwrapped) = next_line {
                 // pop the \ character
                 line.pop();
-                line += next_line_unwrapped;
+                line += next_line_unwrapped.trim_start();
             } else {
                 return Err("Unexpected '\\' at end of file".into());
             }
@@ -44,7 +44,7 @@ pub fn do_first_pass(contents: &str) -> Result<Vec<String>, Box<dyn Error>> {
             }
 
             match (character, next_character) {
-                ('/', '/') if !in_a_string && !in_angle_bracket_string => {
+                ('/', '/') if !in_a_string && !in_angle_bracket_string && !in_comment => {
                     line_out += " ";
                     // skip the rest of the line
                     break;

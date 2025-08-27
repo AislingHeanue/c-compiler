@@ -17,7 +17,7 @@ pub fn preprocess(
     preprocessed_filename: &str,
     _config: PreprocessorConfig,
 ) -> Result<(), Box<dyn Error>> {
-    let (code, _new_map) = internal_preprocess(filename)?;
+    let (code, _new_map) = internal_preprocess(filename, 0, HashMap::new())?;
     println!("{}", code);
 
     fs::write(preprocessed_filename, &code)?;
@@ -27,6 +27,8 @@ pub fn preprocess(
 
 fn internal_preprocess(
     filename: &str,
+    nesting_count: usize,
+    macros: HashMap<String, Macro>,
     // _config: PreprocessorConfig,
 ) -> Result<(String, HashMap<String, Macro>), Box<dyn Error>> {
     let contents = fs::read_to_string(filename)?;
@@ -35,5 +37,5 @@ fn internal_preprocess(
 
     let lexed = lex(after_first_pass)?;
 
-    interpret(filename.to_string(), lexed)
+    interpret(filename.to_string(), lexed, nesting_count, macros)
 }
