@@ -330,7 +330,13 @@ impl CodeDisplay for Type {
             Type::Float => "float32".to_string(),
             Type::Double => "float64".to_string(),
             Type::LongDouble => "longer_float64".to_string(),
-            Type::Pointer(t) => format!("*{}", t.show(context)),
+            Type::Pointer(t, is_restricted) => {
+                if *is_restricted {
+                    format!("*restrict {}", t.show(context))
+                } else {
+                    format!("*{}", t.show(context))
+                }
+            }
             Type::Array(t, s) => format!("[{}]{}", s, t.show(context)),
             Type::Char => "rune".to_string(),
             Type::SignedChar => "signed_rune".to_string(),

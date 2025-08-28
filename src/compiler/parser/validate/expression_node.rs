@@ -208,8 +208,8 @@ impl CheckTypes for ExpressionNode {
                     Type::Void
                 } else if then_type.is_arithmetic() && other_type.is_arithmetic() {
                     ExpressionNode::get_common_type(then, other, &mut context.structs)
-                } else if matches!(then_type, Type::Pointer(_))
-                    || matches!(other_type, Type::Pointer(_))
+                } else if matches!(then_type, Type::Pointer(_, _))
+                    || matches!(other_type, Type::Pointer(_, _))
                 {
                     ExpressionNode::get_common_pointer_type(then, other)?
                 } else if matches!(then_type, Type::Struct(_, _))
@@ -234,10 +234,10 @@ impl CheckTypes for ExpressionNode {
             ExpressionWithoutType::Cast(ref mut target, ref mut e) => {
                 e.check_types_and_convert(context)?;
                 let src_type = e.1.as_ref().unwrap();
-                if matches!((&src_type, &target), (&Type::Double, &Type::Pointer(_)))
-                    || matches!((&target, &src_type), (&Type::Double, &Type::Pointer(_)))
-                    || matches!((&src_type, &target), (&Type::Float, &Type::Pointer(_)))
-                    || matches!((&target, &src_type), (&Type::Float, &Type::Pointer(_)))
+                if matches!((&src_type, &target), (&Type::Double, &Type::Pointer(_, _)))
+                    || matches!((&target, &src_type), (&Type::Double, &Type::Pointer(_, _)))
+                    || matches!((&src_type, &target), (&Type::Float, &Type::Pointer(_, _)))
+                    || matches!((&target, &src_type), (&Type::Float, &Type::Pointer(_, _)))
                 {
                     return Err("Cannot cast between Float or Double and Pointer types".into());
                 }
@@ -256,7 +256,7 @@ impl CheckTypes for ExpressionNode {
             }
             ExpressionWithoutType::Dereference(ref mut e) => {
                 e.check_types_and_convert(context)?;
-                if let Type::Pointer(t) = e.1.as_ref().unwrap() {
+                if let Type::Pointer(t, _) = e.1.as_ref().unwrap() {
                     // if !t.is_complete(&mut context.structs) {
                     //     return Err("Cannot dereference a pointer to an incomplete type".into());
                     // }
@@ -271,7 +271,7 @@ impl CheckTypes for ExpressionNode {
                 if !e.0.is_lvalue() {
                     return Err("Can only take address of an object".into());
                 }
-                Type::Pointer(Box::new(e.1.clone().unwrap()))
+                Type::Pointer(Box::new(e.1.clone().unwrap()), false)
             }
             ExpressionWithoutType::Subscript(ref mut src, ref mut inner) => {
                 src.check_types_and_convert(context)?;
@@ -279,13 +279,13 @@ impl CheckTypes for ExpressionNode {
                 let src_type = src.1.as_ref().unwrap();
                 let inner_type = inner.1.as_ref().unwrap();
 
-                if let Type::Pointer(left) = src_type {
+                if let Type::Pointer(left, _) = src_type {
                     if !inner_type.is_integer() || !left.is_complete(&mut context.structs) {
                         return Err("Invalid subscript expression".into());
                     }
                     inner.convert_type(&Type::Long);
                     *left.clone()
-                } else if let Type::Pointer(right) = inner_type {
+                } else if let Type::Pointer(right, _) = inner_type {
                     if !src_type.is_integer() || !right.is_complete(&mut context.structs) {
                         return Err("Invalid subscript expression".into());
                     }
@@ -337,7 +337,7 @@ impl CheckTypes for ExpressionNode {
             }
             ExpressionWithoutType::Arrow(ref mut p, ref mut name) => {
                 p.check_types_and_convert(context)?;
-                if let Type::Pointer(p_type) = p.1.as_ref().unwrap() {
+                if let Type::Pointer(p_type, _) = p.1.as_ref().unwrap() {
                     if let Type::Struct(ref s_name, is_union) = **p_type {
                         let info = context.structs.get(s_name).unwrap().clone();
                         let maybe_member =
@@ -390,7 +390,7 @@ impl ExpressionNode {
                 // VALIDATION: Make sure ++ and -- only operate on variables, not constants or
                 // other expressions, and not pointers to void
                 if !src.0.is_lvalue()
-                    || src.1.as_ref().unwrap() == &Type::Pointer(Box::new(Type::Void))
+                    || matches!(src.1.as_ref(), Some(Type::Pointer(t, _)) if **t == Type::Void)
                     || matches!(src.1.as_ref().unwrap(), Type::Struct(_, _))
                 {
                     return Err(format!(
@@ -464,9 +464,16 @@ impl ExpressionNode {
             Ok(t2.clone())
         } else if e2.equals_null_pointer() {
             Ok(t1.clone())
-        } else if let (Type::Pointer(p1), Type::Pointer(p2)) = (t1, t2) {
+        } else if let (Type::Pointer(p1, left_restricted), Type::Pointer(p2, right_restricted)) =
+            (t1, t2)
+        {
             if **p1 == Type::Void || **p2 == Type::Void {
-                return Ok(Type::Pointer(Box::new(Type::Void)));
+                return Ok(Type::Pointer(
+                    Box::new(Type::Void),
+                    // the resulting pointer is only restricted if both pointers in this expression
+                    // are (at least I think that's how it's meant to work)
+                    *left_restricted && *right_restricted,
+                ));
             } else {
                 Err(format!(
                     "Incompatible types for implicit pointer cast: {:?} and {:?}",
@@ -515,7 +522,7 @@ impl ExpressionNode {
         if !target.is_complete(&mut context.structs) {
             return Err("Can't assign to an incomplete type".into());
         }
-        if self.equals_null_pointer() && matches!(target, Type::Pointer(_)) {
+        if self.equals_null_pointer() && matches!(target, Type::Pointer(_, _)) {
             *self = ExpressionNode(
                 ExpressionWithoutType::Constant(Constant::UnsignedLong(0)),
                 Some(target.clone()),
@@ -525,10 +532,10 @@ impl ExpressionNode {
         let t1 = self.1.as_ref().unwrap();
         if t1 != target {
             if (t1.is_arithmetic() && target.is_arithmetic())
-                || (*t1 == Type::Pointer(Box::new(Type::Void))
-                    && matches!(target, Type::Pointer(_)))
-                || (*target == Type::Pointer(Box::new(Type::Void))
-                    && matches!(t1, Type::Pointer(_)))
+                || (matches!(t1, Type::Pointer(t,_) if **t == Type::Void)
+                    && matches!(target, Type::Pointer(_, _)))
+                || (matches!(target, Type::Pointer(t,_) if **t == Type::Void)
+                    && matches!(t1, Type::Pointer(_, _)))
             {
                 self.convert_type(target);
             } else {
@@ -560,7 +567,7 @@ impl ExpressionNode {
             Some(Type::Array(t, _)) => {
                 *self = ExpressionNode(
                     ExpressionWithoutType::AddressOf(Box::new(self.clone())),
-                    Some(Type::Pointer(t.clone())),
+                    Some(Type::Pointer(t.clone(), false)),
                 )
             }
             Some(Type::Struct(name, is_union)) => {
@@ -592,67 +599,68 @@ impl ExpressionNode {
 
         // Get the common type of this expression
         // also handle ALL pointer arithmetic type-checking cases in this block
-        let (common_type, is_pointer_arithmetic) =
-            if (matches!(left_type, Type::Pointer(_)) || matches!(right_type, Type::Pointer(_))) {
-                match op {
-                    BinaryOperatorNode::Add => {
-                        if left_type.is_complete_pointer(&mut context.structs)
-                            && right_type.is_integer()
-                        {
-                            right.convert_type(&Type::Long);
-                            (left_type.clone(), true)
-                        } else if right_type.is_complete_pointer(&mut context.structs)
-                            && left_type.is_integer()
-                        {
-                            left.convert_type(&Type::Long);
-                            (right_type.clone(), true)
-                        } else {
-                            return Err("Invalid pointer addition".into());
-                        }
+        let (common_type, is_pointer_arithmetic) = if (matches!(left_type, Type::Pointer(_, _))
+            || matches!(right_type, Type::Pointer(_, _)))
+        {
+            match op {
+                BinaryOperatorNode::Add => {
+                    if left_type.is_complete_pointer(&mut context.structs)
+                        && right_type.is_integer()
+                    {
+                        right.convert_type(&Type::Long);
+                        (left_type.clone(), true)
+                    } else if right_type.is_complete_pointer(&mut context.structs)
+                        && left_type.is_integer()
+                    {
+                        left.convert_type(&Type::Long);
+                        (right_type.clone(), true)
+                    } else {
+                        return Err("Invalid pointer addition".into());
                     }
-                    BinaryOperatorNode::Subtract => {
-                        if left_type.is_complete_pointer(&mut context.structs)
-                            && right_type.is_integer()
-                        {
-                            right.convert_type(&Type::Long);
-                            (left_type.clone(), true)
-                        } else if left_type == right_type
-                            && left_type.is_complete_pointer(&mut context.structs)
-                        {
-                            // typedef stuff: for <stddef.h>, this type should be annotated as ptrdiff_t
-                            (Type::Long, true)
-                        } else {
-                            return Err("Invalid pointer subtraction".into());
-                        }
-                    }
-                    BinaryOperatorNode::Less
-                    | BinaryOperatorNode::Greater
-                    | BinaryOperatorNode::LessEqual
-                    | BinaryOperatorNode::GreaterEqual => {
-                        if left_type == right_type {
-                            (left_type.clone(), false)
-                        } else {
-                            return Err("Can't compare pointers with different types".into());
-                        }
-                    }
-                    BinaryOperatorNode::Equal | BinaryOperatorNode::NotEqual => {
-                        (ExpressionNode::get_common_pointer_type(left, right)?, false)
-                    }
-                    BinaryOperatorNode::And | BinaryOperatorNode::Or => (Type::Integer, false),
-                    o => return Err(format!("Invalid pointer operation: {:?}", o).into()),
                 }
-            } else if left_type.is_arithmetic() && right_type.is_arithmetic() {
-                (
-                    ExpressionNode::get_common_type(left, right, &mut context.structs),
-                    false,
-                )
-            } else {
-                return Err(format!(
-                    "Cannot perform binary operation on non-arithmetic types {:?} and {:?}",
-                    left_type, right_type
-                )
-                .into());
-            };
+                BinaryOperatorNode::Subtract => {
+                    if left_type.is_complete_pointer(&mut context.structs)
+                        && right_type.is_integer()
+                    {
+                        right.convert_type(&Type::Long);
+                        (left_type.clone(), true)
+                    } else if left_type == right_type
+                        && left_type.is_complete_pointer(&mut context.structs)
+                    {
+                        // typedef stuff: for <stddef.h>, this type should be annotated as ptrdiff_t
+                        (Type::Long, true)
+                    } else {
+                        return Err("Invalid pointer subtraction".into());
+                    }
+                }
+                BinaryOperatorNode::Less
+                | BinaryOperatorNode::Greater
+                | BinaryOperatorNode::LessEqual
+                | BinaryOperatorNode::GreaterEqual => {
+                    if left_type == right_type {
+                        (left_type.clone(), false)
+                    } else {
+                        return Err("Can't compare pointers with different types".into());
+                    }
+                }
+                BinaryOperatorNode::Equal | BinaryOperatorNode::NotEqual => {
+                    (ExpressionNode::get_common_pointer_type(left, right)?, false)
+                }
+                BinaryOperatorNode::And | BinaryOperatorNode::Or => (Type::Integer, false),
+                o => return Err(format!("Invalid pointer operation: {:?}", o).into()),
+            }
+        } else if left_type.is_arithmetic() && right_type.is_arithmetic() {
+            (
+                ExpressionNode::get_common_type(left, right, &mut context.structs),
+                false,
+            )
+        } else {
+            return Err(format!(
+                "Cannot perform binary operation on non-arithmetic types {:?} and {:?}",
+                left_type, right_type
+            )
+            .into());
+        };
 
         if (!left_type.is_scalar() || !right_type.is_scalar())
             && matches!(op, BinaryOperatorNode::And | BinaryOperatorNode::Or)

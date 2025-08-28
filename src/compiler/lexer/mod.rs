@@ -95,9 +95,8 @@ pub enum Token {
     KeywordStruct,
     KeywordUnion,
     KeywordConst,
-
-    DirectiveAttribute,
-    DirectiveExtension,
+    KeywordRestrict,
+    KeywordInline,
 }
 
 lazy_static! {
@@ -153,12 +152,12 @@ lazy_static! {
                 Token::OpenSquareBracket => r"\[",
                 Token::CloseSquareBracket => r"\]",
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
-                Token::IntegerConstant(_) => r"([0-9]+)[^\w.]",
-                Token::LongConstant(_) => r"([0-9]+[lL])[^\w.]",
-                Token::LongLongConstant(_) => r"([0-9]+(?:ll|LL))[^\w.]",
-                Token::UnsignedIntegerConstant(_) => r"([0-9]+[uU])[^\w.]",
-                Token::UnsignedLongConstant(_) => r"([0-9]+([lL][uU]|[uU][lL]))[^\w.]",
-                Token::UnsignedLongLongConstant(_) => r"([0-9]+((?:ll|LL)[uU]|[uU](?:ll|LL)))[^\w.]",
+                Token::IntegerConstant(_) => r"((?:0x[0-9a-f]+)|(?:[0-9]+))[^\w.]",
+                Token::LongConstant(_) => r"((?:(?:0x[0-9a-f]+)|(?:[0-9]+))[lL])[^\w.]",
+                Token::LongLongConstant(_) => r"((?:(?:0x[0-9a-f]+)|(?:[0-9]+))(?:ll|LL))[^\w.]",
+                Token::UnsignedIntegerConstant(_) => r"((?:(?:0x[0-9a-f]+)|(?:[0-9]+))[uU])[^\w.]",
+                Token::UnsignedLongConstant(_) => r"((?:(?:0x[0-9a-f]+)|(?:[0-9]+))([lL][uU]|[uU][lL]))[^\w.]",
+                Token::UnsignedLongLongConstant(_) => r"((?:(?:0x[0-9a-f]+)|(?:[0-9]+))((?:ll|LL)[uU]|[uU](?:ll|LL)))[^\w.]",
                 Token::FloatConstant(_) => r"((?:(?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[fF])[^\w.]",
                 Token::DoubleConstant(_) => r"((?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]",
                 Token::LongDoubleConstant(_) => r"((?:(?:[0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[lL])[^\w.]",
@@ -199,8 +198,8 @@ lazy_static! {
                 Token::KeywordStruct => r"struct\b",
                 Token::KeywordUnion => r"union\b",
                 Token::KeywordConst => r"const\b",
-                Token::DirectiveAttribute => r"__attribute__\b",
-                Token::DirectiveExtension => r"__extension__\b"
+                Token::KeywordRestrict => r"restrict\b",
+                Token::KeywordInline => r"inline\b"
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
@@ -224,26 +223,65 @@ impl Token {
             Token::StringLiteral(_) => {
                 Token::StringLiteral(Token::parse_string(text[1..text.len() - 1].to_string()))
             }
-            Token::IntegerConstant(_) => Token::IntegerConstant(text.parse::<i64>().unwrap()),
+            Token::IntegerConstant(_) => {
+                if text.starts_with("0x") {
+                    Token::IntegerConstant(
+                        i64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
+                    )
+                } else {
+                    Token::IntegerConstant(text.parse::<i64>().unwrap())
+                }
+            }
             Token::LongConstant(_) => {
-                Token::LongConstant(text.trim_end_matches(['l', 'L']).parse::<i64>().unwrap())
+                let text = text.trim_end_matches(['l', 'L']);
+                if text.starts_with("0x") {
+                    Token::LongConstant(
+                        i64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
+                    )
+                } else {
+                    Token::LongConstant(text.parse::<i64>().unwrap())
+                }
             }
             Token::LongLongConstant(_) => {
-                Token::LongLongConstant(text.trim_end_matches(['l', 'L']).parse::<i64>().unwrap())
+                let text = text.trim_end_matches(['l', 'L']);
+                if text.starts_with("0x") {
+                    Token::LongLongConstant(
+                        i64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
+                    )
+                } else {
+                    Token::LongLongConstant(text.parse::<i64>().unwrap())
+                }
             }
-            Token::UnsignedIntegerConstant(_) => Token::UnsignedIntegerConstant(
-                text.trim_end_matches(['u', 'U']).parse::<u64>().unwrap(),
-            ),
-            Token::UnsignedLongConstant(_) => Token::UnsignedLongConstant(
-                text.trim_end_matches(['l', 'L', 'u', 'U'])
-                    .parse::<u64>()
-                    .unwrap(),
-            ),
-            Token::UnsignedLongLongConstant(_) => Token::UnsignedLongLongConstant(
-                text.trim_end_matches(['l', 'L', 'u', 'U'])
-                    .parse::<u64>()
-                    .unwrap(),
-            ),
+            Token::UnsignedIntegerConstant(_) => {
+                let text = text.trim_end_matches(['u', 'U']);
+                if text.starts_with("0x") {
+                    Token::UnsignedIntegerConstant(
+                        u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
+                    )
+                } else {
+                    Token::UnsignedIntegerConstant(text.parse::<u64>().unwrap())
+                }
+            }
+            Token::UnsignedLongConstant(_) => {
+                let text = text.trim_end_matches(['u', 'U', 'l', 'L']);
+                if text.starts_with("0x") {
+                    Token::UnsignedLongConstant(
+                        u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
+                    )
+                } else {
+                    Token::UnsignedLongConstant(text.parse::<u64>().unwrap())
+                }
+            }
+            Token::UnsignedLongLongConstant(_) => {
+                let text = text.trim_end_matches(['u', 'U', 'l', 'L']);
+                if text.starts_with("0x") {
+                    Token::UnsignedLongLongConstant(
+                        u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
+                    )
+                } else {
+                    Token::UnsignedLongLongConstant(text.parse::<u64>().unwrap())
+                }
+            }
             Token::FloatConstant(_) => {
                 Token::FloatConstant(text.trim_end_matches(['f', 'F']).parse::<f32>().unwrap())
             }

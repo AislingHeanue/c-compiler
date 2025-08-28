@@ -166,7 +166,11 @@ impl Parse<Constant> for VecDeque<Token> {
             Token::DoubleConstant(v) => Ok(Constant::Double(v)),
             Token::LongDoubleConstant(v) => Ok(Constant::LongDouble(v)),
             Token::CharacterConstant(num) => Ok(Constant::Integer(num.into())),
-            _ => unreachable!(),
+            t => Err(format!(
+                "Single token of a constant expression was not a constant, got: {:?}",
+                t
+            )
+            .into()),
         }
     }
 }

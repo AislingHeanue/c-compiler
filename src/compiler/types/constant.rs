@@ -12,7 +12,7 @@ use super::{one_double_is_negative_zero, one_float_is_negative_zero};
 
 impl Constant {
     pub fn static_convert_to(&self, target: &Type) -> StaticInitialiser {
-        if matches!(target, Type::Pointer(_)) {
+        if matches!(target, Type::Pointer(_, _)) {
             self.static_convert_to_pointer()
         } else {
             Constant::static_convert_number_to(self, target)
@@ -78,7 +78,7 @@ impl Constant {
             Type::UnsignedShort => Constant::UnsignedShort(value.try_into().unwrap()),
             Type::UnsignedLongLong => Constant::UnsignedLongLong(value.try_into().unwrap()),
             // adding a constant to a pointer is only reasonable if the second operand is Long
-            Type::Pointer(_) => Constant::Long(value),
+            Type::Pointer(_, _) => Constant::Long(value),
             Type::Char => Constant::Char(value.try_into().unwrap()),
             Type::SignedChar => Constant::Char(value.try_into().unwrap()),
             Type::UnsignedChar => Constant::UnsignedChar(value.try_into().unwrap()),
@@ -158,7 +158,7 @@ impl Constant {
             Type::LongDouble => self.to_long_double(),
             Type::Function(_, _) => unreachable!(),
             Type::Array(_, _) => unreachable!(),
-            Type::Pointer(_) => self.to_long(),
+            Type::Pointer(_, _) => self.to_long(),
             Type::Char => self.to_char(),
             Type::SignedChar => self.to_char(),
             Type::UnsignedChar => self.to_uchar(),

@@ -19,7 +19,7 @@ impl CheckTypes for Type {
                 }
                 inner.check_types(context)?
             }
-            Type::Pointer(inner) => inner.check_types(context)?,
+            Type::Pointer(inner, _) => inner.check_types(context)?,
             _ => {}
         }
         Ok(())

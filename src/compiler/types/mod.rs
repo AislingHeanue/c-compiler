@@ -24,7 +24,8 @@ pub enum Type {
     Function(Box<Type>, Vec<Type>),
     // type and length
     Array(Box<Type>, u64),
-    Pointer(Box<Type>),
+    // bool denotes whether the pointer is marked as restricted
+    Pointer(Box<Type>, bool),
     Char,
     SignedChar,
     UnsignedChar,
@@ -67,7 +68,7 @@ pub enum StorageInfo {
     Automatic,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StorageClass {
     Static,
     Extern,

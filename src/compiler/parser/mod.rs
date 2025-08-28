@@ -226,7 +226,9 @@ pub struct StructInfo {
 #[derive(Debug)]
 pub enum Declarator {
     Name(String),
-    Pointer(Box<Declarator>),
+    // bool denotes whether the pointer declaration is marked as 'restrict'
+    // See https://en.wikipedia.org/wiki/Restrict
+    Pointer(Box<Declarator>, bool),
     // params info and any further declarator to apply to the parent type
     Function(
         Box<Declarator>,
@@ -238,7 +240,8 @@ pub enum Declarator {
 
 #[derive(Debug)]
 pub enum AbstractDeclarator {
-    Pointer(Box<AbstractDeclarator>),
+    // is_restricted
+    Pointer(Box<AbstractDeclarator>, bool),
     Array(Box<AbstractDeclarator>, u64),
     Base,
 }

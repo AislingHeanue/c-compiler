@@ -51,7 +51,7 @@ impl StaticInitialiser {
             Type::SignedChar => StaticInitialiser::char_from_double(i),
             Type::UnsignedChar => StaticInitialiser::unsigned_char_from_double(i),
             Type::Function(_, _) => unreachable!(),
-            Type::Pointer(_) => unreachable!(),
+            Type::Pointer(_, _) => unreachable!(),
             Type::Array(..) => unreachable!(),
             Type::Void => unreachable!(),
             Type::Struct(_, _) => unreachable!(),
@@ -74,7 +74,7 @@ impl StaticInitialiser {
             Type::Char => StaticInitialiser::char(i),
             Type::SignedChar => StaticInitialiser::char(i),
             Type::UnsignedChar => StaticInitialiser::unsigned_char(i),
-            Type::Pointer(_) | Type::Array(..) => {
+            Type::Pointer(_, _) | Type::Array(..) => {
                 let value = StaticInitialiser::unsigned_long(i);
                 if !matches!(
                     value,

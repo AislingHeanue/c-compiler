@@ -35,7 +35,7 @@ impl InitialiserNode {
         context: &mut ValidateContext,
     ) -> Result<Vec<StaticInitialiser>, Box<dyn Error>> {
         let init_list: Vec<StaticInitialiser> = match (target_type, self.0.clone()) {
-            (Type::Pointer(t), InitialiserWithoutType::Single(init_e))
+            (Type::Pointer(t, _), InitialiserWithoutType::Single(init_e))
                 if init_e.is_string_literal() =>
             {
                 if **t != Type::Char {
@@ -91,7 +91,7 @@ impl InitialiserNode {
                 );
             }
             (_, InitialiserWithoutType::Single(ref i)) => {
-                if matches!(target_type, Type::Pointer(_)) && !i.equals_null_pointer() {
+                if matches!(target_type, Type::Pointer(_, _)) && !i.equals_null_pointer() {
                     return Err("Cannot initialise a static pointer with a non-pointer type".into());
                 }
                 let c = if let ExpressionWithoutType::Constant(c) = &i.0 {
@@ -329,7 +329,7 @@ impl InitialiserNode {
                 Some(target_type.clone()),
             ),
             Type::Function(_, _) => unreachable!(),
-            Type::Pointer(_) => InitialiserNode(
+            Type::Pointer(_, _) => InitialiserNode(
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::UnsignedLong(0)),
                     Some(target_type.clone()),

@@ -17,47 +17,29 @@ use std::{collections::VecDeque, error::Error};
 
 impl Parse<DeclarationNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<DeclarationNode, Box<dyn Error>> {
-        // kill any top-level references to compiler extensions that we don't know how to handle
-        while !self.is_empty() && self.peek()? == Token::DirectiveExtension {
-            println!("Ignoring an 'extension' directive");
-            self.read()?;
-        }
-
         // take the storage class out of the type definition (assuming there is only one, since
         // otherwise that's an error)
-        let (_, specifier_loc, constant_loc) = self.clone().pop_tokens_for_type(context)?;
+        let (_, specifier_locations) = self.clone().pop_tokens_for_type(context)?;
 
-        let (storage_class, _is_constant) = match (specifier_loc, constant_loc) {
-            (None, None) => (None, false),
-            (Some(i), Some(j)) => {
-                let removed_storage;
-                // have to remove the higher index first
-                if i < j {
-                    self.remove(j);
-                    removed_storage = self.remove(i);
-                } else {
-                    removed_storage = self.remove(i);
-                    self.remove(j);
-                }
-                match removed_storage.unwrap() {
-                    Token::KeywordStatic => (Some(StorageClass::Static), true),
-                    Token::KeywordExtern => (Some(StorageClass::Extern), true),
+        let mut _is_constant = false;
+        let mut _is_inline = false;
+        let mut storage_class = None;
+        specifier_locations
+            .values()
+            .sorted_by(|v1, v2| v1.cmp(v2))
+            .rev()
+            .for_each(|v| {
+                let removed = self.remove(*v);
+                match removed.unwrap() {
+                    Token::KeywordInline => _is_inline = true,
+                    Token::KeywordConst => _is_constant = true,
+                    Token::KeywordStatic => storage_class = Some(StorageClass::Static),
+                    Token::KeywordExtern => storage_class = Some(StorageClass::Extern),
                     _ => unreachable!(),
                 }
-            }
-            (Some(i), None) => {
-                let removed_storage = self.remove(i);
-                match removed_storage.unwrap() {
-                    Token::KeywordStatic => (Some(StorageClass::Static), false),
-                    Token::KeywordExtern => (Some(StorageClass::Extern), false),
-                    _ => unreachable!(),
-                }
-            }
-            (None, Some(j)) => {
-                self.remove(j);
-                (None, true)
-            }
-        };
+            });
+
+        let must_have_body = _is_constant && storage_class != Some(StorageClass::Extern);
 
         let (base_type, declarator, struct_declaration): (
             Type,
@@ -144,7 +126,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
         let out_type = declarator_output.out_type;
         let param_names = declarator_output.param_names.unwrap_or(Vec::new());
 
-        match out_type {
+        let out = match out_type {
             Type::Function(_, ref param_types) => {
                 let name = DeclarationNode::new_identifier(
                     declarator_output.name,
@@ -233,7 +215,24 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                     _ => Err("Invalid token in variable declaration".into()),
                 }
             }
+        };
+        if must_have_body {
+            if let Ok(ref out) = out {
+                match out {
+                    DeclarationNode::Variable(v) if v.init.is_none() => {
+                        return Err("Const variable declaration must have a value".into())
+                    }
+                    DeclarationNode::Function(f) if f.body.is_none() => {
+                        return Err("Const function declaration must have a value".into())
+                    }
+                    DeclarationNode::Type(_) | DeclarationNode::Struct(_) => {
+                        return Err("Const declaration must have a value".into())
+                    }
+                    _ => {}
+                }
+            }
         }
+        out
     }
 }
 

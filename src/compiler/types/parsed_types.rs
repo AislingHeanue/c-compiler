@@ -28,7 +28,7 @@ impl Type {
             Type::UnsignedLong => 8,
             Type::UnsignedShort => 2,
             Type::UnsignedLongLong => 8,
-            Type::Pointer(_) => 8, // pointer is stored like u64
+            Type::Pointer(_, _) => 8, // pointer is stored like u64
             Type::Char => 1,
             Type::SignedChar => 1,
             Type::UnsignedChar => 1,
@@ -110,7 +110,7 @@ impl Type {
     }
 
     pub fn is_complete_pointer(&self, structs: &mut HashMap<String, StructInfo>) -> bool {
-        if let Type::Pointer(p1) = self {
+        if let Type::Pointer(p1, _) = self {
             p1.is_complete(structs)
         } else {
             false

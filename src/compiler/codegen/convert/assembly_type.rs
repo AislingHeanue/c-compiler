@@ -15,7 +15,7 @@ impl Convert<AssemblyType> for Type {
             Type::UnsignedInteger => Ok(AssemblyType::Longword),
             Type::UnsignedLong | Type::UnsignedLongLong => Ok(AssemblyType::Quadword),
             Type::UnsignedShort => Ok(AssemblyType::Word),
-            Type::Pointer(_) => Ok(AssemblyType::Quadword),
+            Type::Pointer(_, _) => Ok(AssemblyType::Quadword),
             Type::Float => Ok(AssemblyType::Float),
             Type::Double => Ok(AssemblyType::Double),
             Type::LongDouble => Ok(AssemblyType::Double),

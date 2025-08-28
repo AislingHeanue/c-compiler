@@ -53,7 +53,7 @@ lazy_static! {
         for token in PreprocessorToken::iter() {
             let entry:&str = match token {
                 PreprocessorToken::Identifier(_) => r"^[a-zA-Z_]\w*\b",
-                PreprocessorToken::Number(_) => r#"\.?[0-9](?:[0-9]|[eEpP][\+\-])*(?:[lL]?[lL]?[uU]?|[uU][lL]?[lL]?)"#,
+                PreprocessorToken::Number(_) => r#"\.?[0-9](?:[0-9a-zA-Z_\.]|[eEpP][\+\-])*(?:[lL]?[lL]?[uU]?|[uU][lL]?[lL]?)"#,
                 PreprocessorToken::CharacterConstant(_) => r#"'(?:[^'\\\n]|\\['"?\\abfnrtv0-9]+)'"#,
                 PreprocessorToken::StringLiteral(_) => r#""(?:[^"\\\n]|\\['"?\\abfnrtv])*""#,
                 PreprocessorToken::KeywordDefined => r"defined\b",

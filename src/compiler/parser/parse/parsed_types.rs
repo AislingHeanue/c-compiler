@@ -3,7 +3,10 @@ use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::{Declarator, ExpressionWithoutType, StructDeclaration},
 };
-use std::{collections::VecDeque, error::Error};
+use std::{
+    collections::{hash_map::Entry, HashMap, VecDeque},
+    error::Error,
+};
 
 impl Parse<Type> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Type, Box<dyn Error>> {
@@ -243,16 +246,18 @@ impl Parse<StructMember> for VecDeque<Token> {
 
 impl Parse<OutputWithStruct> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<OutputWithStruct, Box<dyn Error>> {
-        let (mut types_deque, storage, constant_location) = self.pop_tokens_for_type(context)?;
+        let (mut types_deque, specifier_locations) = self.pop_tokens_for_type(context)?;
 
         // DeclarationNode should already filter out any instances of static and extern from this
         // list. Otherwise thrown an error here since that means there are either too many
         // specifiers, or a specifier is used in a bad place.
-        if storage.is_some() {
+        if specifier_locations.contains_key(&SpecifierKind::Storage)
+            || specifier_locations.contains_key(&SpecifierKind::Inline)
+        {
             return Err("Illegal use of storage specifiers in this type".into());
         }
-        let _is_constant = if let Some(loc) = constant_location {
-            types_deque.remove(loc);
+        let _is_constant = if let Some(loc) = specifier_locations.get(&SpecifierKind::Const) {
+            types_deque.remove(*loc);
             true
         } else {
             false
@@ -306,7 +311,13 @@ impl Parse<OutputWithStruct> for VecDeque<Token> {
     }
 }
 
-pub type TypeResults = (VecDeque<Token>, Option<usize>, Option<usize>);
+pub type TypeResults = (VecDeque<Token>, HashMap<SpecifierKind, usize>);
+#[derive(PartialEq, Eq, Hash)]
+pub enum SpecifierKind {
+    Const,
+    Storage,
+    Inline,
+}
 
 pub trait PopForType {
     fn pop_tokens_for_type(
@@ -322,8 +333,7 @@ impl PopForType for VecDeque<Token> {
         context: &mut ParseContext,
     ) -> Result<TypeResults, Box<dyn Error>> {
         let mut types_deque = VecDeque::new();
-        let mut storage_loc = None;
-        let mut const_loc = None;
+        let mut specifier_locations = HashMap::new();
         while self.peek()?.is_start_of_declaration(context) {
             match self.peek()? {
                 Token::KeywordStruct | Token::KeywordUnion => {
@@ -353,18 +363,26 @@ impl PopForType for VecDeque<Token> {
                     // DONE READING A STRUCT TYPE //
                 }
                 Token::KeywordStatic | Token::KeywordExtern => {
-                    if storage_loc.is_some() {
-                        return Err("Encountered more than one storage specifier in a type".into());
+                    if let Entry::Vacant(e) = specifier_locations.entry(SpecifierKind::Storage) {
+                        e.insert(types_deque.len());
                     } else {
-                        storage_loc = Some(types_deque.len());
+                        return Err("Encountered more than one storage specifier in a type".into());
                     }
                     types_deque.push_back(self.read()?);
                 }
                 Token::KeywordConst => {
-                    if const_loc.is_some() {
-                        return Err("Encountered more than one storage specifier in a type".into());
+                    if let Entry::Vacant(e) = specifier_locations.entry(SpecifierKind::Const) {
+                        e.insert(types_deque.len());
                     } else {
-                        const_loc = Some(types_deque.len());
+                        return Err("Encountered more than one const specifier in a type".into());
+                    }
+                    types_deque.push_back(self.read()?);
+                }
+                Token::KeywordInline => {
+                    if let Entry::Vacant(e) = specifier_locations.entry(SpecifierKind::Inline) {
+                        e.insert(types_deque.len());
+                    } else {
+                        return Err("Encountered more than one inline specifier in a type".into());
                     }
                     types_deque.push_back(self.read()?);
                 }
@@ -373,7 +391,7 @@ impl PopForType for VecDeque<Token> {
                 }
             }
         }
-        Ok((types_deque, storage_loc, const_loc))
+        Ok((types_deque, specifier_locations))
     }
 }
 
@@ -401,7 +419,10 @@ impl Token {
         self.is_type(context)
             || matches!(
                 self,
-                Token::KeywordStatic | Token::KeywordExtern | Token::KeywordConst
+                Token::KeywordStatic
+                    | Token::KeywordExtern
+                    | Token::KeywordConst
+                    | Token::KeywordInline
             )
     }
 

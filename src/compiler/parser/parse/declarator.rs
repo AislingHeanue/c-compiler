@@ -12,20 +12,6 @@ impl Parse<Declarator> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Declarator, Box<dyn Error>> {
         let declarator = self.parse_full_declarator(context)?;
 
-        while !self.is_empty() && self.peek()? == Token::DirectiveAttribute {
-            println!("Unrecognised compiler directive detected. Ignoring everything it says.");
-            self.expect(Token::DirectiveAttribute)?;
-            self.expect(Token::OpenParen)?;
-            let mut nesting_count = 1;
-            while nesting_count != 0 {
-                match self.read()? {
-                    Token::OpenParen => nesting_count += 1,
-                    Token::CloseParen => nesting_count -= 1,
-                    _ => {}
-                }
-            }
-        }
-
         Ok(declarator)
     }
 }
@@ -73,7 +59,13 @@ impl ParseDeclarator for VecDeque<Token> {
         match self.peek()? {
             Token::Star => {
                 self.expect(Token::Star)?;
-                Ok(Declarator::Pointer(Box::new(self.parse(context)?)))
+                match self.peek()? {
+                    Token::KeywordRestrict => {
+                        self.expect(Token::KeywordRestrict)?;
+                        Ok(Declarator::Pointer(Box::new(self.parse(context)?), true))
+                    }
+                    _ => Ok(Declarator::Pointer(Box::new(self.parse(context)?), false)),
+                }
             }
             _ => {
                 let mut simple_declarator = self.parse_simple_declarator(context)?;
@@ -215,9 +207,9 @@ impl Declarator {
                 param_names: None,
                 struct_declarations: Vec::new(),
             }),
-            Declarator::Pointer(declarator) => {
+            Declarator::Pointer(declarator, is_restricted) => {
                 // discard param names, function pointers aren't real
-                declarator.apply_to_type(Type::Pointer(Box::new(base_type)))
+                declarator.apply_to_type(Type::Pointer(Box::new(base_type), is_restricted))
             }
             Declarator::Function(declarator, params) => {
                 let name = if let Declarator::Name(name) = *declarator {

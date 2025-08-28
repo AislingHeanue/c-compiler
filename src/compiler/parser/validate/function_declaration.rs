@@ -66,7 +66,7 @@ impl CheckTypes for FunctionDeclaration {
                 );
             }
             if let Type::Array(t, _size) = arg {
-                *arg = Type::Pointer(t.clone())
+                *arg = Type::Pointer(t.clone(), false)
             };
         }
 
@@ -123,7 +123,7 @@ impl CheckTypes for FunctionDeclaration {
         if self.body.is_some() {
             for (param, arg) in self.params.iter().zip(arg_types.iter()) {
                 let converted_arg = match arg {
-                    Type::Array(t, _size) => Type::Pointer(t.clone()),
+                    Type::Array(t, _size) => Type::Pointer(t.clone(), false),
                     _ => arg.clone(),
                 };
                 context.symbols.insert(

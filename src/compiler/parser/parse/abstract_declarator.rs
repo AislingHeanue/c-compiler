@@ -10,7 +10,19 @@ impl Parse<AbstractDeclarator> for VecDeque<Token> {
         match self.peek()? {
             Token::Star => {
                 self.expect(Token::Star)?;
-                Ok(AbstractDeclarator::Pointer(Box::new(self.parse(context)?)))
+                match self.peek()? {
+                    Token::KeywordRestrict => {
+                        self.expect(Token::KeywordRestrict)?;
+                        Ok(AbstractDeclarator::Pointer(
+                            Box::new(self.parse(context)?),
+                            true,
+                        ))
+                    }
+                    _ => Ok(AbstractDeclarator::Pointer(
+                        Box::new(self.parse(context)?),
+                        false,
+                    )),
+                }
             }
             _ => Ok(self.parse_direct(context)?),
         }
@@ -92,8 +104,8 @@ impl AbstractDeclarator {
         // returns the type, name and list of parameter names associated with the type
     ) -> Result<Type, Box<dyn Error>> {
         match self {
-            AbstractDeclarator::Pointer(a) => {
-                Ok(a.apply_to_type(Type::Pointer(Box::new(base_type)))?)
+            AbstractDeclarator::Pointer(a, is_restricted) => {
+                Ok(a.apply_to_type(Type::Pointer(Box::new(base_type), is_restricted))?)
             }
             AbstractDeclarator::Array(a, size) => {
                 Ok(a.apply_to_type(Type::Array(Box::new(base_type), size))?)
