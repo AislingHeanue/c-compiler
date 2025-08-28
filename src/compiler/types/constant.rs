@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::compiler::{
-    parser::StructInfo,
+    parser::{ExpressionNode, ExpressionWithoutType, StructInfo},
     types::{ComparableStatic, Constant, StaticInitialiser, Type},
 };
 
@@ -110,9 +110,13 @@ impl Constant {
         matches!(
             self,
             Constant::Integer(0)
+                | Constant::Short(0)
                 | Constant::Long(0)
+                | Constant::LongLong(0)
                 | Constant::UnsignedInteger(0)
+                | Constant::UnsignedShort(0)
                 | Constant::UnsignedLong(0)
+                | Constant::UnsignedLongLong(0)
                 | Constant::Double(0.0)
                 | Constant::Char(0)
                 | Constant::UnsignedChar(0)
@@ -168,6 +172,66 @@ impl Constant {
             Type::UnsignedShort => self.to_ushort(),
             Type::LongLong => self.to_long_long(),
             Type::UnsignedLongLong => self.to_ulong_long(),
+        }
+    }
+
+    pub fn value_unsigned(self) -> u64 {
+        match self {
+            Constant::Integer(i) => i.try_into().unwrap(),
+            Constant::Long(i) => i.try_into().unwrap(),
+            Constant::LongLong(i) => i.try_into().unwrap(),
+            Constant::Short(i) => i.try_into().unwrap(),
+            Constant::UnsignedInteger(i) => i.into(),
+            Constant::UnsignedLong(i) => i,
+            Constant::UnsignedLongLong(i) => i,
+            Constant::UnsignedShort(i) => i.into(),
+            Constant::Float(_) => unreachable!(),
+            Constant::Double(_) => unreachable!(),
+            Constant::LongDouble(_) => unreachable!(),
+            Constant::Char(i) => i.try_into().unwrap(),
+            Constant::UnsignedChar(i) => i.into(),
+        }
+    }
+
+    pub fn convert_to_common_type(left: &mut Constant, right: &mut Constant) {
+        let left_t = left.get_type();
+        let right_t = left.get_type();
+        let mut structs = HashMap::new();
+
+        // this is a bit of a hack to reproduce some of the functionality of the type-checking
+        // stage early, without a load of code duplication.
+        let common_type = ExpressionNode::get_common_type(
+            &ExpressionNode(
+                ExpressionWithoutType::Constant(left.clone()),
+                Some(left_t),
+                true,
+            ),
+            &ExpressionNode(
+                ExpressionWithoutType::Constant(right.clone()),
+                Some(right_t),
+                true,
+            ),
+            &mut structs,
+        );
+        *left = left.convert_to(&common_type);
+        *right = right.convert_to(&common_type);
+    }
+
+    pub fn get_type(&self) -> Type {
+        match self {
+            Constant::Integer(_) => Type::Integer,
+            Constant::Long(_) => Type::Long,
+            Constant::LongLong(_) => Type::LongLong,
+            Constant::Short(_) => Type::Short,
+            Constant::UnsignedInteger(_) => Type::UnsignedInteger,
+            Constant::UnsignedLong(_) => Type::UnsignedLongLong,
+            Constant::UnsignedLongLong(_) => Type::UnsignedInteger,
+            Constant::UnsignedShort(_) => Type::UnsignedShort,
+            Constant::Float(_) => Type::Float,
+            Constant::Double(_) => Type::Double,
+            Constant::LongDouble(_) => Type::LongDouble,
+            Constant::Char(_) => Type::Char,
+            Constant::UnsignedChar(_) => Type::UnsignedChar,
         }
     }
 

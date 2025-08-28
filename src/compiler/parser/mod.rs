@@ -21,6 +21,9 @@ pub struct ProgramNode {
 pub struct FunctionDeclaration {
     pub function_type: Type,
     pub name: String,
+    pub _inline: bool,
+    pub output_const: bool,
+    pub output_volatile: bool,
     pub params: Vec<String>,
     pub body: Option<Vec<BlockItemNode>>,
     pub storage_class: Option<StorageClass>,
@@ -28,12 +31,14 @@ pub struct FunctionDeclaration {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ExpressionNode(pub ExpressionWithoutType, pub Option<Type>);
+pub struct ExpressionNode(pub ExpressionWithoutType, pub Option<Type>, pub bool);
 
 #[derive(Debug)]
 pub struct VariableDeclaration {
     pub variable_type: Type,
     pub name: String,
+    pub constant: bool,
+    pub volatile: bool,
     pub init: Option<InitialiserNode>,
     pub storage_class: Option<StorageClass>,
     // variable declarations may also include an inline struct declaration, make sure to include
@@ -235,14 +240,14 @@ pub enum Declarator {
         Vec<(Type, Declarator, Option<StructDeclaration>)>,
     ),
     // containing type and size
-    Array(Box<Declarator>, u64),
+    Array(Box<Declarator>, ExpressionWithoutType),
 }
 
 #[derive(Debug)]
 pub enum AbstractDeclarator {
     // is_restricted
     Pointer(Box<AbstractDeclarator>, bool),
-    Array(Box<AbstractDeclarator>, u64),
+    Array(Box<AbstractDeclarator>, ExpressionWithoutType),
     Base,
 }
 

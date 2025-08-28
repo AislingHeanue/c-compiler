@@ -638,6 +638,8 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                             )]),
                             false,
                         ),
+                        constant: true,
+                        volatile: false,
                     },
                 );
 

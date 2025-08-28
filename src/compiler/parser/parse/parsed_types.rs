@@ -228,7 +228,7 @@ impl Parse<StructMember> for VecDeque<Token> {
                     Option<StructDeclaration>,
                 ) = self.parse(context)?;
                 self.expect(Token::SemiColon)?;
-                let declarator_output = declarator.apply_to_type(base_type)?;
+                let declarator_output = declarator.apply_to_type(base_type, context)?;
 
                 if let Type::Function(_, _) = declarator_output.out_type {
                     Err("A struct member may not have a function type".into())
@@ -317,6 +317,7 @@ pub enum SpecifierKind {
     Const,
     Storage,
     Inline,
+    Volatile,
 }
 
 pub trait PopForType {
@@ -386,6 +387,14 @@ impl PopForType for VecDeque<Token> {
                     }
                     types_deque.push_back(self.read()?);
                 }
+                Token::KeywordVolatile => {
+                    if let Entry::Vacant(e) = specifier_locations.entry(SpecifierKind::Volatile) {
+                        e.insert(types_deque.len());
+                    } else {
+                        return Err("Encountered more than one inline specifier in a type".into());
+                    }
+                    types_deque.push_back(self.read()?);
+                }
                 _ => {
                     types_deque.push_back(self.read()?);
                 }
@@ -423,6 +432,7 @@ impl Token {
                     | Token::KeywordExtern
                     | Token::KeywordConst
                     | Token::KeywordInline
+                    | Token::KeywordVolatile
             )
     }
 

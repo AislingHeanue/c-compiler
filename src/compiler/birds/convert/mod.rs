@@ -80,6 +80,8 @@ fn new_temp_variable(type_to_store: &Type, context: &mut ConvertContext) -> Bird
         SymbolInfo {
             symbol_type: type_to_store.clone(),
             storage: StorageInfo::Automatic,
+            constant: false,
+            volatile: false,
         },
     );
 

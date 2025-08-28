@@ -110,21 +110,7 @@ impl BirdsValueNode {
 
     pub fn get_type(&self, symbols: &HashMap<String, SymbolInfo>) -> Type {
         match self {
-            BirdsValueNode::Constant(constant) => match constant {
-                Constant::Integer(_) => Type::Integer,
-                Constant::Long(_) => Type::Long,
-                Constant::LongLong(_) => Type::LongLong,
-                Constant::UnsignedInteger(_) => Type::UnsignedInteger,
-                Constant::UnsignedLong(_) => Type::UnsignedLong,
-                Constant::UnsignedLongLong(_) => Type::UnsignedLongLong,
-                Constant::Float(_) => Type::Float,
-                Constant::Double(_) => Type::Double,
-                Constant::LongDouble(_) => Type::LongDouble,
-                Constant::Char(_) => Type::Char,
-                Constant::UnsignedChar(_) => Type::UnsignedChar,
-                Constant::Short(_) => Type::Short,
-                Constant::UnsignedShort(_) => Type::UnsignedShort,
-            },
+            BirdsValueNode::Constant(constant) => constant.get_type(),
             BirdsValueNode::Var(v) => symbols.get(v).unwrap().symbol_type.clone(),
         }
     }

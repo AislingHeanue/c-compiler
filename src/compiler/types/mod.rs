@@ -145,6 +145,8 @@ pub enum ComparableStatic {
 pub struct SymbolInfo {
     pub symbol_type: Type,
     pub storage: StorageInfo,
+    pub constant: bool,
+    pub volatile: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

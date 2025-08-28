@@ -21,8 +21,9 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
         // otherwise that's an error)
         let (_, specifier_locations) = self.clone().pop_tokens_for_type(context)?;
 
-        let mut _is_constant = false;
-        let mut _is_inline = false;
+        let mut is_inline = false;
+        let mut is_constant = false;
+        let mut is_volatile = false;
         let mut storage_class = None;
         specifier_locations
             .values()
@@ -31,15 +32,16 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
             .for_each(|v| {
                 let removed = self.remove(*v);
                 match removed.unwrap() {
-                    Token::KeywordInline => _is_inline = true,
-                    Token::KeywordConst => _is_constant = true,
+                    Token::KeywordVolatile => is_volatile = true,
+                    Token::KeywordInline => is_inline = true,
+                    Token::KeywordConst => is_constant = true,
                     Token::KeywordStatic => storage_class = Some(StorageClass::Static),
                     Token::KeywordExtern => storage_class = Some(StorageClass::Extern),
                     _ => unreachable!(),
                 }
             });
 
-        let must_have_body = _is_constant && storage_class != Some(StorageClass::Extern);
+        let must_have_body = is_constant && storage_class != Some(StorageClass::Extern);
 
         let (base_type, declarator, struct_declaration): (
             Type,
@@ -54,7 +56,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                 let (base_type, declarator, struct_declaration): OutputWithStruct =
                     self.parse(context)?;
                 self.expect(Token::SemiColon)?;
-                let declarator_output = declarator.apply_to_type(base_type)?;
+                let declarator_output = declarator.apply_to_type(base_type, context)?;
 
                 let out_type = declarator_output.out_type;
                 let name = declarator_output.name;
@@ -121,7 +123,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
             }
         };
 
-        let declarator_output = declarator.apply_to_type(base_type)?;
+        let declarator_output = declarator.apply_to_type(base_type, context)?;
 
         let out_type = declarator_output.out_type;
         let param_names = declarator_output.param_names.unwrap_or(Vec::new());
@@ -171,6 +173,9 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         body: Some(body),
                         storage_class,
                         struct_declarations: declarator_output.struct_declarations,
+                        _inline: is_inline,
+                        output_const: is_constant,
+                        output_volatile: is_volatile,
                     }))
                 } else {
                     self.expect(Token::SemiColon)?;
@@ -181,6 +186,9 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         body: None,
                         storage_class,
                         struct_declarations: declarator_output.struct_declarations,
+                        _inline: is_inline,
+                        output_const: is_constant,
+                        output_volatile: is_volatile,
                     }))
                 }
             }
@@ -203,6 +211,8 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                             init: Some(initialiser),
                             storage_class,
                             struct_declaration,
+                            constant: is_constant,
+                            volatile: is_volatile,
                         }))
                     }
                     Token::SemiColon => Ok(DeclarationNode::Variable(VariableDeclaration {
@@ -211,6 +221,8 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         init: None,
                         storage_class,
                         struct_declaration,
+                        constant: is_constant,
+                        volatile: is_volatile,
                     })),
                     _ => Err("Invalid token in variable declaration".into()),
                 }

@@ -142,7 +142,15 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
 
                     let src_type = src.get_type(&context.symbols);
                     let dst_type = dst.get_type(&context.symbols);
-                    if src_type == dst_type
+                    // DO NOT propagate copies that are into volatile variables, because there
+                    // is no guarantee that this value will remain the same, ever.
+                    let dst_is_volatile = if let BirdsValueNode::Var(name) = dst {
+                         context.symbols.get(name).unwrap().volatile
+                    } else {
+                        false
+                    };
+
+                    if  !dst_is_volatile && src_type == dst_type
                         || (src_type.is_signed() && dst_type.is_signed())
                         || (!src_type.is_signed() && !dst_type.is_signed())
                     {

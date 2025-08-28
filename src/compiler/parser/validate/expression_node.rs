@@ -108,6 +108,7 @@ impl CheckTypes for ExpressionNode {
                     .get(name)
                     .expect("Var should have been defined");
 
+                self.2 = type_info.constant;
                 match &type_info.symbol_type {
                     Type::Function(_, _) => {
                         return Err("Function has been defined as a variable".into())
@@ -115,21 +116,12 @@ impl CheckTypes for ExpressionNode {
                     t => t.clone(),
                 }
             }
-            ExpressionWithoutType::Constant(ref c) => match c {
-                Constant::Integer(_) => Type::Integer,
-                Constant::Long(_) => Type::Long,
-                Constant::UnsignedInteger(_) => Type::UnsignedInteger,
-                Constant::UnsignedLong(_) => Type::UnsignedLong,
-                Constant::Float(_) => Type::Float,
-                Constant::Double(_) => Type::Double,
-                Constant::LongDouble(_) => Type::LongDouble,
-                Constant::Char(_) => Type::Char,
-                Constant::UnsignedChar(_) => Type::UnsignedChar,
-                Constant::Short(_) => unreachable!(), // parsed doubles don't actually exist
-                Constant::UnsignedShort(_) => unreachable!(),
-                Constant::LongLong(_) => Type::Long,
-                Constant::UnsignedLongLong(_) => Type::UnsignedLongLong,
-            },
+            ExpressionWithoutType::Constant(ref c) => {
+                // marking that this is a constant
+                self.2 = true;
+                c.get_type()
+            }
+
             ExpressionWithoutType::Unary(ref op, ref mut src) => {
                 src.check_types_and_convert(context)?;
                 if matches!(
@@ -166,6 +158,11 @@ impl CheckTypes for ExpressionNode {
             ) => {
                 left.check_types_and_convert(context)?;
                 right.check_types_and_convert(context)?;
+
+                if left.2 {
+                    return Err("Can't preform a compound operation on a constant".into());
+                }
+
                 let mut left_clone = left.clone();
                 left_clone.promote(context)?;
                 right.promote(context)?;
@@ -189,6 +186,9 @@ impl CheckTypes for ExpressionNode {
             }
             ExpressionWithoutType::Assignment(ref mut dst, ref mut src) => {
                 dst.check_types_and_convert(context)?;
+                if dst.2 {
+                    return Err("Cannot assign to a constant after initial declaration".into());
+                }
                 src.check_types_and_convert(context)?;
                 src.convert_type_by_assignment(dst.1.as_ref().unwrap(), context)?;
                 dst.1.clone().unwrap()
@@ -417,7 +417,7 @@ impl ExpressionNode {
 
     // See System V ABI list of rules for how to reconcile types of various sizes
     // C Spec 6.3.1.8, Paragraph 1
-    fn get_common_type(
+    pub fn get_common_type(
         e1: &ExpressionNode,
         e2: &ExpressionNode,
         structs: &mut HashMap<String, StructInfo>,
@@ -507,6 +507,7 @@ impl ExpressionNode {
             *self = ExpressionNode(
                 ExpressionWithoutType::Cast(target.clone(), Box::new(self.clone())),
                 Some(target.clone()),
+                false,
             )
         }
     }
@@ -526,6 +527,7 @@ impl ExpressionNode {
             *self = ExpressionNode(
                 ExpressionWithoutType::Constant(Constant::UnsignedLong(0)),
                 Some(target.clone()),
+                false,
             );
             return Ok(());
         }
@@ -568,6 +570,7 @@ impl ExpressionNode {
                 *self = ExpressionNode(
                     ExpressionWithoutType::AddressOf(Box::new(self.clone())),
                     Some(Type::Pointer(t.clone(), false)),
+                    false,
                 )
             }
             Some(Type::Struct(name, is_union)) => {
@@ -711,11 +714,12 @@ impl ExpressionNode {
             | BinaryOperatorNode::Divide
             | BinaryOperatorNode::BitwiseAnd
             | BinaryOperatorNode::BitwiseXor
+            | BinaryOperatorNode::Mod
             | BinaryOperatorNode::BitwiseOr => common_type,
-            // types which don't convert the right type (TODO: why is Mod here?)
-            BinaryOperatorNode::ShiftLeft
-            | BinaryOperatorNode::ShiftRight
-            | BinaryOperatorNode::Mod => left.1.clone().unwrap(),
+            // types which don't convert the right type
+            BinaryOperatorNode::ShiftLeft | BinaryOperatorNode::ShiftRight => {
+                left.1.clone().unwrap()
+            }
             // logical
             BinaryOperatorNode::And
             | BinaryOperatorNode::Or

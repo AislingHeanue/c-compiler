@@ -93,6 +93,8 @@ impl VariableDeclaration {
             SymbolInfo {
                 symbol_type: self.variable_type.clone(),
                 storage: StorageInfo::Static(initial_value, is_global),
+                constant: self.constant,
+                volatile: self.volatile,
             },
         );
         Ok(())
@@ -117,6 +119,8 @@ impl VariableDeclaration {
                         SymbolInfo {
                             symbol_type: self.variable_type.clone(),
                             storage: StorageInfo::Static(InitialValue::None, true),
+                            constant: self.constant,
+                            volatile: self.volatile,
                         },
                     );
                 }
@@ -146,6 +150,8 @@ impl VariableDeclaration {
                     SymbolInfo {
                         symbol_type: self.variable_type.clone(),
                         storage: StorageInfo::Static(initial_value, false),
+                        constant: self.constant,
+                        volatile: self.volatile,
                     },
                 );
             }
@@ -158,6 +164,8 @@ impl VariableDeclaration {
                     SymbolInfo {
                         symbol_type: self.variable_type.clone(),
                         storage: StorageInfo::Automatic,
+                        constant: self.constant,
+                        volatile: self.volatile,
                     },
                 );
 

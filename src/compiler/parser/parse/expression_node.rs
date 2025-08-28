@@ -31,9 +31,10 @@ impl ExpressionNode {
 
 impl From<ExpressionWithoutType> for ExpressionNode {
     fn from(val: ExpressionWithoutType) -> Self {
-        ExpressionNode(val, None)
+        ExpressionNode(val, None, false)
     }
 }
+
 impl Parse<ExpressionWithoutType> for VecDeque<Token> {
     fn parse(
         &mut self,
@@ -84,7 +85,7 @@ impl ParseExpression for VecDeque<Token> {
                 if self.peek()?.is_start_of_declaration(context) {
                     let cast_type: Type = self.parse(context)?;
                     let abstract_declarator: AbstractDeclarator = self.parse(context)?;
-                    let real_cast_type = abstract_declarator.apply_to_type(cast_type)?;
+                    let real_cast_type = abstract_declarator.apply_to_type(cast_type, context)?;
                     self.expect(Token::CloseParen)?;
                     let factor = self.parse_cast(context, false)?.unwrap();
                     Some(ExpressionWithoutType::Cast(
@@ -216,7 +217,7 @@ impl ParseExpression for VecDeque<Token> {
                                 let abstract_declarator: AbstractDeclarator =
                                     self.parse(context)?;
                                 let real_target_type =
-                                    abstract_declarator.apply_to_type(target_type)?;
+                                    abstract_declarator.apply_to_type(target_type, context)?;
                                 self.expect(Token::CloseParen)?;
                                 Some(ExpressionWithoutType::SizeOfType(real_target_type))
                             } else {

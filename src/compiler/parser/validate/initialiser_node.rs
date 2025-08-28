@@ -51,6 +51,8 @@ impl InitialiserNode {
                             storage: StorageInfo::Constant(StaticInitialiser::Comparable(
                                 ComparableStatic::String(s.to_vec(), true),
                             )),
+                            constant: false,
+                            volatile: false,
                         },
                     );
                     vec![StaticInitialiser::Comparable(ComparableStatic::Pointer(
@@ -261,6 +263,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::Integer(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -268,6 +271,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::Long(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -275,6 +279,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::LongLong(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -282,6 +287,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::UnsignedInteger(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -289,6 +295,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::UnsignedLong(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -296,6 +303,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::UnsignedLongLong(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -303,6 +311,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::Float(0.)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -310,6 +319,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::Double(0.)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -317,6 +327,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::LongDouble(0.)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -333,6 +344,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::UnsignedLong(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -340,6 +352,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::Char(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -347,6 +360,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::Char(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -354,6 +368,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::UnsignedChar(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -361,6 +376,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::Short(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),
@@ -368,6 +384,7 @@ impl InitialiserNode {
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::UnsignedShort(0)),
                     Some(target_type.clone()),
+                    false,
                 )),
                 Some(target_type.clone()),
             ),

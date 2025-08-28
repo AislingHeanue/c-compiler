@@ -4,7 +4,6 @@ use super::{parsed_types::PopForType, Declarator, Parse, ParseContext, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::StructDeclaration,
-    types::Constant,
 };
 use std::{collections::VecDeque, error::Error};
 
@@ -169,26 +168,8 @@ impl ParseDeclarator for VecDeque<Token> {
         context: &mut ParseContext,
     ) -> Result<Declarator, Box<dyn Error>> {
         self.expect(Token::OpenSquareBracket)?;
-        let c = self.parse(context)?;
-        let maybe_i: Option<u64> = match c {
-            Constant::Integer(i) => i.try_into().ok(),
-            Constant::Long(i) => i.try_into().ok(),
-            Constant::LongLong(i) => i.try_into().ok(),
-            Constant::UnsignedInteger(i) => Some(i.into()),
-            Constant::UnsignedLong(i) => Some(i),
-            Constant::UnsignedLongLong(i) => Some(i),
-            Constant::Char(i) => Some(i as u64),
-            _ => None,
-        };
-        if let Some(i) = maybe_i {
-            if i < 1 {
-                return Err("Array dimension must be at least 1".into());
-            }
-
-            declarator = Declarator::Array(Box::new(declarator), i);
-        } else {
-            return Err("Constant value in array type must be an integer".into());
-        }
+        let e = self.parse(context)?;
+        declarator = Declarator::Array(Box::new(declarator), e);
         self.expect(Token::CloseSquareBracket)?;
         Ok(declarator)
     }
@@ -198,6 +179,7 @@ impl Declarator {
     pub fn apply_to_type(
         self,
         base_type: Type,
+        context: &mut ParseContext,
         // returns the type, name and list of parameter names associated with the type
     ) -> Result<DeclaratorApplicationOutput, Box<dyn Error>> {
         match self {
@@ -209,7 +191,7 @@ impl Declarator {
             }),
             Declarator::Pointer(declarator, is_restricted) => {
                 // discard param names, function pointers aren't real
-                declarator.apply_to_type(Type::Pointer(Box::new(base_type), is_restricted))
+                declarator.apply_to_type(Type::Pointer(Box::new(base_type), is_restricted), context)
             }
             Declarator::Function(declarator, params) => {
                 let name = if let Declarator::Name(name) = *declarator {
@@ -224,7 +206,9 @@ impl Declarator {
                 let (param_types, param_names): (Vec<Type>, Vec<String>) = process_results(
                     params
                         .into_iter()
-                        .map(|(t, declarator, _struct_declaration)| declarator.apply_to_type(t)),
+                        .map(|(t, declarator, _struct_declaration)| {
+                            declarator.apply_to_type(t, context)
+                        }),
                     |iter| iter.map(|o| (o.out_type, o.name)).unzip(),
                 )?;
 
@@ -235,8 +219,9 @@ impl Declarator {
                     struct_declarations,
                 })
             }
-            Declarator::Array(declarator, size) => {
-                declarator.apply_to_type(Type::Array(Box::new(base_type), size))
+            Declarator::Array(declarator, size_expression) => {
+                let size = size_expression.fold_to_constant(context)?.value_unsigned();
+                declarator.apply_to_type(Type::Array(Box::new(base_type), size), context)
             }
         }
     }

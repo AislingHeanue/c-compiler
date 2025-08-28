@@ -112,6 +112,8 @@ impl CheckTypes for FunctionDeclaration {
             SymbolInfo {
                 symbol_type: this_type.clone(),
                 storage: StorageInfo::Function(is_defined, is_global),
+                constant: self.output_const,
+                volatile: self.output_volatile,
             },
         );
 
@@ -131,6 +133,8 @@ impl CheckTypes for FunctionDeclaration {
                     SymbolInfo {
                         symbol_type: converted_arg,
                         storage: StorageInfo::Automatic,
+                        constant: self.output_const,
+                        volatile: self.output_volatile,
                     },
                 );
             }

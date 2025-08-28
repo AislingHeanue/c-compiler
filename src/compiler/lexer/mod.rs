@@ -97,6 +97,7 @@ pub enum Token {
     KeywordConst,
     KeywordRestrict,
     KeywordInline,
+    KeywordVolatile,
 }
 
 lazy_static! {
@@ -199,7 +200,8 @@ lazy_static! {
                 Token::KeywordUnion => r"union\b",
                 Token::KeywordConst => r"const\b",
                 Token::KeywordRestrict => r"restrict\b",
-                Token::KeywordInline => r"inline\b"
+                Token::KeywordInline => r"inline\b",
+                Token::KeywordVolatile => r"volatile\b",
             };
             if !entry.is_empty(){
                 let entry = "^".to_string() + entry;
