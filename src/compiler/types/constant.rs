@@ -225,7 +225,7 @@ impl Constant {
             Constant::Short(_) => Type::Short,
             Constant::UnsignedInteger(_) => Type::UnsignedInteger,
             Constant::UnsignedLong(_) => Type::UnsignedLongLong,
-            Constant::UnsignedLongLong(_) => Type::UnsignedInteger,
+            Constant::UnsignedLongLong(_) => Type::UnsignedLongLong,
             Constant::UnsignedShort(_) => Type::UnsignedShort,
             Constant::Float(_) => Type::Float,
             Constant::Double(_) => Type::Double,
