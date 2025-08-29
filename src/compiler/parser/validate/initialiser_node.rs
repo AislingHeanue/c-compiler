@@ -47,7 +47,7 @@ impl InitialiserNode {
                     context.symbols.insert(
                         new_name.clone(),
                         SymbolInfo {
-                            symbol_type: Type::Array(t.clone(), s.len() as u64 + 1),
+                            symbol_type: Type::Array(t.clone(), Some(s.len() as u64 + 1)),
                             storage: StorageInfo::Constant(StaticInitialiser::Comparable(
                                 ComparableStatic::String(s.to_vec(), true),
                             )),
@@ -64,11 +64,13 @@ impl InitialiserNode {
             }
 
             (Type::Array(t, size), InitialiserWithoutType::Single(init_e)) => {
+                let size =
+                    size.ok_or::<Box<dyn Error>>("Can't initialise an incomplete array".into())?;
                 if let ExpressionWithoutType::String(s) = &init_e.0 {
-                    if s.len() > (*size).try_into().unwrap() {
+                    if s.len() > (size).try_into().unwrap() {
                         return Err("Static String is too long".into());
                     }
-                    let difference: i32 = *size as i32 - s.len() as i32;
+                    let difference: i32 = size as i32 - s.len() as i32;
 
                     if !t.is_character() {
                         return Err("Can't initialise a non-character array with a string".into());
@@ -92,22 +94,45 @@ impl InitialiserNode {
                     "Structs and unions must be initialised with a compound expression".into(),
                 );
             }
-            (_, InitialiserWithoutType::Single(ref i)) => {
+            (_, InitialiserWithoutType::Single(ref mut i)) => {
+                i.check_types_and_convert(context)?;
+                if let (Type::Pointer(target_p, _), Some(Type::Pointer(p, _))) = (target_type, &i.1)
+                {
+                    if let (Type::Function(r1, args1), Type::Function(r2, args2)) =
+                        (*target_p.clone(), *p.clone())
+                    {
+                        // NOTE: var args might break this check (among other things)
+                        if r1 != r2 || args1 != args2 {
+                            return Err("Incompatible types assigning a function pointer to a static variable".into());
+                        }
+                        if let ExpressionWithoutType::AddressOf(v) = &i.0 {
+                            if let ExpressionWithoutType::Var(name) = &v.0 {
+                                return Ok(vec![StaticInitialiser::FunctionPointer(
+                                    name.to_string(),
+                                )]);
+                            } else {
+                                return Err("Unexpected error parsing initialiser".into());
+                            }
+                        } else {
+                            return Err("Unexpected error parsing initialiser".into());
+                        }
+                    }
+                }
                 if matches!(target_type, Type::Pointer(_, _)) && !i.equals_null_pointer() {
                     return Err("Cannot initialise a static pointer with a non-pointer type".into());
                 }
-                let c = if let ExpressionWithoutType::Constant(c) = &i.0 {
-                    c
+                if let ExpressionWithoutType::Constant(c) = &i.0 {
+                    vec![c.static_convert_to(target_type)]
                 } else {
                     return Err(
                         "Static variables must be initialised with a constant expression".into(),
                     );
-                };
-
-                vec![c.static_convert_to(target_type)]
+                }
             }
             (Type::Array(t, size), InitialiserWithoutType::Compound(ref mut initialisers)) => {
-                let expected_count = (*size).try_into().unwrap();
+                let size =
+                    size.ok_or::<Box<dyn Error>>("Can't initialise an incomplete array".into())?;
+                let expected_count = (size).try_into().unwrap();
                 if initialisers.len() > expected_count {
                     return Err(format!(
                         "Too many initialisers in static declaration of array, got {}, expected {}",
@@ -122,8 +147,8 @@ impl InitialiserNode {
                         .map(|init| init.create_static_init_list(t, context)),
                     |iter| iter.flatten().collect(),
                 )?;
-                if initialisers.len() < (*size).try_into().unwrap() {
-                    let offset = *size - initialisers.len() as u64;
+                if initialisers.len() < (size).try_into().unwrap() {
+                    let offset = size - initialisers.len() as u64;
                     statics.push(StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(
                         t.get_size(&mut context.structs) * offset,
                     )));
@@ -191,13 +216,15 @@ impl InitialiserNode {
             (Type::Array(t, size), InitialiserWithoutType::Single(ref mut init_e))
                 if matches!(&init_e.0, ExpressionWithoutType::String(_s)) =>
             {
+                let size =
+                    size.ok_or::<Box<dyn Error>>("Can't initialise an incomplete array".into())?;
                 if let ExpressionWithoutType::String(s) = &init_e.0 {
                     if !t.is_character() {
                         return Err(
                             "Can't initialise non-character array with a string literal".into()
                         );
                     }
-                    if s.len() > (*size).try_into().unwrap() {
+                    if s.len() > size.try_into().unwrap() {
                         return Err("Initialiser has the wrong number of elements".into());
                     }
                 } else {
@@ -210,13 +237,15 @@ impl InitialiserNode {
                 init_e.convert_type_by_assignment(target_type, context)?;
             }
             (Type::Array(t, size), InitialiserWithoutType::Compound(ref mut c_init)) => {
-                if c_init.len() > (*size).try_into().unwrap() {
+                let size =
+                    size.ok_or::<Box<dyn Error>>("Can't initialise an incomplete array".into())?;
+                if c_init.len() > size.try_into().unwrap() {
                     return Err("Initialiser has the wrong number of elements".into());
                 }
                 for init in c_init.iter_mut() {
                     init.check_types(t, context)?;
                 }
-                while c_init.len() < (*size).try_into().unwrap() {
+                while c_init.len() < size.try_into().unwrap() {
                     c_init.push(InitialiserNode::zero(t, context));
                 }
             }
@@ -333,7 +362,7 @@ impl InitialiserNode {
             ),
             Type::Array(t, size) => InitialiserNode(
                 InitialiserWithoutType::Compound(
-                    (0..*size)
+                    (0..size.unwrap())
                         .map(|_| InitialiserNode::zero(t, context))
                         .collect(),
                 ),

@@ -68,6 +68,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 }
             }
             BirdsInstructionNode::FunctionCall(_, _, _)
+            | BirdsInstructionNode::IndirectFunctionCall(_, _, _)
             | BirdsInstructionNode::Return(_)
             | BirdsInstructionNode::Jump(_)
             | BirdsInstructionNode::JumpZero(_, _)
@@ -167,7 +168,28 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                         live_variables.push(right.clone())
                     }
                 }
-                BirdsInstructionNode::FunctionCall(_, args, _) => {
+                BirdsInstructionNode::FunctionCall(_, args, _)=> {
+                    for arg in args.iter() {
+                        if matches!(arg, BirdsValueNode::Var(_)) && !live_variables.contains(arg) {
+                            live_variables.push(arg.clone())
+                        }
+                    }
+                    for v in context.aliased_variables.clone() {
+                        if !live_variables.contains(&v) {
+                            live_variables.push(v)
+                        }
+                    }
+                    for v in context.static_variables.clone() {
+                        if !live_variables.contains(&v) {
+                            live_variables.push(v)
+                        }
+                    }
+                }
+                BirdsInstructionNode::IndirectFunctionCall(src, args ,_ ) => {
+                    if matches!(src, BirdsValueNode::Var(_)) && !live_variables.contains(src) {
+                        live_variables.push(src.clone())
+                    }
+
                     for arg in args.iter() {
                         if matches!(arg, BirdsValueNode::Var(_)) && !live_variables.contains(arg) {
                             live_variables.push(arg.clone())

@@ -48,7 +48,11 @@ impl Validate for ExpressionNode {
             ExpressionWithoutType::FunctionCall(_, ref mut params) => {
                 params.validate(context)?;
             }
-            ExpressionWithoutType::Cast(_, ref mut expression) => {
+            ExpressionWithoutType::IndirectFunctionCall(ref mut left, ref mut params) => {
+                left.validate(context)?;
+                params.validate(context)?;
+            }
+            ExpressionWithoutType::Cast(_, ref mut expression, _) => {
                 expression.validate(context)?;
             }
             ExpressionWithoutType::Dereference(ref mut ptr) => {
@@ -61,7 +65,7 @@ impl Validate for ExpressionNode {
             ExpressionWithoutType::SizeOf(ref mut e) => {
                 e.validate(context)?;
             }
-            ExpressionWithoutType::SizeOfType(ref _t) => {}
+            ExpressionWithoutType::SizeOfType(ref _t, _) => {}
             ExpressionWithoutType::Dot(ref mut e, _) => {
                 e.validate(context)?;
             }
@@ -85,21 +89,89 @@ impl CheckTypes for ExpressionNode {
                     .get(name)
                     .expect("Function should have been defined")
                     .clone();
-                if let Type::Function(out, params) = &type_info.symbol_type {
-                    if **out != Type::Void && !out.is_complete(&mut context.structs) {
-                        return Err("Can't call a function with an incomplete return type".into());
-                    }
-                    if params.len() != args.len() {
-                        return Err("Function call has the wrong number of arguments".into());
-                    }
-                    for (arg, param) in args.iter_mut().zip(params.iter()) {
-                        arg.check_types_and_convert(context)?;
-                        arg.convert_type_by_assignment(param, context)?;
-                    }
+                match &type_info.symbol_type {
+                    Type::Function(out, params) => {
+                        if **out != Type::Void && !out.is_complete(&mut context.structs) {
+                            return Err(
+                                "Can't call a function with an incomplete return type".into()
+                            );
+                        }
+                        if params.len() != args.len() {
+                            return Err("Function call has the wrong number of arguments".into());
+                        }
+                        for (arg, param) in args.iter_mut().zip(params.iter()) {
+                            arg.check_types_and_convert(context)?;
+                            arg.convert_type_by_assignment(param, context)?;
+                        }
 
-                    *out.clone()
+                        *out.clone()
+                    }
+                    Type::Pointer(p, _) => {
+                        if let Type::Function(ref out, ref params) = **p {
+                            let mut named_var = ExpressionNode(
+                                ExpressionWithoutType::Var(name.to_string()),
+                                None,
+                                false,
+                            );
+                            named_var.check_types_and_convert(context)?;
+
+                            if **out != Type::Void && !out.is_complete(&mut context.structs) {
+                                return Err(
+                                    "Can't call a function with an incomplete return type".into()
+                                );
+                            }
+                            if params.len() != args.len() {
+                                return Err(
+                                    "Function call has the wrong number of arguments".into()
+                                );
+                            }
+                            for (arg, param) in args.iter_mut().zip(params.iter()) {
+                                arg.check_types_and_convert(context)?;
+                                arg.convert_type_by_assignment(param, context)?;
+                            }
+
+                            // relabel this expression as an INDIRECT function call if no functions
+                            // with this name are in scope
+                            self.0 = ExpressionWithoutType::IndirectFunctionCall(
+                                Box::new(named_var),
+                                args.clone(),
+                            );
+                            *out.clone()
+                        } else {
+                            return Err(
+                                "Non-function pointer variable has been called as a function"
+                                    .into(),
+                            );
+                        }
+                    }
+                    _ => return Err("Variable has been called as a function".into()),
+                }
+            }
+            ExpressionWithoutType::IndirectFunctionCall(ref mut left, ref mut args) => {
+                left.check_types_and_convert(context)?;
+                if let Some(Type::Pointer(ref p, _)) = &left.1 {
+                    if let Type::Function(ref out, ref params) = **p {
+                        if **out != Type::Void && !out.is_complete(&mut context.structs) {
+                            return Err(
+                                "Can't call a function with an incomplete return type".into()
+                            );
+                        }
+                        if params.len() != args.len() {
+                            return Err("Function call has the wrong number of arguments".into());
+                        }
+                        for (arg, param) in args.iter_mut().zip(params.iter()) {
+                            arg.check_types_and_convert(context)?;
+                            arg.convert_type_by_assignment(param, context)?;
+                        }
+
+                        *out.clone()
+                    } else {
+                        return Err(
+                            "Non-function pointer expression has been called as a function".into(),
+                        );
+                    }
                 } else {
-                    return Err("Variable has been called as a function".into());
+                    return Err("Non-pointer expression has been called as a function".into());
                 }
             }
             ExpressionWithoutType::Var(ref name) => {
@@ -109,12 +181,14 @@ impl CheckTypes for ExpressionNode {
                     .expect("Var should have been defined");
 
                 self.2 = type_info.constant;
-                match &type_info.symbol_type {
-                    Type::Function(_, _) => {
-                        return Err("Function has been defined as a variable".into())
-                    }
-                    t => t.clone(),
-                }
+                // match &type_info.symbol_type {
+                //     // Type::Function(_, _) => {
+                //     //     println!("{:?}", self);
+                //     //     return Err("Function has been defined as a variable".into());
+                //     // }
+                //     t => t.clone(),
+                // }
+                type_info.symbol_type.clone()
             }
             ExpressionWithoutType::Constant(ref c) => {
                 // marking that this is a constant
@@ -231,7 +305,10 @@ impl CheckTypes for ExpressionNode {
 
                 common_type
             }
-            ExpressionWithoutType::Cast(ref mut target, ref mut e) => {
+            ExpressionWithoutType::Cast(ref mut target, ref mut e, ref mut struct_declarations) => {
+                for s in struct_declarations.iter_mut() {
+                    s.check_types(context)?;
+                }
                 e.check_types_and_convert(context)?;
                 let src_type = e.1.as_ref().unwrap();
                 if matches!((&src_type, &target), (&Type::Double, &Type::Pointer(_, _)))
@@ -297,7 +374,7 @@ impl CheckTypes for ExpressionNode {
             }
             ExpressionWithoutType::String(ref s) => {
                 // WEE WOO WEE WOO DON'T FORGET TO ASSIGN SPACE FOR THE NULL TERMINATOR
-                Type::Array(Box::new(Type::Char), (s.len() as u64) + 1)
+                Type::Array(Box::new(Type::Char), Some((s.len() as u64) + 1))
             }
             ExpressionWithoutType::SizeOf(ref mut e) => {
                 e.check_types(context)?;
@@ -309,7 +386,10 @@ impl CheckTypes for ExpressionNode {
                 // size_t
                 Type::UnsignedLong
             }
-            ExpressionWithoutType::SizeOfType(ref mut t) => {
+            ExpressionWithoutType::SizeOfType(ref mut t, ref mut struct_declarations) => {
+                for s in struct_declarations.iter_mut() {
+                    s.check_types(context)?;
+                }
                 t.check_types(context)?;
                 if !t.is_complete(&mut context.structs) {
                     return Err("Can't get the size of an incomplete type".into());
@@ -505,7 +585,7 @@ impl ExpressionNode {
     pub fn convert_type(&mut self, target: &Type) {
         if self.1.as_ref().unwrap() != target {
             *self = ExpressionNode(
-                ExpressionWithoutType::Cast(target.clone(), Box::new(self.clone())),
+                ExpressionWithoutType::Cast(target.clone(), Box::new(self.clone()), Vec::new()),
                 Some(target.clone()),
                 false,
             )
@@ -560,6 +640,7 @@ impl ExpressionNode {
         Ok(())
     }
 
+    // type decay occurs here
     fn post_type_check_convert(
         &mut self,
         context: &mut ValidateContext,
@@ -570,6 +651,13 @@ impl ExpressionNode {
                 *self = ExpressionNode(
                     ExpressionWithoutType::AddressOf(Box::new(self.clone())),
                     Some(Type::Pointer(t.clone(), false)),
+                    false,
+                )
+            }
+            Some(Type::Function(_, _)) => {
+                *self = ExpressionNode(
+                    ExpressionWithoutType::AddressOf(Box::new(self.clone())),
+                    Some(Type::Pointer(Box::new(self.1.clone().unwrap()), false)),
                     false,
                 )
             }

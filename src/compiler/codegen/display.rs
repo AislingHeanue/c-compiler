@@ -350,6 +350,9 @@ impl CodeDisplay for StaticInitialiser {
                 let mut ryu_buffer = Buffer::new();
                 format!(".double {}", ryu_buffer.format(*f))
             }
+            StaticInitialiser::FunctionPointer(name) => {
+                format!(".quad {}", name)
+            }
         };
 
         format!("{:indent$}{}", "", s, indent = context.indent)
@@ -735,6 +738,30 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
+            Instruction::CallIndirect(o) => {
+                // let function_name = if context.is_mac {
+                //     "_".to_string() + s
+                //} else if context.is_linux {
+                // if let AssemblySymbolInfo::Function(false, _, _, _) =
+                //     context.symbols.get(s).unwrap()
+                // {
+                //     // if a function isn't defined in this file, call it from another file (ie
+                //     // externally link it)
+                //     s.to_string() + "@PLT"
+                // } else {
+                //     s.to_string()
+                // }
+                // } else {
+                //     s.to_string()
+                // };
+                context.long();
+                format!(
+                    "{:indent$}call *{}",
+                    "",
+                    o.show(context),
+                    indent = context.indent
+                )
+            }
             Instruction::Lea(src, dst) => {
                 context.long();
                 format!(
@@ -787,6 +814,7 @@ impl CodeDisplay for Operand {
                         }
                     }
                     // extern variables with no definition in the current file follow this code path
+                    Some(AssemblySymbolInfo::Function(_, _, _, _)) => "",
                     None => {
                         if context.is_mac {
                             "_"
@@ -794,7 +822,6 @@ impl CodeDisplay for Operand {
                             ""
                         }
                     }
-                    _ => unreachable!(),
                 };
 
                 if *offset == 0 {

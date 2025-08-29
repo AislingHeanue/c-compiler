@@ -31,6 +31,7 @@ pub struct FunctionDeclaration {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+// third field marks that the expression is constant
 pub struct ExpressionNode(pub ExpressionWithoutType, pub Option<Type>, pub bool);
 
 #[derive(Debug)]
@@ -43,28 +44,28 @@ pub struct VariableDeclaration {
     pub storage_class: Option<StorageClass>,
     // variable declarations may also include an inline struct declaration, make sure to include
     // them here
-    pub struct_declaration: Option<StructDeclaration>,
+    pub struct_declarations: Vec<StructDeclaration>,
 }
 
 #[derive(Debug)]
 pub struct TypeDeclaration {
     pub target_type: Type,
     pub name: String,
-    pub struct_declaration: Option<StructDeclaration>,
+    pub struct_declarations: Vec<StructDeclaration>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StructDeclaration {
     pub name: String,
     pub members: Option<Vec<StructMember>>,
     pub is_union: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StructMember {
     pub member_type: Type,
     pub name: Option<String>,
-    pub struct_declaration: Option<StructDeclaration>,
+    pub struct_declarations: Vec<StructDeclaration>,
 }
 
 #[derive(Debug, Clone)]
@@ -173,13 +174,14 @@ pub enum ExpressionWithoutType {
     ),
     // function name, args...
     FunctionCall(String, Vec<ExpressionNode>),
+    IndirectFunctionCall(Box<ExpressionNode>, Vec<ExpressionNode>),
     // target type to cast expression to
-    Cast(Type, Box<ExpressionNode>),
+    Cast(Type, Box<ExpressionNode>, Vec<StructDeclaration>),
     Dereference(Box<ExpressionNode>),
     AddressOf(Box<ExpressionNode>),
     String(Vec<i8>),
     SizeOf(Box<ExpressionNode>),
-    SizeOfType(Type),
+    SizeOfType(Type, Vec<StructDeclaration>),
     // operates only on structs
     Dot(Box<ExpressionNode>, String),
     // operates only on pointers (to structs)
@@ -228,28 +230,38 @@ pub struct StructInfo {
     // pub is_union: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Declarator {
     Name(String),
+    Base,
     // bool denotes whether the pointer declaration is marked as 'restrict'
     // See https://en.wikipedia.org/wiki/Restrict
     Pointer(Box<Declarator>, bool),
+    ConstPointer(Box<Declarator>),
     // params info and any further declarator to apply to the parent type
-    Function(
-        Box<Declarator>,
-        Vec<(Type, Declarator, Option<StructDeclaration>)>,
-    ),
+    Function(Box<Declarator>, Vec<(Type, Declarator)>),
     // containing type and size
-    Array(Box<Declarator>, ExpressionWithoutType),
+    Array(Box<Declarator>, Option<ExpressionNode>),
 }
 
-#[derive(Debug)]
-pub enum AbstractDeclarator {
-    // is_restricted
-    Pointer(Box<AbstractDeclarator>, bool),
-    Array(Box<AbstractDeclarator>, ExpressionWithoutType),
-    Base,
-}
+// declarator, struct_declarations
+pub type DeclaratorWithStructs = (Declarator, Vec<StructDeclaration>);
+
+// #[derive(Debug, Clone)]
+// pub enum AbstractDeclarator {
+//     // is_restricted
+//     Pointer(Box<AbstractDeclarator>, bool),
+//     Array(Box<AbstractDeclarator>, ExpressionWithoutType),
+//     Function(Box<AbstractDeclarator>, Vec<ParamDeclarator>),
+//     Base,
+// }
+// pub type AbstractDeclaratorWithStructs = (AbstractDeclarator, Vec<StructDeclaration>);
+
+// #[derive(Debug, Clone)]
+// pub enum ParamDeclarator {
+//     Plain(Type, Declarator),
+//     Anonymous(AbstractDeclarator),
+// }
 
 pub fn parse(lexed: VecDeque<Token>, do_not_validate: bool) -> Result<ProgramNode, Box<dyn Error>> {
     do_parse(lexed, do_not_validate)

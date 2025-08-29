@@ -178,6 +178,9 @@ impl InterferenceGraph {
                 Instruction::SetCondition(_, dst_int, _) => {
                     self.add_mock_register(&AssemblyType::Longword, dst_int, context)
                 }
+                Instruction::CallIndirect(src) => {
+                    self.add_mock_register(&AssemblyType::Quadword, src, context)
+                }
                 Instruction::Label(_) => {}
                 Instruction::Push(src) => {
                     if let Operand::MockReg(name) = src {

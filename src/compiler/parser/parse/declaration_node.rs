@@ -1,15 +1,14 @@
 use itertools::Itertools;
 
 use super::{
-    declarator::OutputWithStruct,
-    parsed_types::{ParseStructDeclaration, PopForType},
+    parsed_types::{OutputWithStructs, ParseStructDeclaration, PopForType},
     Identity, Parse, ParseContext, Type,
 };
 use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::{
-        BlockItemNode, DeclarationNode, Declarator, FunctionDeclaration, StructDeclaration,
-        TypeDeclaration, VariableDeclaration,
+        BlockItemNode, DeclarationNode, Declarator, DeclaratorWithStructs, FunctionDeclaration,
+        StructDeclaration, TypeDeclaration, VariableDeclaration,
     },
     types::StorageClass,
 };
@@ -43,23 +42,28 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
 
         let must_have_body = is_constant && storage_class != Some(StorageClass::Extern);
 
-        let (base_type, declarator, struct_declaration): (
+        let (base_type, declarator, struct_declarations): (
             Type,
             Declarator,
-            Option<StructDeclaration>,
+            Vec<StructDeclaration>,
         ) = match self.peek()? {
             Token::KeywordTypedef => {
                 if storage_class.is_some() {
                     return Err("Cannot use static or extern in a typedef alias".into());
                 }
                 self.expect(Token::KeywordTypedef)?;
-                let (base_type, declarator, struct_declaration): OutputWithStruct =
+                let (base_type, declarator, struct_declarations): OutputWithStructs =
                     self.parse(context)?;
                 self.expect(Token::SemiColon)?;
                 let declarator_output = declarator.apply_to_type(base_type, context)?;
 
                 let out_type = declarator_output.out_type;
                 let name = declarator_output.name;
+                let name = if let Some(name) = name {
+                    name
+                } else {
+                    return Err("typedef specified without a target name".into());
+                };
                 context
                     .current_scope_identifiers
                     .insert(name.clone(), Identity::TypeAlias(out_type.clone()));
@@ -67,7 +71,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                 return Ok(DeclarationNode::Type(TypeDeclaration {
                     target_type: out_type,
                     name,
-                    struct_declaration,
+                    struct_declarations,
                 }));
             }
             Token::KeywordStruct | Token::KeywordUnion => {
@@ -103,24 +107,25 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         if !struct_declaration_tokens.is_empty() {
                             return Err("Leftover tokens parsing a struct declaration".into());
                         }
+                        let mut all_declarations = vec![struct_declaration.clone()];
 
-                        let declarator: Declarator = self.parse(context)?;
+                        let (declarator, mut variable_structs): DeclaratorWithStructs =
+                            self.parse(context)?;
+
+                        all_declarations.append(&mut variable_structs);
+
                         (
                             Type::Struct(
                                 struct_declaration.name.clone(),
                                 struct_declaration.is_union,
                             ),
                             declarator,
-                            Some(struct_declaration),
+                            all_declarations,
                         )
                     }
                 }
             }
-            _ => {
-                let (out, declarator, struct_declaration): OutputWithStruct =
-                    self.parse(context)?;
-                (out, declarator, struct_declaration)
-            }
+            _ => self.parse(context)?,
         };
 
         let declarator_output = declarator.apply_to_type(base_type, context)?;
@@ -130,8 +135,13 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
 
         let out = match out_type {
             Type::Function(_, ref param_types) => {
+                let declaration_name = if let Some(name) = declarator_output.name {
+                    name
+                } else {
+                    return Err("function declared without a name".into());
+                };
                 let name = DeclarationNode::new_identifier(
-                    declarator_output.name,
+                    declaration_name,
                     true,
                     context,
                     storage_class.clone(),
@@ -172,7 +182,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         params: new_params_names,
                         body: Some(body),
                         storage_class,
-                        struct_declarations: declarator_output.struct_declarations,
+                        struct_declarations,
                         _inline: is_inline,
                         output_const: is_constant,
                         output_volatile: is_volatile,
@@ -185,7 +195,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         params: param_names,
                         body: None,
                         storage_class,
-                        struct_declarations: declarator_output.struct_declarations,
+                        struct_declarations,
                         _inline: is_inline,
                         output_const: is_constant,
                         output_volatile: is_volatile,
@@ -193,8 +203,13 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                 }
             }
             _ => {
+                let declaration_name = if let Some(name) = declarator_output.name {
+                    name
+                } else {
+                    return Err("variable declared without a name".into());
+                };
                 let name = DeclarationNode::new_identifier(
-                    declarator_output.name,
+                    declaration_name,
                     context.current_scope_is_file,
                     context,
                     storage_class.clone(),
@@ -210,7 +225,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                             name,
                             init: Some(initialiser),
                             storage_class,
-                            struct_declaration,
+                            struct_declarations,
                             constant: is_constant,
                             volatile: is_volatile,
                         }))
@@ -220,7 +235,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         name,
                         init: None,
                         storage_class,
-                        struct_declaration,
+                        struct_declarations,
                         constant: is_constant,
                         volatile: is_volatile,
                     })),

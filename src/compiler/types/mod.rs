@@ -23,7 +23,7 @@ pub enum Type {
     // return type, param types
     Function(Box<Type>, Vec<Type>),
     // type and length
-    Array(Box<Type>, u64),
+    Array(Box<Type>, Option<u64>),
     // bool denotes whether the pointer is marked as restricted
     Pointer(Box<Type>, bool),
     Char,
@@ -80,6 +80,7 @@ pub enum StaticInitialiser {
     Float(f32),
     Double(f64),
     LongDouble(f64),
+    FunctionPointer(String),
 }
 
 fn one_double_is_negative_zero(a: f64, b: f64) -> bool {

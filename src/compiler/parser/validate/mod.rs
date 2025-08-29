@@ -143,7 +143,7 @@ impl Validate for DeclarationNode {
             DeclarationNode::Function(f) => f.validate(context)?,
             DeclarationNode::Type(t) => {
                 if matches!(context.pass, ValidationPass::TypeChecking) {
-                    if let Some(ref mut s) = t.struct_declaration {
+                    for s in t.struct_declarations.iter_mut() {
                         s.check_types(context)?;
                     }
                     t.target_type.check_types(context)?;

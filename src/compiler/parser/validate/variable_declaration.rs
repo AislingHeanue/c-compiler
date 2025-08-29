@@ -18,8 +18,8 @@ impl Validate for VariableDeclaration {
             if self.variable_type == Type::Void {
                 return Err("Cannot declare a variable with a void type".into());
             }
-            if let Some(ref mut struct_declaration) = self.struct_declaration {
-                struct_declaration.check_types(context)?;
+            for s in self.struct_declarations.iter_mut() {
+                s.check_types(context)?;
             }
 
             if context.current_function_name.is_none() {

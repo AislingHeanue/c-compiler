@@ -19,7 +19,7 @@ impl Convert<AssemblyType> for Type {
             Type::Float => Ok(AssemblyType::Float),
             Type::Double => Ok(AssemblyType::Double),
             Type::LongDouble => Ok(AssemblyType::Double),
-            Type::Array(t, size) => {
+            Type::Array(t, Some(size)) => {
                 let assembly_t = (*t).convert(context)?;
                 let size = assembly_t.get_size() * size;
                 let alignment = if size < 16 {
@@ -29,6 +29,7 @@ impl Convert<AssemblyType> for Type {
                 };
                 Ok(AssemblyType::ByteArray(size, alignment))
             }
+            Type::Array(_, None) => Err("Tried to convert an incomplete array".into()),
             Type::Function(_, _) => Err("Tried to convert a function type".into()),
             Type::Char | Type::SignedChar | Type::UnsignedChar => Ok(AssemblyType::Byte),
             Type::Struct(name, _) => {

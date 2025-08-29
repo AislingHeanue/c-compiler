@@ -106,6 +106,7 @@ enum Instruction {
     // pops from the stack into a given register (affects RSP)
     Pop(Register),
     Call(String),
+    CallIndirect(Operand),
     Ret,
 }
 

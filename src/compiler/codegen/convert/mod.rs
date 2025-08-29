@@ -65,7 +65,7 @@ struct Args {
 }
 
 #[derive(Debug)]
-struct ReturnInfo {
+pub struct ReturnInfo {
     integer: Vec<(Operand, AssemblyType)>,
     double: Vec<Operand>,
     uses_memory: bool,
@@ -105,7 +105,7 @@ fn pass_args_to_callee(
             // because that's also crimes.
             let var_name = get_var_name(&v);
             let struct_type = context.symbols.get(&var_name).unwrap().symbol_type.clone();
-            let classes = classify_struct(&struct_type, context);
+            let classes = classify_struct(&struct_type, context)?;
 
             let mut throw_it_onto_the_stack = true;
             let size = t.get_size();
@@ -168,7 +168,7 @@ fn pass_returns_to_caller(
         let var_name = get_var_name(&v);
         let struct_type = context.symbols.get(&var_name).unwrap().symbol_type.clone();
 
-        let classes = classify_struct(&struct_type, context);
+        let classes = classify_struct(&struct_type, context)?;
         let size = t.get_size();
 
         if *classes.first().unwrap() == Class::Memory {
@@ -217,7 +217,7 @@ pub fn classify_return_by_type(
             registers.push(FUNCTION_RETURN_REGISTERS[0].clone());
             Ok((false, registers))
         } else if let Type::Struct(_, _) = t {
-            let classes = classify_struct(t, context);
+            let classes = classify_struct(t, context)?;
             let mut integers_used = 0;
             let mut sse_used = 0;
             let mut uses_memory = false;
@@ -274,7 +274,7 @@ pub fn classify_params_by_type(
                 integers_used += 1;
             }
         } else if let Type::Struct(_, _) = t {
-            let classes = classify_struct(t, context);
+            let classes = classify_struct(t, context)?;
             for class in classes {
                 match class {
                     Class::Memory => {}
@@ -305,21 +305,24 @@ fn get_var_name(v: &BirdsValueNode) -> String {
     }
 }
 
-fn classify_struct(struct_type: &Type, context: &mut ConvertContext) -> Vec<Class> {
+fn classify_struct(
+    struct_type: &Type,
+    context: &mut ConvertContext,
+) -> Result<Vec<Class>, Box<dyn Error>> {
     let (name, _is_union) = if let Type::Struct(name, is_union) = struct_type {
         (name, is_union)
     } else {
         unreachable!()
     };
     if let Some(classes) = context.struct_classes.get(name) {
-        return classes.to_vec();
+        return Ok(classes.to_vec());
     }
     let info = context.structs.get(name).unwrap().clone();
     let out = if info.size > 16 {
         vec![Class::Memory; u64::div_ceil(info.size, 8) as usize]
     } else {
-        let member_types = flatten_struct_types(struct_type, context);
-        let classes = flatten_types_to_classes(&member_types, 0, context);
+        let member_types = flatten_struct_types(struct_type, context)?;
+        let classes = flatten_types_to_classes(&member_types, 0, context)?;
         // size > 8 means there are exactly 2 eightbytes we need to classify
         // (this would probably be more complicated if we supported floats)
         if info.size > 8 {
@@ -337,30 +340,37 @@ fn classify_struct(struct_type: &Type, context: &mut ConvertContext) -> Vec<Clas
         }
     };
     context.struct_classes.insert(name.to_string(), out.clone());
-    out
+    Ok(out)
 }
 
-fn flatten_struct_types(this_type: &Type, context: &mut ConvertContext) -> Vec<Type> {
+fn flatten_struct_types(
+    this_type: &Type,
+    context: &mut ConvertContext,
+) -> Result<Vec<Type>, Box<dyn Error>> {
     match this_type {
         Type::Struct(name, false) => {
             let info = context.structs.get(name).unwrap().clone();
-            info.members
-                .iter()
-                .flat_map(|m| flatten_struct_types(&m.member_type, context))
-                .collect()
+            process_results(
+                info.members
+                    .iter()
+                    .map(|m| flatten_struct_types(&m.member_type, context)),
+                |iter| iter.flatten().collect(),
+            )
         }
         // unions need lots of extra care and attention, handled in the below function
-        Type::Struct(_name, true) => vec![this_type.clone()],
+        Type::Struct(_name, true) => Ok(vec![this_type.clone()]),
         Type::Array(inner_type, size) => {
-            let out_types = flatten_struct_types(inner_type, context);
+            let size =
+                size.ok_or::<Box<dyn Error>>("Struct can't contain incomplete array type".into())?;
+            let out_types = flatten_struct_types(inner_type, context)?;
             // if we encounter an array of size N, then flatten the inner type and
             // duplicate it N times
-            vec![out_types; *size as usize]
+            Ok(vec![out_types; size as usize]
                 .into_iter()
                 .flatten()
-                .collect()
+                .collect())
         }
-        _ => vec![this_type.clone()],
+        _ => Ok(vec![this_type.clone()]),
     }
 }
 
@@ -368,7 +378,7 @@ fn flatten_types_to_classes(
     member_types: &[Type],
     mut current_size: u64,
     context: &mut ConvertContext,
-) -> (Option<Class>, Option<Class>) {
+) -> Result<(Option<Class>, Option<Class>), Box<dyn Error>> {
     let starting_size = current_size;
     let mut first_out_class = Class::Sse;
     let mut second_out_class = Class::Sse;
@@ -377,14 +387,16 @@ fn flatten_types_to_classes(
         match t {
             Type::Struct(name, true) => {
                 let info = context.structs.get(name).unwrap().clone();
-                let type_possibilities = info
-                    .members
-                    .iter()
-                    .map(|m| flatten_struct_types(&m.member_type, context))
-                    .collect_vec();
+                let type_possibilities = process_results(
+                    info.members
+                        .iter()
+                        .map(|m| flatten_struct_types(&m.member_type, context)),
+                    |iter| iter.collect_vec(),
+                )?;
+
                 // if info.size <= 8 {
                 for possibility in type_possibilities {
-                    let classes = flatten_types_to_classes(&possibility, current_size, context);
+                    let classes = flatten_types_to_classes(&possibility, current_size, context)?;
                     if let Some(class) = classes.0 {
                         if class != Class::Sse {
                             first_out_class = Class::Integer
@@ -417,12 +429,12 @@ fn flatten_types_to_classes(
     }
     if starting_size <= 8 {
         if current_size <= 8 {
-            (Some(first_out_class), None)
+            Ok((Some(first_out_class), None))
         } else {
-            (Some(first_out_class), Some(second_out_class))
+            Ok((Some(first_out_class), Some(second_out_class)))
         }
     } else {
-        (None, Some(second_out_class))
+        Ok((None, Some(second_out_class)))
     }
 }
 

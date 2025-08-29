@@ -37,7 +37,7 @@ impl CheckTypes for StructDeclaration {
                 context.current_struct_members.insert(name.clone());
             }
 
-            if let Some(ref mut s) = m.struct_declaration {
+            for s in m.struct_declarations.iter_mut() {
                 let original_checking_embedded_struct = context.checking_embedded_struct;
                 if m.name.is_none() {
                     context.checking_embedded_struct = true;
@@ -129,7 +129,7 @@ impl CheckTypes for StructMember {
             unreachable!()
         }
 
-        if let Some(ref mut s) = self.struct_declaration {
+        for s in self.struct_declarations.iter_mut() {
             // if m is itself a struct definition, bring said definition into scope
             s.check_types(context)?;
         }

@@ -1,14 +1,17 @@
 use itertools::process_results;
 
-use super::{parsed_types::PopForType, Declarator, Parse, ParseContext, Type};
+use super::{Declarator, Parse, ParseContext, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::StructDeclaration,
+    parser::{DeclaratorWithStructs, StructDeclaration},
 };
 use std::{collections::VecDeque, error::Error};
 
-impl Parse<Declarator> for VecDeque<Token> {
-    fn parse(&mut self, context: &mut ParseContext) -> Result<Declarator, Box<dyn Error>> {
+impl Parse<DeclaratorWithStructs> for VecDeque<Token> {
+    fn parse(
+        &mut self,
+        context: &mut ParseContext,
+    ) -> Result<DeclaratorWithStructs, Box<dyn Error>> {
         let declarator = self.parse_full_declarator(context)?;
 
         Ok(declarator)
@@ -17,32 +20,28 @@ impl Parse<Declarator> for VecDeque<Token> {
 
 #[derive(Debug)]
 pub struct DeclaratorApplicationOutput {
-    pub name: String,
+    pub name: Option<String>,
     pub out_type: Type,
     pub param_names: Option<Vec<String>>,
-    pub struct_declarations: Vec<StructDeclaration>,
 }
 
-pub type OutputWithStruct = (Type, Declarator, Option<StructDeclaration>);
+pub type ParamList = (Vec<(Type, Declarator)>, Vec<StructDeclaration>);
 
 trait ParseDeclarator {
     fn parse_full_declarator(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<Declarator, Box<dyn Error>>;
+    ) -> Result<(Declarator, Vec<StructDeclaration>), Box<dyn Error>>;
     fn parse_simple_declarator(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<Declarator, Box<dyn Error>>;
-
-    fn parse_param_list(
-        &mut self,
-        context: &mut ParseContext,
-    ) -> Result<Vec<OutputWithStruct>, Box<dyn Error>>;
+    ) -> Result<(Declarator, Vec<StructDeclaration>), Box<dyn Error>>;
+    fn parse_param_list(&mut self, context: &mut ParseContext)
+        -> Result<ParamList, Box<dyn Error>>;
     fn parse_param(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<OutputWithStruct, Box<dyn Error>>;
+    ) -> Result<(Type, Declarator, Vec<StructDeclaration>), Box<dyn Error>>;
     fn parse_array(
         &mut self,
         declarator: Declarator,
@@ -54,38 +53,76 @@ impl ParseDeclarator for VecDeque<Token> {
     fn parse_full_declarator(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<Declarator, Box<dyn Error>> {
+    ) -> Result<(Declarator, Vec<StructDeclaration>), Box<dyn Error>> {
+        if self.is_empty() {
+            return Ok((Declarator::Base, Vec::new()));
+        }
         match self.peek()? {
             Token::Star => {
                 self.expect(Token::Star)?;
-                match self.peek()? {
-                    Token::KeywordRestrict => {
+                match self.peek() {
+                    Ok(Token::KeywordRestrict) => {
                         self.expect(Token::KeywordRestrict)?;
-                        Ok(Declarator::Pointer(Box::new(self.parse(context)?), true))
+                        if self.is_empty() {
+                            Ok((
+                                Declarator::Pointer(Box::new(Declarator::Base), true),
+                                Vec::new(),
+                            ))
+                        } else {
+                            let (declarator, structs) = self.parse(context)?;
+                            Ok((Declarator::Pointer(Box::new(declarator), true), structs))
+                        }
                     }
-                    _ => Ok(Declarator::Pointer(Box::new(self.parse(context)?), false)),
+                    Ok(Token::KeywordConst) => {
+                        self.expect(Token::KeywordConst)?;
+                        if self.is_empty() {
+                            Ok((
+                                Declarator::ConstPointer(Box::new(Declarator::Base)),
+                                Vec::new(),
+                            ))
+                        } else {
+                            let (declarator, structs) = self.parse(context)?;
+                            Ok((Declarator::ConstPointer(Box::new(declarator)), structs))
+                        }
+                    }
+                    _ => {
+                        if self.is_empty() {
+                            Ok((
+                                Declarator::Pointer(Box::new(Declarator::Base), false),
+                                Vec::new(),
+                            ))
+                        } else {
+                            let (declarator, structs) = self.parse(context)?;
+                            Ok((Declarator::Pointer(Box::new(declarator), false), structs))
+                        }
+                    }
                 }
             }
             _ => {
-                let mut simple_declarator = self.parse_simple_declarator(context)?;
+                let (mut simple_declarator, mut structs) = self.parse_simple_declarator(context)?;
                 match self.peek() {
                     // function declaration type!
                     Ok(Token::OpenParen) => {
-                        let param_list = self.parse_param_list(context)?;
-                        Ok(Declarator::Function(
-                            Box::new(simple_declarator),
-                            param_list,
+                        if matches!(simple_declarator, Declarator::Function(_, _)) {
+                            return Err("A function cannot return another function".into());
+                        }
+                        let (param_list, mut structs_from_params) =
+                            self.parse_param_list(context)?;
+                        structs.append(&mut structs_from_params);
+                        Ok((
+                            Declarator::Function(Box::new(simple_declarator), param_list),
+                            structs,
                         ))
                     }
                     Ok(Token::OpenSquareBracket) => {
                         while !self.is_empty() && matches!(self.peek()?, Token::OpenSquareBracket) {
                             simple_declarator = self.parse_array(simple_declarator, context)?;
                         }
-                        Ok(simple_declarator)
+                        Ok((simple_declarator, structs))
                     }
-                    Ok(_) => Ok(simple_declarator),
+                    Ok(_) => Ok((simple_declarator, structs)),
                     // no further tokens found after the declarator, this is okay
-                    Err(_) => Ok(simple_declarator),
+                    Err(_) => Ok((simple_declarator, structs)),
                 }
             }
         }
@@ -93,73 +130,61 @@ impl ParseDeclarator for VecDeque<Token> {
     fn parse_simple_declarator(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<Declarator, Box<dyn Error>> {
-        match self.read()? {
-            Token::Identifier(name) => {
+    ) -> Result<(Declarator, Vec<StructDeclaration>), Box<dyn Error>> {
+        match self.peek() {
+            Ok(Token::Identifier(name)) => {
                 // do not process the scope of 'name' here, because it complicates parameters
-                Ok(Declarator::Name(name))
+                self.expect(Token::Identifier("".to_string()))?;
+                Ok((Declarator::Name(name), Vec::new()))
             }
-            Token::OpenParen => {
-                let declarator = self.parse(context)?;
+            Ok(Token::OpenParen) => {
+                self.expect(Token::OpenParen)?;
+                let (declarator, structs) = self.parse(context)?;
                 self.expect(Token::CloseParen)?;
-                Ok(declarator)
+                Ok((declarator, structs))
             }
-            _ => Err("Invalid declarator".into()),
+            // empty list or some other kind of token both mean that this is an abstract declarator
+            _ => Ok((Declarator::Base, Vec::new())),
         }
     }
 
     fn parse_param_list(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<Vec<OutputWithStruct>, Box<dyn Error>> {
+    ) -> Result<(Vec<(Type, Declarator)>, Vec<StructDeclaration>), Box<dyn Error>> {
         self.expect(Token::OpenParen)?;
         let mut param_list = Vec::new();
+        let mut structs = Vec::new();
 
         if self.peek()? == Token::KeywordVoid {
             self.expect(Token::KeywordVoid)?;
             if matches!(self.peek()?, Token::CloseParen) {
                 self.expect(Token::CloseParen)?;
-                return Ok(param_list);
+                return Ok((param_list, structs));
             } else {
                 // void wasn't in parentheses by itself, so keep scanning param list
                 self.push_front(Token::KeywordVoid)
             }
         }
 
-        param_list.push(self.parse_param(context)?);
+        let (t, param, mut structs_from_param) = self.parse_param(context)?;
+        param_list.push((t, param));
+        structs.append(&mut structs_from_param);
         while self.peek()? != Token::CloseParen {
             self.expect(Token::Comma)?;
-            param_list.push(self.parse_param(context)?);
+            let (t, param, mut structs_from_param) = self.parse_param(context)?;
+            param_list.push((t, param));
+            structs.append(&mut structs_from_param);
         }
         self.expect(Token::CloseParen)?;
-        Ok(param_list)
+        Ok((param_list, structs))
     }
 
     fn parse_param(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<OutputWithStruct, Box<dyn Error>> {
-        // check whether there is a declarator present in this param
-        let mut copy_remaining_tokens_after_type = self.clone();
-        copy_remaining_tokens_after_type.pop_tokens_for_type(context)?;
-
-        let is_anonymous = matches!(
-            copy_remaining_tokens_after_type.front(),
-            None | Some(Token::Comma | Token::CloseParen)
-        );
-
-        if !is_anonymous {
-            self.parse(context)
-        } else {
-            let (t, s): (Type, Option<StructDeclaration>) = self.parse(context)?;
-            context.num_anonymous_params += 1;
-            let declarator = Declarator::Name(format!(
-                "anonymous.parameter.{}",
-                context.num_anonymous_params
-            ));
-            Ok((t, declarator, s))
-        }
-        // function params never have static or extern storage
+    ) -> Result<(Type, Declarator, Vec<StructDeclaration>), Box<dyn Error>> {
+        self.parse(context)
     }
 
     fn parse_array(
@@ -185,43 +210,53 @@ impl Declarator {
         match self {
             Declarator::Name(name) => Ok(DeclaratorApplicationOutput {
                 out_type: base_type,
-                name,
+                name: Some(name),
                 param_names: None,
-                struct_declarations: Vec::new(),
+            }),
+            Declarator::Base => Ok(DeclaratorApplicationOutput {
+                out_type: base_type,
+                name: None,
+                param_names: None,
             }),
             Declarator::Pointer(declarator, is_restricted) => {
-                // discard param names, function pointers aren't real
                 declarator.apply_to_type(Type::Pointer(Box::new(base_type), is_restricted), context)
             }
+            Declarator::ConstPointer(declarator) => {
+                // TODO: this const is thrown out the window. Once there's a mechanism to const-ify
+                // a type, it needs to be added here
+                declarator.apply_to_type(Type::Pointer(Box::new(base_type), false), context)
+            }
             Declarator::Function(declarator, params) => {
-                let name = if let Declarator::Name(name) = *declarator {
-                    name
-                } else {
-                    return Err("Cannot apply additional declarators to a function type (function pointers aren't real)".into());
-                };
-                let struct_declarations: Vec<StructDeclaration> = params
-                    .iter()
-                    .filter_map(|(_, _, struct_declaration)| struct_declaration.clone())
-                    .collect();
                 let (param_types, param_names): (Vec<Type>, Vec<String>) = process_results(
                     params
                         .into_iter()
-                        .map(|(t, declarator, _struct_declaration)| {
-                            declarator.apply_to_type(t, context)
-                        }),
-                    |iter| iter.map(|o| (o.out_type, o.name)).unzip(),
+                        .map(|(t, declarator)| declarator.apply_to_type(t, context)),
+                    |iter| {
+                        iter.map(|o| (o.out_type, o.name.unwrap_or(".anonymous".to_string())))
+                            .unzip()
+                    },
                 )?;
 
-                Ok(DeclaratorApplicationOutput {
-                    out_type: Type::Function(Box::new(base_type), param_types),
-                    name,
-                    param_names: Some(param_names),
-                    struct_declarations,
-                })
+                if let Declarator::Name(name) = *declarator {
+                    Ok(DeclaratorApplicationOutput {
+                        out_type: Type::Function(Box::new(base_type), param_types),
+                        name: Some(name),
+                        param_names: Some(param_names),
+                    })
+                } else {
+                    // discard param names, function pointers will never use them directly
+                    // because we know this isn't a function definition with a body.
+                    declarator
+                        .apply_to_type(Type::Function(Box::new(base_type), param_types), context)
+                }
             }
             Declarator::Array(declarator, size_expression) => {
-                let size = size_expression.fold_to_constant(context)?.value_unsigned();
-                declarator.apply_to_type(Type::Array(Box::new(base_type), size), context)
+                if let Some(expression) = size_expression {
+                    let size = expression.0.fold_to_constant(context)?.value_unsigned();
+                    declarator.apply_to_type(Type::Array(Box::new(base_type), Some(size)), context)
+                } else {
+                    declarator.apply_to_type(Type::Array(Box::new(base_type), None), context)
+                }
             }
         }
     }

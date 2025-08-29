@@ -1,8 +1,11 @@
 use super::{
-    AbstractDeclarator, BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, Identity, Parse,
-    ParseContext, Type, UnaryOperatorNode,
+    BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, Identity, Parse, ParseContext, Type,
+    UnaryOperatorNode,
 };
-use crate::compiler::lexer::{Token, TokenVector};
+use crate::compiler::{
+    lexer::{Token, TokenVector},
+    parser::{Declarator, StructDeclaration},
+};
 use std::{collections::VecDeque, error::Error};
 
 impl Parse<ExpressionNode> for VecDeque<Token> {
@@ -84,13 +87,21 @@ impl ParseExpression for VecDeque<Token> {
                 self.expect(Token::OpenParen)?;
                 if self.peek()?.is_start_of_declaration(context) {
                     let cast_type: Type = self.parse(context)?;
-                    let abstract_declarator: AbstractDeclarator = self.parse(context)?;
-                    let real_cast_type = abstract_declarator.apply_to_type(cast_type, context)?;
+                    let (declarator, struct_declarations): (Declarator, Vec<StructDeclaration>) =
+                        self.parse(context)?;
+                    let declarator_output = declarator.apply_to_type(cast_type, context)?;
+                    if declarator_output.name.is_some() {
+                        return Err(
+                            "Cast must be used with an abstract declarator, but a name was found"
+                                .into(),
+                        );
+                    }
                     self.expect(Token::CloseParen)?;
                     let factor = self.parse_cast(context, false)?.unwrap();
                     Some(ExpressionWithoutType::Cast(
-                        real_cast_type,
+                        declarator_output.out_type,
                         Box::new(factor.into()),
+                        struct_declarations,
                     ))
                 } else {
                     // baited, not actually a cast, go further down the chain...
@@ -214,12 +225,18 @@ impl ParseExpression for VecDeque<Token> {
                             self.expect(Token::OpenParen)?;
                             if self.peek()?.is_start_of_declaration(context) {
                                 let target_type: Type = self.parse(context)?;
-                                let abstract_declarator: AbstractDeclarator =
+                                let (declarator, structs): (Declarator, Vec<StructDeclaration>) =
                                     self.parse(context)?;
-                                let real_target_type =
-                                    abstract_declarator.apply_to_type(target_type, context)?;
+                                let declarator_output =
+                                    declarator.apply_to_type(target_type, context)?;
+                                if declarator_output.name.is_some() {
+                                    return Err("Sizeof must be used with an abstract declarator, but a name was found".into());
+                                }
                                 self.expect(Token::CloseParen)?;
-                                Some(ExpressionWithoutType::SizeOfType(real_target_type))
+                                Some(ExpressionWithoutType::SizeOfType(
+                                    declarator_output.out_type,
+                                    structs,
+                                ))
                             } else {
                                 self.push_front(Token::OpenParen);
                                 let expression = self.parse_postfix(context, allow_empty)?.unwrap();
@@ -297,6 +314,44 @@ impl ParseExpression for VecDeque<Token> {
                         Box::new(left.unwrap().into()),
                         loc,
                     ));
+                }
+                Token::OpenParen => {
+                    if let Some(ExpressionWithoutType::Var(name)) = left {
+                        let (new_name, _external_link) =
+                            ExpressionWithoutType::resolve_identifier(&name, context)?;
+
+                        self.expect(Token::OpenParen)?;
+                        let mut arguments: Vec<ExpressionWithoutType> = Vec::new();
+                        if !matches!(self.peek()?, Token::CloseParen) {
+                            arguments.push(self.parse(context)?);
+                        }
+                        while matches!(self.peek()?, Token::Comma) {
+                            self.expect(Token::Comma)?;
+                            arguments.push(self.parse(context)?);
+                        }
+                        self.expect(Token::CloseParen)?;
+
+                        left = Some(ExpressionWithoutType::FunctionCall(
+                            new_name,
+                            arguments.into_iter().map(|a| a.into()).collect(),
+                        ))
+                    } else {
+                        self.expect(Token::OpenParen)?;
+                        let mut arguments: Vec<ExpressionWithoutType> = Vec::new();
+                        if !matches!(self.peek()?, Token::CloseParen) {
+                            arguments.push(self.parse(context)?);
+                        }
+                        while matches!(self.peek()?, Token::Comma) {
+                            self.expect(Token::Comma)?;
+                            arguments.push(self.parse(context)?);
+                        }
+                        self.expect(Token::CloseParen)?;
+
+                        left = Some(ExpressionWithoutType::IndirectFunctionCall(
+                            Box::new(left.unwrap().into()),
+                            arguments.into_iter().map(|a| a.into()).collect(),
+                        ))
+                    }
                 }
                 _ => unreachable!(),
             }

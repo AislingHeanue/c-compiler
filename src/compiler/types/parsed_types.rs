@@ -35,7 +35,7 @@ impl Type {
             Type::Function(_, _) => unreachable!(),
             Type::Void => unreachable!(),
             Type::Array(t, size) => {
-                align_stack_size(t.get_size(structs), t.get_alignment(structs)) * (*size)
+                align_stack_size(t.get_size(structs), t.get_alignment(structs)) * (size.unwrap())
             } // arrays are like pointers except that they aren't
             Type::Struct(name, _) => structs.get(name).unwrap().size,
         }
@@ -105,6 +105,8 @@ impl Type {
         match self {
             Type::Struct(name, _) => structs.contains_key(name),
             Type::Void => false,
+            Type::Function(_, _) => false,
+            Type::Array(_, s) => s.is_some(),
             _ => true,
         }
     }

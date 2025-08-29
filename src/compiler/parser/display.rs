@@ -194,11 +194,10 @@ impl CodeDisplay for ForInitialiserNode {
 
 impl CodeDisplay for VariableDeclaration {
     fn show(&self, context: &mut DisplayContext) -> String {
-        let struct_part = if let Some(s) = &self.struct_declaration {
-            s.show(context) + &context.new_line_start()
-        } else {
-            "".to_string()
-        };
+        let mut struct_part = "".to_string();
+        for s in self.struct_declarations.iter() {
+            struct_part += &(s.show(context) + &context.new_line_start())
+        }
         if let Some(init) = &self.init {
             format!(
                 "{}var {} {} = {}",
@@ -337,7 +336,8 @@ impl CodeDisplay for Type {
                     format!("*{}", t.show(context))
                 }
             }
-            Type::Array(t, s) => format!("[{}]{}", s, t.show(context)),
+            Type::Array(t, Some(s)) => format!("[{}]{}", s, t.show(context)),
+            Type::Array(t, None) => format!("[]{}", t.show(context)),
             Type::Char => "rune".to_string(),
             Type::SignedChar => "signed_rune".to_string(),
             Type::UnsignedChar => "unsigned_rune".to_string(),
@@ -450,8 +450,24 @@ impl CodeDisplay for ExpressionWithoutType {
             ExpressionWithoutType::FunctionCall(name, args) => {
                 format!("{}({})", name, args.show(&mut context.indent()))
             }
-            ExpressionWithoutType::Cast(target_type, e) => {
-                format!("{}({})", target_type.show(context), e.show(context))
+            ExpressionWithoutType::IndirectFunctionCall(left, args) => {
+                format!(
+                    "({})({})",
+                    left.show(context),
+                    args.show(&mut context.indent())
+                )
+            }
+            ExpressionWithoutType::Cast(target_type, e, struct_declarations) => {
+                let mut struct_part = "".to_string();
+                for s in struct_declarations.iter() {
+                    struct_part += &(s.show(context) + &context.new_line_start())
+                }
+                format!(
+                    "{}{}({})",
+                    struct_part,
+                    target_type.show(context),
+                    e.show(context)
+                )
             }
             ExpressionWithoutType::Dereference(e) => format!("*{}", e.show(context)),
             ExpressionWithoutType::AddressOf(e) => format!("&{}", e.show(context)),
@@ -467,7 +483,13 @@ impl CodeDisplay for ExpressionWithoutType {
                 out
             }
             ExpressionWithoutType::SizeOf(e) => format!("sizeof({})", e.show(context)),
-            ExpressionWithoutType::SizeOfType(t) => format!("sizeof({})", t.show(context)),
+            ExpressionWithoutType::SizeOfType(t, struct_declarations) => {
+                let mut struct_part = "".to_string();
+                for s in struct_declarations.iter() {
+                    struct_part += &(s.show(context) + &context.new_line_start())
+                }
+                format!("{}sizeof({})", struct_part, t.show(context))
+            }
             ExpressionWithoutType::Dot(e, name) => format!("{}.{}", e.show(context), name),
             ExpressionWithoutType::Arrow(p, name) => format!("(*{}).{}", p.show(context), name),
         }

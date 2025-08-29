@@ -530,7 +530,28 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     Ok((instructions, new_dst.into()))
                 }
             }
-            ExpressionWithoutType::Cast(target_type, e) => {
+            ExpressionWithoutType::IndirectFunctionCall(left, args) => {
+                let (mut instructions, left_ptr): E = left.convert(context)?;
+                let (mut instructions_from_args, values): Ve = args.convert(context)?;
+                instructions.append(&mut instructions_from_args);
+
+                let new_dst_type = self.1.as_ref().unwrap();
+                if *new_dst_type == Type::Void {
+                    instructions.push(BirdsInstructionNode::IndirectFunctionCall(
+                        left_ptr, values, None,
+                    ));
+                    Ok((instructions, BirdsValueNode::Var("!".to_string()).into()))
+                } else {
+                    let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
+                    instructions.push(BirdsInstructionNode::IndirectFunctionCall(
+                        left_ptr,
+                        values,
+                        Some(new_dst.clone()),
+                    ));
+                    Ok((instructions, new_dst.into()))
+                }
+            }
+            ExpressionWithoutType::Cast(target_type, e, _) => {
                 let this_type = e.1.clone().unwrap();
                 let (mut instructions, new_src): E = e.convert(context)?;
 
@@ -656,7 +677,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     .into(),
                 ))
             }
-            ExpressionWithoutType::SizeOfType(t) => Ok((
+            ExpressionWithoutType::SizeOfType(t, _) => Ok((
                 Vec::new(),
                 BirdsValueNode::Constant(Constant::UnsignedLong(t.get_size(&mut context.structs)))
                     .into(),

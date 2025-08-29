@@ -59,10 +59,6 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
             | BirdsInstructionNode::UintToFloat(ref mut src, _)
             | BirdsInstructionNode::FloatToDouble(ref mut src, _)
             | BirdsInstructionNode::DoubleToFloat(ref mut src, _)
-            // | BirdsInstructionNode::FloatToInt(ref mut src, _)
-            // | BirdsInstructionNode::FloatToUint(ref mut src, _)
-            // | BirdsInstructionNode::UintToFloat(ref mut src, _)
-            // | BirdsInstructionNode::IntToFloat(ref mut src, _)
             | BirdsInstructionNode::CopyToOffset(ref mut src, _, _)
             | BirdsInstructionNode::LoadFromPointer(ref mut src, _)
             | BirdsInstructionNode::StoreInPointer(ref mut src, _) => {
@@ -70,13 +66,14 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 Some(instruction)
             }
             BirdsInstructionNode::Binary(_, ref mut left, ref mut right, _)
-            |BirdsInstructionNode::JumpCondition(_, ref mut left, ref mut right, _)
+            | BirdsInstructionNode::JumpCondition(_, ref mut left, ref mut right, _)
             | BirdsInstructionNode::AddPointer(ref mut left, ref mut right, _, _) => {
                 Self::replace_value(left, &reaching_copies);
                 Self::replace_value(right, &reaching_copies);
                 Some(instruction)
             }
-            BirdsInstructionNode::FunctionCall(_, ref mut args, _) => {
+            BirdsInstructionNode::IndirectFunctionCall(_, ref mut args, _)
+            | BirdsInstructionNode::FunctionCall(_, ref mut args, _) => {
                 for arg in args.iter_mut() {
                     Self::replace_value(arg, &reaching_copies);
                 }
@@ -93,12 +90,12 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 }
                 Some(instruction)
             }
+            // GetAddress is never propagated to because it returns the sources, address, not its
+            // pointer
             BirdsInstructionNode::Jump(_)
             | BirdsInstructionNode::Return(None)
             | BirdsInstructionNode::Label(_)
-            // GetAddress is never propagated to because it returns the sources, address, not its
-            // pointer
-            | BirdsInstructionNode::GetAddress(_,_)=> Some(instruction),
+            | BirdsInstructionNode::GetAddress(_, _) => Some(instruction),
         }
     }
 

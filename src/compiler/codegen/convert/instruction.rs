@@ -7,7 +7,7 @@ use crate::compiler::{
         ConvertContext, ImmediateValue, Instruction, Operand, Register, DOUBLE_PARAM_REGISTERS,
         DOUBLE_RETURN_REGISTERS, FUNCTION_PARAM_REGISTERS, FUNCTION_RETURN_REGISTERS,
     },
-    types::StaticInitialiser,
+    types::{StaticInitialiser, Type},
 };
 use std::error::Error;
 
@@ -463,211 +463,42 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
             BirdsInstructionNode::FunctionCall(name, args, dst) => {
                 let mut instructions = Vec::new();
 
-                let returns = if let Some(ref d) = dst {
-                    pass_returns_to_caller(d.clone(), context)?
-                } else {
-                    ReturnInfo {
-                        integer: Vec::new(),
-                        double: Vec::new(),
-                        uses_memory: false,
-                    }
-                };
-
-                let int_register_start = if returns.uses_memory {
-                    instructions.push(Instruction::Lea(
-                        dst.clone().unwrap().convert(context)?,
-                        Operand::Reg(FUNCTION_PARAM_REGISTERS[0].clone()),
-                    ));
-                    1
-                } else {
-                    0
-                };
-
-                let args = pass_args_to_callee(args, returns.uses_memory, context)?;
-
-                let len_stack_args = args.stack.len();
-                let stack_padding: i64 = if len_stack_args % 2 == 1 { 8 } else { 0 };
-                if stack_padding != 0 {
-                    instructions.push(Instruction::Binary(
-                        BinaryOperator::Sub,
-                        AssemblyType::Quadword,
-                        Operand::Imm(ImmediateValue::Signed(stack_padding)),
-                        Operand::Reg(Register::SP),
-                    ));
-                }
-
-                for (i, (arg, _is_signed, arg_type)) in args.integer.into_iter().enumerate() {
-                    match arg_type {
-                        AssemblyType::ByteArray(size, _) => {
-                            if size < 4 {
-                                // the caller should zero out the first 4 bytes of any argument
-                                // register for compatibility with Clang functions.
-                                instructions.push(Instruction::Mov(
-                                    AssemblyType::Longword,
-                                    Operand::Imm(ImmediateValue::Signed(0)),
-                                    Operand::Reg(
-                                        FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
-                                    ),
-                                ));
-                            }
-                            Instruction::copy_bytes_to_register(
-                                size as i32,
-                                &mut instructions,
-                                &arg,
-                                &FUNCTION_PARAM_REGISTERS[i + int_register_start],
-                            )
-                        }
-                        // AssemblyType::Byte if is_signed => {
-                        //     // the caller should zero out the first 4 bytes of any argument
-                        //     // register for compatibility with Clang functions.
-                        //     // instructions.push(Instruction::Movsx(
-                        //     //     AssemblyType::Byte,
-                        //     //     AssemblyType::Longword,
-                        //     //     arg,
-                        //     //     Operand::Reg(
-                        //     //         FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
-                        //     //     ),
-                        //     // ));
-                        // }
-                        AssemblyType::Byte => {
-                            // the caller should zero out the first 4 bytes of any argument
-                            // register for compatibility with Clang functions.
-                            // instructions.push(Instruction::MovZeroExtend(
-                            //     AssemblyType::Byte,
-                            //     AssemblyType::Longword,
-                            //     arg,
-                            //     Operand::Reg(
-                            //         FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
-                            //     ),
-                            // ));
-                            // Currently doesn't work in this exact form, see
-                            // https://github.com/nlsandler/writing-a-c-compiler-tests/issues/140
-                            instructions.push(Instruction::Mov(
-                                AssemblyType::Longword,
-                                Operand::Imm(ImmediateValue::Signed(0)),
-                                Operand::Reg(
-                                    FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
-                                ),
-                            ));
-                            instructions.push(Instruction::Mov(
-                                AssemblyType::Byte,
-                                arg,
-                                Operand::Reg(
-                                    FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
-                                ),
-                            ));
-                        }
-                        _ => {
-                            instructions.push(Instruction::Mov(
-                                arg_type,
-                                arg,
-                                Operand::Reg(
-                                    FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
-                                ),
-                            ));
-                        }
-                    }
-                }
-
-                for (i, (arg, arg_type)) in args.double.into_iter().enumerate() {
-                    match arg_type {
-                        AssemblyType::Float => {
-                            // zero out the register we're putting this float into
-                            instructions.push(Instruction::Binary(
-                                BinaryOperator::Xor,
-                                AssemblyType::Double,
-                                Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
-                                Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
-                            ));
-
-                            instructions.push(Instruction::Mov(
-                                AssemblyType::Float,
-                                arg,
-                                Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
-                            ));
-                        }
-                        AssemblyType::Double => {
-                            instructions.push(Instruction::Mov(
-                                AssemblyType::Double,
-                                arg,
-                                Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
-                            ));
-                        }
-                        _ => return Err("Invalid type stored in SSE register".into()),
-                    }
-                }
-
-                for (arg, _is_signed, arg_type) in args.stack.into_iter().rev() {
-                    if let AssemblyType::ByteArray(size, _) = arg_type {
-                        instructions.push(Instruction::Binary(
-                            BinaryOperator::Sub,
-                            AssemblyType::Quadword,
-                            Operand::Imm(ImmediateValue::Signed(8)),
-                            Operand::Reg(Register::SP),
-                        ));
-                        Instruction::copy_bytes(
-                            size as i32,
-                            &mut instructions,
-                            &arg,
-                            &Operand::Memory(Register::SP, 0),
-                            0,
-                            0,
-                        )
-                    } else if matches!(arg, Operand::Imm(_) | Operand::Reg(_))
-                        || matches!(arg_type, AssemblyType::Quadword | AssemblyType::Double)
-                    {
-                        instructions.push(Instruction::Push(arg));
-                    } else {
-                        instructions.push(Instruction::Mov(
-                            arg_type,
-                            arg,
-                            Operand::Reg(Register::AX),
-                        ));
-                        instructions.push(Instruction::Push(Operand::Reg(Register::AX)));
-                    }
-                }
+                let (len_stack_args, stack_padding, returns) =
+                    Instruction::setup_for_function_call(&mut instructions, args, &dst, context)?;
 
                 instructions.push(Instruction::Call(name));
 
-                let callee_stack_size: i64 = 8 * len_stack_args as i64 + stack_padding;
-                if callee_stack_size != 0 {
-                    instructions.push(Instruction::Binary(
-                        BinaryOperator::Add,
-                        AssemblyType::Quadword,
-                        Operand::Imm(ImmediateValue::Signed(callee_stack_size)),
-                        Operand::Reg(Register::SP),
-                    ));
-                }
+                Instruction::teardown_for_function_call(
+                    &mut instructions,
+                    len_stack_args,
+                    stack_padding,
+                    returns,
+                    dst,
+                )?;
 
-                // the callee stuck its return values in an assortment of locations, collect them
-                // into the locations listed in the returns struct (which corresponds to the real
-                // dst).
-                if dst.is_some() && !returns.uses_memory {
-                    for (i, (op, t)) in returns.integer.iter().enumerate() {
-                        if let AssemblyType::ByteArray(size, _) = t {
-                            Instruction::copy_bytes_from_register(
-                                *size as i32,
-                                &mut instructions,
-                                &FUNCTION_RETURN_REGISTERS[i],
-                                op,
-                            );
-                        } else {
-                            instructions.push(Instruction::Mov(
-                                *t,
-                                Operand::Reg(FUNCTION_RETURN_REGISTERS[i].clone()),
-                                op.clone(),
-                            ))
-                        }
-                    }
-                    for (i, op) in returns.double.iter().enumerate() {
-                        let this_src = Operand::Reg(DOUBLE_RETURN_REGISTERS[i].clone());
-                        instructions.push(Instruction::Mov(
-                            AssemblyType::Double,
-                            this_src,
-                            op.clone(),
-                        ))
-                    }
-                }
+                instructions
+            }
+            BirdsInstructionNode::IndirectFunctionCall(ptr, args, dst) => {
+                let mut instructions = Vec::new();
+                let left_ptr = ptr.convert(context)?;
+
+                let (len_stack_args, stack_padding, returns) =
+                    Instruction::setup_for_function_call(&mut instructions, args, &dst, context)?;
+
+                // instructions.push(Instruction::Mov(
+                //     AssemblyType::Quadword,
+                //     left_ptr,
+                //     Operand::Reg(Register::AX),
+                // ));
+                instructions.push(Instruction::CallIndirect(left_ptr));
+
+                Instruction::teardown_for_function_call(
+                    &mut instructions,
+                    len_stack_args,
+                    stack_padding,
+                    returns,
+                    dst,
+                )?;
 
                 instructions
             }
@@ -962,6 +793,15 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 )]
             }
             BirdsInstructionNode::GetAddress(src, dst) => {
+                if let BirdsValueNode::Var(ref v) = src {
+                    let info = context.symbols.get(v).unwrap();
+                    if let Type::Function(_, _) = info.symbol_type {
+                        return Ok(vec![Instruction::Lea(
+                            Operand::Data(v.to_string(), 0),
+                            dst.convert(context)?,
+                        )]);
+                    }
+                }
                 vec![Instruction::Lea(
                     src.convert(context)?,
                     dst.convert(context)?,
@@ -1221,6 +1061,212 @@ impl Instruction {
         offset_src: i32,
     ) {
         instructions.push(Instruction::Mov(*t, src.offset(offset_src), dst.clone()));
+    }
+
+    pub fn setup_for_function_call(
+        instructions: &mut Vec<Instruction>,
+        args: Vec<BirdsValueNode>,
+        dst: &Option<BirdsValueNode>,
+        context: &mut ConvertContext,
+    ) -> Result<(usize, i64, ReturnInfo), Box<dyn Error>> {
+        let returns = if let Some(ref d) = dst {
+            pass_returns_to_caller(d.clone(), context)?
+        } else {
+            ReturnInfo {
+                integer: Vec::new(),
+                double: Vec::new(),
+                uses_memory: false,
+            }
+        };
+
+        let int_register_start = if returns.uses_memory {
+            instructions.push(Instruction::Lea(
+                dst.clone().unwrap().convert(context)?,
+                Operand::Reg(FUNCTION_PARAM_REGISTERS[0].clone()),
+            ));
+            1
+        } else {
+            0
+        };
+
+        let args = pass_args_to_callee(args, returns.uses_memory, context)?;
+
+        let len_stack_args = args.stack.len();
+        let stack_padding: i64 = if len_stack_args % 2 == 1 { 8 } else { 0 };
+        if stack_padding != 0 {
+            instructions.push(Instruction::Binary(
+                BinaryOperator::Sub,
+                AssemblyType::Quadword,
+                Operand::Imm(ImmediateValue::Signed(stack_padding)),
+                Operand::Reg(Register::SP),
+            ));
+        }
+
+        for (i, (arg, _is_signed, arg_type)) in args.integer.into_iter().enumerate() {
+            match arg_type {
+                AssemblyType::ByteArray(size, _) => {
+                    if size < 4 {
+                        // the caller should zero out the first 4 bytes of any argument
+                        // register for compatibility with Clang functions.
+                        instructions.push(Instruction::Mov(
+                            AssemblyType::Longword,
+                            Operand::Imm(ImmediateValue::Signed(0)),
+                            Operand::Reg(FUNCTION_PARAM_REGISTERS[i + int_register_start].clone()),
+                        ));
+                    }
+                    Instruction::copy_bytes_to_register(
+                        size as i32,
+                        instructions,
+                        &arg,
+                        &FUNCTION_PARAM_REGISTERS[i + int_register_start],
+                    )
+                }
+                // AssemblyType::Byte if is_signed => {
+                //     // the caller should zero out the first 4 bytes of any argument
+                //     // register for compatibility with Clang functions.
+                //     // instructions.push(Instruction::Movsx(
+                //     //     AssemblyType::Byte,
+                //     //     AssemblyType::Longword,
+                //     //     arg,
+                //     //     Operand::Reg(
+                //     //         FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
+                //     //     ),
+                //     // ));
+                // }
+                AssemblyType::Byte => {
+                    // the caller should zero out the first 4 bytes of any argument
+                    // register for compatibility with Clang functions.
+                    // instructions.push(Instruction::MovZeroExtend(
+                    //     AssemblyType::Byte,
+                    //     AssemblyType::Longword,
+                    //     arg,
+                    //     Operand::Reg(
+                    //         FUNCTION_PARAM_REGISTERS[i + int_register_start].clone(),
+                    //     ),
+                    // ));
+                    // Currently doesn't work in this exact form, see
+                    // https://github.com/nlsandler/writing-a-c-compiler-tests/issues/140
+                    instructions.push(Instruction::Mov(
+                        AssemblyType::Longword,
+                        Operand::Imm(ImmediateValue::Signed(0)),
+                        Operand::Reg(FUNCTION_PARAM_REGISTERS[i + int_register_start].clone()),
+                    ));
+                    instructions.push(Instruction::Mov(
+                        AssemblyType::Byte,
+                        arg,
+                        Operand::Reg(FUNCTION_PARAM_REGISTERS[i + int_register_start].clone()),
+                    ));
+                }
+                _ => {
+                    instructions.push(Instruction::Mov(
+                        arg_type,
+                        arg,
+                        Operand::Reg(FUNCTION_PARAM_REGISTERS[i + int_register_start].clone()),
+                    ));
+                }
+            }
+        }
+
+        for (i, (arg, arg_type)) in args.double.into_iter().enumerate() {
+            match arg_type {
+                AssemblyType::Float => {
+                    // zero out the register we're putting this float into
+                    instructions.push(Instruction::Binary(
+                        BinaryOperator::Xor,
+                        AssemblyType::Double,
+                        Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
+                        Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
+                    ));
+
+                    instructions.push(Instruction::Mov(
+                        AssemblyType::Float,
+                        arg,
+                        Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
+                    ));
+                }
+                AssemblyType::Double => {
+                    instructions.push(Instruction::Mov(
+                        AssemblyType::Double,
+                        arg,
+                        Operand::Reg(DOUBLE_PARAM_REGISTERS[i].clone()),
+                    ));
+                }
+                _ => return Err("Invalid type stored in SSE register".into()),
+            }
+        }
+
+        for (arg, _is_signed, arg_type) in args.stack.into_iter().rev() {
+            if let AssemblyType::ByteArray(size, _) = arg_type {
+                instructions.push(Instruction::Binary(
+                    BinaryOperator::Sub,
+                    AssemblyType::Quadword,
+                    Operand::Imm(ImmediateValue::Signed(8)),
+                    Operand::Reg(Register::SP),
+                ));
+                Instruction::copy_bytes(
+                    size as i32,
+                    instructions,
+                    &arg,
+                    &Operand::Memory(Register::SP, 0),
+                    0,
+                    0,
+                )
+            } else if matches!(arg, Operand::Imm(_) | Operand::Reg(_))
+                || matches!(arg_type, AssemblyType::Quadword | AssemblyType::Double)
+            {
+                instructions.push(Instruction::Push(arg));
+            } else {
+                instructions.push(Instruction::Mov(arg_type, arg, Operand::Reg(Register::AX)));
+                instructions.push(Instruction::Push(Operand::Reg(Register::AX)));
+            }
+        }
+        Ok((len_stack_args, stack_padding, returns))
+    }
+
+    fn teardown_for_function_call(
+        instructions: &mut Vec<Instruction>,
+        len_stack_args: usize,
+        stack_padding: i64,
+        returns: ReturnInfo,
+        dst: Option<BirdsValueNode>,
+    ) -> Result<(), Box<dyn Error>> {
+        let callee_stack_size: i64 = 8 * len_stack_args as i64 + stack_padding;
+        if callee_stack_size != 0 {
+            instructions.push(Instruction::Binary(
+                BinaryOperator::Add,
+                AssemblyType::Quadword,
+                Operand::Imm(ImmediateValue::Signed(callee_stack_size)),
+                Operand::Reg(Register::SP),
+            ));
+        }
+
+        // the callee stuck its return values in an assortment of locations, collect them
+        // into the locations listed in the returns struct (which corresponds to the real
+        // dst).
+        if dst.is_some() && !returns.uses_memory {
+            for (i, (op, t)) in returns.integer.iter().enumerate() {
+                if let AssemblyType::ByteArray(size, _) = t {
+                    Instruction::copy_bytes_from_register(
+                        *size as i32,
+                        instructions,
+                        &FUNCTION_RETURN_REGISTERS[i],
+                        op,
+                    );
+                } else {
+                    instructions.push(Instruction::Mov(
+                        *t,
+                        Operand::Reg(FUNCTION_RETURN_REGISTERS[i].clone()),
+                        op.clone(),
+                    ))
+                }
+            }
+            for (i, op) in returns.double.iter().enumerate() {
+                let this_src = Operand::Reg(DOUBLE_RETURN_REGISTERS[i].clone());
+                instructions.push(Instruction::Mov(AssemblyType::Double, this_src, op.clone()))
+            }
+        }
+
+        Ok(())
     }
 }
 

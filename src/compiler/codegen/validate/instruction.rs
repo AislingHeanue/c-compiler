@@ -248,6 +248,9 @@ impl Instruction {
             }
             Instruction::Pop(_) => {} // pop only points to real registers
             Instruction::Call(_) => {}
+            Instruction::CallIndirect(ref mut src) => {
+                src.replace_mock_register(context);
+            }
             Instruction::Lea(ref mut src, ref mut dst) => {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
@@ -742,6 +745,56 @@ impl Instruction {
                 } else {
                     unreachable!()
                 };
+                let updated = vec![
+                    Operand::Reg(Register::DI),
+                    Operand::Reg(Register::SI),
+                    Operand::Reg(Register::DX),
+                    Operand::Reg(Register::CX),
+                    Operand::Reg(Register::R8),
+                    Operand::Reg(Register::R9),
+                    Operand::Reg(Register::AX),
+                    Operand::Reg(Register::XMM0),
+                    Operand::Reg(Register::XMM1),
+                    Operand::Reg(Register::XMM2),
+                    Operand::Reg(Register::XMM3),
+                    Operand::Reg(Register::XMM4),
+                    Operand::Reg(Register::XMM5),
+                    Operand::Reg(Register::XMM6),
+                    Operand::Reg(Register::XMM7),
+                    Operand::Reg(Register::XMM7),
+                    Operand::Reg(Register::XMM8),
+                    Operand::Reg(Register::XMM9),
+                    Operand::Reg(Register::XMM10),
+                    Operand::Reg(Register::XMM11),
+                    Operand::Reg(Register::XMM12),
+                    Operand::Reg(Register::XMM13),
+                    Operand::Reg(Register::XMM14),
+                    Operand::Reg(Register::XMM15),
+                ];
+                convert_uses_and_updates((used, updated))
+            }
+            Instruction::CallIndirect(src) => {
+                // assume that all registers are used, since we have no way of knowing what kind of
+                // function this is.
+                let mut used = vec![
+                    Operand::Reg(Register::DI),
+                    Operand::Reg(Register::SI),
+                    Operand::Reg(Register::DX),
+                    Operand::Reg(Register::CX),
+                    Operand::Reg(Register::R8),
+                    Operand::Reg(Register::R9),
+                    Operand::Reg(Register::XMM0),
+                    Operand::Reg(Register::XMM1),
+                    Operand::Reg(Register::XMM2),
+                    Operand::Reg(Register::XMM3),
+                    Operand::Reg(Register::XMM4),
+                    Operand::Reg(Register::XMM5),
+                    Operand::Reg(Register::XMM6),
+                    Operand::Reg(Register::XMM7),
+                    Operand::Reg(Register::XMM7),
+                    Operand::Reg(Register::XMM8),
+                ];
+                used.push(src.clone());
                 let updated = vec![
                     Operand::Reg(Register::DI),
                     Operand::Reg(Register::SI),

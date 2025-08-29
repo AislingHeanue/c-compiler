@@ -101,6 +101,8 @@ impl InitialiserNode {
             (InitialiserWithoutType::Single(e), Type::Array(t, size))
                 if e.is_string_literal() && t.is_character() =>
             {
+                let size =
+                    size.ok_or::<Box<dyn Error>>("Can't initialise incomplete array type".into())?;
                 let mut instructions = Vec::new();
                 let first_offset = context.current_initialiser_offset;
                 if let ExpressionWithoutType::String(v) = e.0 {

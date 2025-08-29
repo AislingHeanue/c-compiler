@@ -393,6 +393,7 @@ impl Token {
                 | Token::OpenSquareBracket
                 | Token::Dot
                 | Token::Arrow
+                | Token::OpenParen
         )
     }
 
@@ -440,6 +441,7 @@ impl TokenVector for VecDeque<Token> {
     fn expect(&mut self, expected: Token) -> Result<(), Box<dyn Error>> {
         let token = self.read()?;
         if discriminant(&expected) != discriminant(&token) {
+            println!("{:?}", self);
             return Err(format!(
                 "Unexpected token, got {:?}, expecting {:?}",
                 token, expected

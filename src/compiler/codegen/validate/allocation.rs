@@ -117,6 +117,9 @@ impl AllocateRegisters for Vec<Instruction> {
                 }
                 Instruction::Pop(_) => {} // pop only points to real registers
                 Instruction::Call(_) => {}
+                Instruction::CallIndirect(ref mut src) => {
+                    src.replace_mock_register_with_map(context);
+                }
                 Instruction::Lea(ref mut src, ref mut dst) => {
                     src.replace_mock_register_with_map(context);
                     dst.replace_mock_register_with_map(context);
@@ -162,6 +165,7 @@ impl AllocateRegisters for Vec<Instruction> {
                 | Instruction::Idiv(_, ref mut src)
                 | Instruction::Div(_, ref mut src)
                 | Instruction::SetCondition(_, ref mut src, _)
+                | Instruction::CallIndirect(ref mut src)
                 | Instruction::Push(ref mut src) => {
                     *src = true_register_value(src, &coalesced_registers);
                 }

@@ -100,7 +100,11 @@ impl ExpressionWithoutType {
                 return Err("Cannot use a function call in a constant".into())
             }
 
-            ExpressionWithoutType::Cast(t, e) => {
+            ExpressionWithoutType::IndirectFunctionCall(_, _) => {
+                return Err("Cannot use a function call in a constant".into())
+            }
+
+            ExpressionWithoutType::Cast(t, e, _) => {
                 if !t.is_integer() {
                     return Err("Cannot cast to a non-integer type in a constant".into());
                 }
@@ -126,7 +130,7 @@ impl ExpressionWithoutType {
                 return Err("Cannot use sizeof of an expression in a constant".into())
             }
 
-            ExpressionWithoutType::SizeOfType(t) => {
+            ExpressionWithoutType::SizeOfType(t, _) => {
                 // this should definitely be possible according to the spec
                 if matches!(t, Type::Struct(_, _)) {
                     return Err("Cannot get the size of a struct in a constant".into());
