@@ -85,6 +85,9 @@ impl CheckTypes for StructDeclaration {
                 // struct entries are sequential (with padding if needed)
                 align_stack_size(size, this_alignment)
             };
+            if m.name.is_none() && !matches!(m.member_type, Type::Enum(_) | Type::Struct(_, _)) {
+                return Err("Anonymous struct member must be one of enum, struct or union".into());
+            }
 
             entries.push(MemberEntry {
                 member_type: m.member_type.clone(),

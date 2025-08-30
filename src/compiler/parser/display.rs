@@ -359,8 +359,8 @@ impl CodeDisplay for Type {
                     format!("*{}", t.show(context))
                 }
             }
-            Type::Array(t, Some(s)) => format!("[{}]{}", s, t.show(context)),
-            Type::Array(t, None) => format!("[]{}", t.show(context)),
+            Type::Array(t, Some(s)) => format!("[{}]({})", s, t.show(context)),
+            Type::Array(t, None) => format!("[]({})", t.show(context)),
             Type::Char => "rune".to_string(),
             Type::SignedChar => "signed_rune".to_string(),
             Type::UnsignedChar => "unsigned_rune".to_string(),

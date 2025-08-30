@@ -492,7 +492,7 @@ impl ExpressionWithoutType {
             // assignment to enums can bring new names into scope. That being said, that only
             // applies to variable names which are not already found in the current scope, so the
             // majority of (valid) variables won't be affected by this change.
-            Ok((name.to_string(), false))
+            Ok((format!("{}.expecting.enum.member", name), false))
         }
     }
 

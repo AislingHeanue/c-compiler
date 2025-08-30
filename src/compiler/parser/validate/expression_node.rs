@@ -186,17 +186,24 @@ impl CheckTypes for ExpressionNode {
                     //     t => t.clone(),
                     // }
                     info.symbol_type.clone()
-                } else if let Some(member) =
-                    context.enum_names_in_scope.iter().find(|m| m.name == *name)
-                {
-                    *self = ExpressionNode(
-                        ExpressionWithoutType::Constant(Constant::Integer(member.init)),
-                        Some(Type::Integer),
-                        true,
-                    );
-                    self.1.clone().unwrap()
+                } else if name.ends_with(".expecting.enum.member") {
+                    let name = &name[..name.len() - 22];
+                    if let Some(member) =
+                        context.enum_names_in_scope.iter().find(|m| m.name == *name)
+                    {
+                        *self = ExpressionNode(
+                            ExpressionWithoutType::Constant(Constant::Integer(member.init)),
+                            Some(Type::Integer),
+                            true,
+                        );
+                        self.1.clone().unwrap()
+                    } else {
+                        return Err(
+                            format!("Variable '{}' is used before it is declared", name).into()
+                        );
+                    }
                 } else {
-                    return Err(format!("Variable {} is used before it is declared", name).into());
+                    return Err(format!("Variable '{}' is used before it is declared", name).into());
                 }
             }
             ExpressionWithoutType::Constant(ref c) => {
