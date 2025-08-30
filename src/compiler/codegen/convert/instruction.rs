@@ -54,9 +54,9 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                         }
                     }
 
-                    for (i, op) in returns.double.iter().enumerate() {
+                    for (i, (op, t)) in returns.double.iter().enumerate() {
                         instructions.push(Instruction::Mov(
-                            AssemblyType::Double,
+                            *t,
                             op.clone(),
                             Operand::Reg(DOUBLE_RETURN_REGISTERS[i].clone()),
                         ))
@@ -77,6 +77,13 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                             context,
                         );
                         Instruction::Cmp(src_type, zero, src.convert(context)?)
+                    } else if src_type == AssemblyType::Float {
+                        let zero = create_static_constant(
+                            src_type.get_alignment(),
+                            StaticInitialiser::Float(0.),
+                            context,
+                        );
+                        Instruction::Cmp(src_type, zero, src.convert(context)?)
                     } else {
                         Instruction::Cmp(
                             src_type,
@@ -94,15 +101,18 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     Instruction::SetCondition(
                         ConditionCode::E,
                         dst.convert(context)?,
-                        src_type == AssemblyType::Double,
+                        src_type.is_float(),
                     ),
                 ]
             }
             BirdsInstructionNode::Unary(op, src, dst) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
-                if src_type == AssemblyType::Double && op == BirdsUnaryOperatorNode::Negate {
-                    let negative_zero =
-                        create_static_constant(16, StaticInitialiser::Double(-0.0), context);
+                if src_type.is_float() && op == BirdsUnaryOperatorNode::Negate {
+                    let negative_zero = if src_type == AssemblyType::Double {
+                        create_static_constant(16, StaticInitialiser::Double(-0.0), context)
+                    } else {
+                        create_static_constant(16, StaticInitialiser::Float(-0.0), context)
+                    };
                     vec![
                         Instruction::Mov(
                             src_type,
@@ -210,7 +220,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
             BirdsInstructionNode::Binary(op, left, right, dst) if op.is_relational() => {
                 let (left_type, is_signed, _) = AssemblyType::infer(&left, context)?;
                 // use different condition codes if the expression type is unsigned
-                let instruction = if is_signed && left_type != AssemblyType::Double {
+                let instruction = if is_signed && !left_type.is_float() {
                     Instruction::SetCondition(
                         op.convert(context)?,
                         dst.clone().convert(context)?,
@@ -220,7 +230,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     Instruction::SetCondition(
                         op.convert_condition_unsigned(context)?,
                         dst.clone().convert(context)?,
-                        left_type == AssemblyType::Double,
+                        left_type.is_float(),
                     )
                 };
 
@@ -388,7 +398,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
             BirdsInstructionNode::Jump(s) => vec![Instruction::Jmp(s)],
             BirdsInstructionNode::JumpZero(src, s) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
-                if src_type == AssemblyType::Double {
+                if src_type.is_float() {
                     vec![
                         // Zero out XMM0 (this is the quickest way to get zero in double-land)
                         Instruction::Binary(
@@ -417,7 +427,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
             }
             BirdsInstructionNode::JumpNotZero(src, s) => {
                 let src_type = AssemblyType::infer(&src, context)?.0;
-                if src_type == AssemblyType::Double {
+                if src_type.is_float() {
                     vec![
                         // Zero out XMM0 (this is the quickest way to get zero in double-land)
                         Instruction::Binary(
@@ -446,9 +456,8 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
             }
             BirdsInstructionNode::JumpCondition(op, left, right, s) => {
                 let (left_type, is_signed, _) = AssemblyType::infer(&left, context)?;
-                let is_double = left_type == AssemblyType::Double;
                 let possible_codes: (ConditionCode, ConditionCode) = op.convert(context)?;
-                let condition_code = if is_signed && !is_double {
+                let condition_code = if is_signed && !left_type.is_float() {
                     possible_codes.0
                 } else {
                     possible_codes.1
@@ -456,7 +465,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 vec![
                     // don't forget to swap the left and right operands here
                     Instruction::Cmp(left_type, right.convert(context)?, left.convert(context)?),
-                    Instruction::JmpCondition(condition_code, s, is_double),
+                    Instruction::JmpCondition(condition_code, s, left_type.is_float()),
                 ]
             }
             BirdsInstructionNode::Label(s) => vec![Instruction::Label(s)],
@@ -1260,9 +1269,9 @@ impl Instruction {
                     ))
                 }
             }
-            for (i, op) in returns.double.iter().enumerate() {
+            for (i, (op, t)) in returns.double.iter().enumerate() {
                 let this_src = Operand::Reg(DOUBLE_RETURN_REGISTERS[i].clone());
-                instructions.push(Instruction::Mov(AssemblyType::Double, this_src, op.clone()))
+                instructions.push(Instruction::Mov(*t, this_src, op.clone()))
             }
         }
 

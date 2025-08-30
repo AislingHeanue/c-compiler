@@ -635,7 +635,7 @@ impl ExpressionNode {
             return Ok(());
         }
         let t1 = self.1.as_ref().unwrap();
-        if t1 != target {
+        if !t1.equal_for_assignment(target) {
             if (t1.is_arithmetic() && target.is_arithmetic())
                 || (matches!(t1, Type::Pointer(t,_) if **t == Type::Void)
                     && matches!(target, Type::Pointer(_, _)))

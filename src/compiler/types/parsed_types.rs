@@ -156,4 +156,11 @@ impl Type {
             _ => Class::Integer,
         }
     }
+
+    pub fn equal_for_assignment(&self, other: &Type) -> bool {
+        match (self, other) {
+            (Type::Pointer(a, _), Type::Pointer(b, _)) => a == b,
+            _ => self == other,
+        }
+    }
 }

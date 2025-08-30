@@ -67,7 +67,7 @@ struct Args {
 #[derive(Debug)]
 pub struct ReturnInfo {
     integer: Vec<(Operand, AssemblyType)>,
-    double: Vec<Operand>,
+    double: Vec<(Operand, AssemblyType)>,
     uses_memory: bool,
 }
 
@@ -86,7 +86,7 @@ fn pass_args_to_callee(
 
     for v in values {
         let (t, is_signed, is_scalar) = AssemblyType::infer(&v, context)?;
-        if t == AssemblyType::Double {
+        if t.is_float() {
             if args.double.len() < 8 {
                 args.double.push((v.convert(context)?, t));
             } else {
@@ -161,7 +161,7 @@ fn pass_returns_to_caller(
         uses_memory: false,
     };
     if t.is_float() {
-        out.double.push(v.convert(context)?);
+        out.double.push((v.convert(context)?, t));
     } else if is_scalar {
         out.integer.push((v.convert(context)?, t));
     } else {
@@ -177,8 +177,10 @@ fn pass_returns_to_caller(
             for i in 0_i32..classes.len() as i32 {
                 match classes.get(i as usize).unwrap() {
                     Class::Sse => {
-                        out.double
-                            .push(Operand::MockMemory(var_name.clone(), i * 8));
+                        out.double.push((
+                            Operand::MockMemory(var_name.clone(), i * 8),
+                            AssemblyType::get_sse_eightbyte(i * 8, size as i32),
+                        ));
                     }
                     Class::Integer => {
                         out.integer.push((
