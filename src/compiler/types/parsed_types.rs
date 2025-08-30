@@ -32,7 +32,7 @@ impl Type {
             Type::Char => 1,
             Type::SignedChar => 1,
             Type::UnsignedChar => 1,
-            Type::Function(_, _) => unreachable!(),
+            Type::Function(_, _, _) => unreachable!(),
             Type::Void => unreachable!(),
             Type::Array(t, size) => {
                 align_stack_size(t.get_size(structs), t.get_alignment(structs)) * (size.unwrap())
@@ -100,7 +100,7 @@ impl Type {
     pub fn is_scalar(&self) -> bool {
         !matches!(
             self,
-            Type::Array(..) | Type::Void | Type::Function(_, _) | Type::Struct(_, _)
+            Type::Array(..) | Type::Void | Type::Function(_, _, _) | Type::Struct(_, _)
         )
     }
 
@@ -108,7 +108,7 @@ impl Type {
         match self {
             Type::Struct(name, _) => structs.contains_key(name),
             Type::Void => false,
-            Type::Function(_, _) => false,
+            Type::Function(_, _, _) => false,
             Type::Array(_, s) => s.is_some(),
             _ => true,
         }
@@ -150,7 +150,7 @@ impl Type {
             Type::Double => Class::Sse,
             Type::LongDouble => Class::Sse,
             Type::Array(..) => unreachable!(),
-            Type::Function(_, _) => unreachable!(),
+            Type::Function(_, _, _) => unreachable!(),
             Type::Struct(_, _) => unreachable!(),
             Type::Void => unreachable!(),
             _ => Class::Integer,

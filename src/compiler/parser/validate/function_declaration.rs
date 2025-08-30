@@ -35,7 +35,9 @@ impl CheckTypes for FunctionDeclaration {
         let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
 
         let (return_type, arg_types) =
-            if let Type::Function(ref return_type, ref mut arg_types) = &mut self.function_type {
+            if let Type::Function(ref return_type, ref mut arg_types, ref is_variadic) =
+                &mut self.function_type
+            {
                 (return_type, arg_types)
             } else {
                 return Err("Function is not a function type".into());
@@ -72,7 +74,7 @@ impl CheckTypes for FunctionDeclaration {
 
         // now that the type has been updated, drop the mutable reference to function_type
         let this_type = &self.function_type;
-        let arg_types = if let Type::Function(_, ref arg_types) = this_type {
+        let arg_types = if let Type::Function(_, ref arg_types, _) = this_type {
             arg_types
         } else {
             unreachable!()

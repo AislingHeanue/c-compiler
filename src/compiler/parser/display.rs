@@ -252,8 +252,8 @@ impl CodeDisplay for InitialiserWithoutType {
 
 impl CodeDisplay for FunctionDeclaration {
     fn show(&self, context: &mut DisplayContext) -> String {
-        let (out_type, param_types) = match &self.function_type {
-            Type::Function(out, params) => (out, params),
+        let (out_type, param_types, is_variadic) = match &self.function_type {
+            Type::Function(out, params, is_variadic) => (out, params, is_variadic),
             _ => unreachable!(),
         };
         let show_params = param_types
@@ -346,7 +346,7 @@ impl CodeDisplay for Type {
             Type::Long => "int64".to_string(),
             Type::UnsignedInteger => "uint32".to_string(),
             Type::UnsignedLong => "uint64".to_string(),
-            Type::Function(output, inputs) => {
+            Type::Function(output, inputs, is_variadic) => {
                 format!("func ({}) {}", inputs.show(context), output.show(context))
             }
             Type::Float => "float32".to_string(),

@@ -50,7 +50,7 @@ impl StaticInitialiser {
             Type::Char => StaticInitialiser::char_from_double(i),
             Type::SignedChar => StaticInitialiser::char_from_double(i),
             Type::UnsignedChar => StaticInitialiser::unsigned_char_from_double(i),
-            Type::Function(_, _) => unreachable!(),
+            Type::Function(_, _, _) => unreachable!(),
             Type::Pointer(_, _) => unreachable!(),
             Type::Array(..) => unreachable!(),
             Type::Void => unreachable!(),
@@ -85,7 +85,7 @@ impl StaticInitialiser {
                 }
                 value
             }
-            Type::Function(_, _) => unreachable!(),
+            Type::Function(_, _, _) => unreachable!(),
             Type::Void => unreachable!(),
             Type::Struct(_, _) => unreachable!(),
             Type::Enum(_) => StaticInitialiser::integer(i),

@@ -42,6 +42,7 @@ pub enum Token {
     Colon,
     Arrow,
     Dot,
+    Ellipses,
 
     AddAssign,
     SubtractAssign,
@@ -153,6 +154,7 @@ lazy_static! {
                 Token::Arrow => r"->",
                 Token::OpenSquareBracket => r"\[",
                 Token::CloseSquareBracket => r"\]",
+                Token::Ellipses => r"\.\.\.",
                 Token::Identifier(_) => r"^[a-zA-Z_]\w*\b",
                 Token::IntegerConstant(_) => r"((?:0x[0-9a-f]+)|(?:[0-9]+))[^\w.]",
                 Token::LongConstant(_) => r"((?:(?:0x[0-9a-f]+)|(?:[0-9]+))[lL])[^\w.]",

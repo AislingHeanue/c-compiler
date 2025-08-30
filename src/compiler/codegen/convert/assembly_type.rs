@@ -30,7 +30,7 @@ impl Convert<AssemblyType> for Type {
                 Ok(AssemblyType::ByteArray(size, alignment))
             }
             Type::Array(_, None) => Err("Tried to convert an incomplete array".into()),
-            Type::Function(_, _) => Err("Tried to convert a function type".into()),
+            Type::Function(_, _, _) => Err("Tried to convert a function type".into()),
             Type::Char | Type::SignedChar | Type::UnsignedChar => Ok(AssemblyType::Byte),
             Type::Struct(name, _) => {
                 let info = context.structs.get(&name).unwrap().clone();

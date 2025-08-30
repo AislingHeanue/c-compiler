@@ -804,7 +804,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
             BirdsInstructionNode::GetAddress(src, dst) => {
                 if let BirdsValueNode::Var(ref v) = src {
                     let info = context.symbols.get(v).unwrap();
-                    if let Type::Function(_, _) = info.symbol_type {
+                    if let Type::Function(_, _, _) = info.symbol_type {
                         return Ok(vec![Instruction::Lea(
                             Operand::Data(v.to_string(), 0),
                             dst.convert(context)?,

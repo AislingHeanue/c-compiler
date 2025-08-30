@@ -20,8 +20,8 @@ pub enum Type {
     Float,
     Double,
     LongDouble,
-    // return type, param types
-    Function(Box<Type>, Vec<Type>),
+    // return type, param types, is_variadic
+    Function(Box<Type>, Vec<Type>, bool),
     // type and length
     Array(Box<Type>, Option<u64>),
     // bool denotes whether the pointer is marked as restricted

@@ -807,7 +807,7 @@ impl ExpressionWithoutType {
                 Type::Float | Type::Double | Type::LongDouble => unreachable!(),
                 Type::Array(..) => unreachable!(),
                 Type::Pointer(_, _) => unreachable!(),
-                Type::Function(_, _) => unreachable!(),
+                Type::Function(_, _, _) => unreachable!(),
                 Type::Void => unreachable!(),
                 Type::Struct(_, _) => unreachable!(),
             }
@@ -832,7 +832,7 @@ impl ExpressionWithoutType {
                 Type::Pointer(_, _) => unreachable!(),
                 Type::Array(..) => unreachable!(),
                 Type::Float | Type::Double | Type::LongDouble => unreachable!(),
-                Type::Function(_, _) => unreachable!(),
+                Type::Function(_, _, _) => unreachable!(),
                 Type::Void => unreachable!(),
                 Type::Struct(_, _) => unreachable!(),
             }

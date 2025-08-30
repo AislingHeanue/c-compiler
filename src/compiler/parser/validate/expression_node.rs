@@ -90,7 +90,7 @@ impl CheckTypes for ExpressionNode {
                     .expect("Function should have been defined")
                     .clone();
                 match &type_info.symbol_type {
-                    Type::Function(out, params) => {
+                    Type::Function(out, params, is_variadic) => {
                         if **out != Type::Void && !out.is_complete(&mut context.structs) {
                             return Err(
                                 "Can't call a function with an incomplete return type".into()
@@ -107,7 +107,7 @@ impl CheckTypes for ExpressionNode {
                         *out.clone()
                     }
                     Type::Pointer(p, _) => {
-                        if let Type::Function(ref out, ref params) = **p {
+                        if let Type::Function(ref out, ref params, ref is_variadic) = **p {
                             let mut named_var = ExpressionNode(
                                 ExpressionWithoutType::Var(name.to_string()),
                                 None,
@@ -150,7 +150,7 @@ impl CheckTypes for ExpressionNode {
             ExpressionWithoutType::IndirectFunctionCall(ref mut left, ref mut args) => {
                 left.check_types_and_convert(context)?;
                 if let Some(Type::Pointer(ref p, _)) = &left.1 {
-                    if let Type::Function(ref out, ref params) = **p {
+                    if let Type::Function(ref out, ref params, is_variadic) = **p {
                         if **out != Type::Void && !out.is_complete(&mut context.structs) {
                             return Err(
                                 "Can't call a function with an incomplete return type".into()
@@ -677,7 +677,7 @@ impl ExpressionNode {
                     false,
                 )
             }
-            Some(Type::Function(_, _)) => {
+            Some(Type::Function(_, _, _)) => {
                 *self = ExpressionNode(
                     ExpressionWithoutType::AddressOf(Box::new(self.clone())),
                     Some(Type::Pointer(Box::new(self.1.clone().unwrap()), false)),

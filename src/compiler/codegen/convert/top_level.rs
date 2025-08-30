@@ -39,7 +39,7 @@ impl BirdsTopLevel {
             .iter()
             .map(|name| BirdsValueNode::Var(name.to_string()))
             .collect_vec();
-        let return_uses_memory = if let Some(Type::Function(return_type, _)) =
+        let return_uses_memory = if let Some(Type::Function(return_type, _, _)) =
             context.symbols.get(&name).map(|a| &a.symbol_type)
         {
             classify_return_by_type(&return_type.clone(), context)?.0

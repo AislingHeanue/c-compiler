@@ -72,7 +72,7 @@ impl Constant {
             Type::SignedChar => Constant::Char(value.try_into().unwrap()),
             Type::UnsignedChar => Constant::UnsignedChar(value.try_into().unwrap()),
 
-            Type::Function(_, _) => unreachable!(),
+            Type::Function(_, _, _) => unreachable!(),
             Type::Array(..) => unreachable!(),
             Type::Float => panic!("Can't use get_typed_constant to generate a float"),
             Type::Double => panic!("Can't use get_typed_constant to generate a double"),
@@ -150,7 +150,7 @@ impl Constant {
             Type::Float => self.to_float(),
             Type::Double => self.to_double(),
             Type::LongDouble => self.to_long_double(),
-            Type::Function(_, _) => unreachable!(),
+            Type::Function(_, _, _) => unreachable!(),
             Type::Array(_, _) => unreachable!(),
             Type::Pointer(_, _) => self.to_long(),
             Type::Char => self.to_char(),

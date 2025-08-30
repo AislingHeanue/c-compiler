@@ -47,7 +47,7 @@ impl Convert<Option<BirdsTopLevel>> for FunctionDeclaration {
             // without a return statement, then it must actually return 0. If a return statement is
             // otherwise present, this instruction will never be run (dead code).
             let map_entry = context.symbols.get(&name).unwrap();
-            if let Type::Function(out, _) = &map_entry.symbol_type {
+            if let Type::Function(out, _, _) = &map_entry.symbol_type {
                 if **out != Type::Void {
                     instructions.push(BirdsInstructionNode::Return(Some(
                         BirdsValueNode::Constant(Constant::Integer(0)),

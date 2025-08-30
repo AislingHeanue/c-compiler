@@ -189,7 +189,7 @@ impl CheckTypes for StatementNode {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         match self {
             StatementNode::Return(exp) => {
-                let out_type = if let Type::Function(out, _) = &context
+                let out_type = if let Type::Function(out, _, _) = &context
                     .symbols
                     .get(context.current_function_name.as_ref().unwrap())
                     .unwrap()

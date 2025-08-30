@@ -7,7 +7,7 @@ use super::{CheckTypes, ValidateContext};
 impl CheckTypes for Type {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         match self {
-            Type::Function(out, params) => {
+            Type::Function(out, params, _) => {
                 out.check_types(context)?;
                 for param in params {
                     param.check_types(context)?

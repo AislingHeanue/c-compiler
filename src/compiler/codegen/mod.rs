@@ -271,11 +271,11 @@ pub fn codegen(
     let mut stolen_map = HashMap::new();
     swap(&mut stolen_map, &mut context.symbols);
     for (k, v) in stolen_map {
-        if let Type::Function(_, _) = v.symbol_type {
+        if let Type::Function(_, _, _) = v.symbol_type {
             if let StorageInfo::Function(defined, _) = v.storage {
                 let type_info = v.symbol_type.clone();
                 let (uses_memory, return_registers, param_registers) =
-                    if let Type::Function(returns, params) = type_info {
+                    if let Type::Function(returns, params, is_variadic) = type_info {
                         let (uses_memory, return_registers) =
                             classify_return_by_type(&returns, &mut context)?;
                         let param_registers =

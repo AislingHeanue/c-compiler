@@ -98,11 +98,13 @@ impl InitialiserNode {
                 i.check_types_and_convert(context)?;
                 if let (Type::Pointer(target_p, _), Some(Type::Pointer(p, _))) = (target_type, &i.1)
                 {
-                    if let (Type::Function(r1, args1), Type::Function(r2, args2)) =
-                        (*target_p.clone(), *p.clone())
+                    if let (
+                        Type::Function(r1, args1, is_variadic1),
+                        Type::Function(r2, args2, is_variadic2),
+                    ) = (*target_p.clone(), *p.clone())
                     {
                         // NOTE: var args might break this check (among other things)
-                        if r1 != r2 || args1 != args2 {
+                        if r1 != r2 || args1 != args2 || is_variadic1 != is_variadic2 {
                             return Err("Incompatible types assigning a function pointer to a static variable".into());
                         }
                         if let ExpressionWithoutType::AddressOf(v) = &i.0 {
@@ -368,7 +370,7 @@ impl InitialiserNode {
                 ),
                 Some(target_type.clone()),
             ),
-            Type::Function(_, _) => unreachable!(),
+            Type::Function(_, _, _) => unreachable!(),
             Type::Pointer(_, _) => InitialiserNode(
                 InitialiserWithoutType::Single(ExpressionNode(
                     ExpressionWithoutType::Constant(Constant::UnsignedLong(0)),

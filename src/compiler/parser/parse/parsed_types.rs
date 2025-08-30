@@ -326,7 +326,7 @@ impl Parse<StructMember> for VecDeque<Token> {
                 self.expect(Token::SemiColon)?;
                 let declarator_output = declarator.apply_to_type(base_type, context)?;
 
-                if let Type::Function(_, _) = declarator_output.out_type {
+                if let Type::Function(_, _, _) = declarator_output.out_type {
                     Err("A struct member may not have a function type".into())
                 } else {
                     Ok(StructMember {

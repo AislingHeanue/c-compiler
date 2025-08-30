@@ -25,7 +25,7 @@ pub struct DeclaratorApplicationOutput {
     pub param_names: Option<Vec<String>>,
 }
 
-pub type ParamList = (Vec<(Type, Declarator)>, Vec<InlineDeclaration>);
+pub type ParamList = (Vec<(Type, Declarator)>, Vec<InlineDeclaration>, bool);
 
 trait ParseDeclarator {
     fn parse_full_declarator(
@@ -103,21 +103,25 @@ impl ParseDeclarator for VecDeque<Token> {
                 match self.peek() {
                     // function declaration type!
                     Ok(Token::OpenParen) => {
-                        if matches!(simple_declarator, Declarator::Function(_, _)) {
+                        if matches!(simple_declarator, Declarator::Function(_, _, _)) {
                             return Err("A function cannot return another function".into());
                         }
 
                         // enter a new scope for params!
                         let scopes = BlockItemNode::enter_scope(context);
 
-                        let (param_list, mut structs_from_params) =
+                        let (param_list, mut structs_from_params, is_variadic) =
                             self.parse_param_list(context)?;
 
                         BlockItemNode::leave_scope(scopes, context);
 
                         structs.append(&mut structs_from_params);
                         Ok((
-                            Declarator::Function(Box::new(simple_declarator), param_list),
+                            Declarator::Function(
+                                Box::new(simple_declarator),
+                                param_list,
+                                is_variadic,
+                            ),
                             structs,
                         ))
                     }
@@ -158,7 +162,7 @@ impl ParseDeclarator for VecDeque<Token> {
     fn parse_param_list(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Vec<(Type, Declarator)>, Vec<InlineDeclaration>), Box<dyn Error>> {
+    ) -> Result<(Vec<(Type, Declarator)>, Vec<InlineDeclaration>, bool), Box<dyn Error>> {
         self.expect(Token::OpenParen)?;
         let mut param_list = Vec::new();
         let mut structs = Vec::new();
@@ -167,24 +171,30 @@ impl ParseDeclarator for VecDeque<Token> {
             self.expect(Token::KeywordVoid)?;
             if matches!(self.peek()?, Token::CloseParen) {
                 self.expect(Token::CloseParen)?;
-                return Ok((param_list, structs));
+                return Ok((param_list, structs, false));
             } else {
                 // void wasn't in parentheses by itself, so keep scanning param list
                 self.push_front(Token::KeywordVoid)
             }
         }
 
+        let mut is_variadic = false;
         let (t, param, mut structs_from_param) = self.parse_param(context)?;
         param_list.push((t, param));
         structs.append(&mut structs_from_param);
         while self.peek()? != Token::CloseParen {
             self.expect(Token::Comma)?;
+            if matches!(self.peek()?, Token::Ellipses) {
+                self.expect(Token::Ellipses)?;
+                is_variadic = true;
+                break;
+            }
             let (t, param, mut structs_from_param) = self.parse_param(context)?;
             param_list.push((t, param));
             structs.append(&mut structs_from_param);
         }
         self.expect(Token::CloseParen)?;
-        Ok((param_list, structs))
+        Ok((param_list, structs, is_variadic))
     }
 
     fn parse_param(
@@ -233,7 +243,7 @@ impl Declarator {
                 // a type, it needs to be added here
                 declarator.apply_to_type(Type::Pointer(Box::new(base_type), false), context)
             }
-            Declarator::Function(declarator, params) => {
+            Declarator::Function(declarator, params, is_variadic) => {
                 let mut num_anonymous_params = 0;
                 let (param_types, param_names): (Vec<Type>, Vec<String>) = process_results(
                     params
@@ -255,15 +265,17 @@ impl Declarator {
 
                 if let Declarator::Name(name) = *declarator {
                     Ok(DeclaratorApplicationOutput {
-                        out_type: Type::Function(Box::new(base_type), param_types),
+                        out_type: Type::Function(Box::new(base_type), param_types, is_variadic),
                         name: Some(name),
                         param_names: Some(param_names),
                     })
                 } else {
                     // discard param names, function pointers will never use them directly
                     // because we know this isn't a function definition with a body.
-                    declarator
-                        .apply_to_type(Type::Function(Box::new(base_type), param_types), context)
+                    declarator.apply_to_type(
+                        Type::Function(Box::new(base_type), param_types, is_variadic),
+                        context,
+                    )
                 }
             }
             Declarator::Array(declarator, size_expression) => {

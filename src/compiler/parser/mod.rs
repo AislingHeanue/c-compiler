@@ -251,8 +251,8 @@ pub enum Declarator {
     // See https://en.wikipedia.org/wiki/Restrict
     Pointer(Box<Declarator>, bool),
     ConstPointer(Box<Declarator>),
-    // params info and any further declarator to apply to the parent type
-    Function(Box<Declarator>, Vec<(Type, Declarator)>),
+    // params info and any further declarator to apply to the parent type, is_variadic
+    Function(Box<Declarator>, Vec<(Type, Declarator)>, bool),
     // containing type and size
     Array(Box<Declarator>, Option<ExpressionNode>),
 }
