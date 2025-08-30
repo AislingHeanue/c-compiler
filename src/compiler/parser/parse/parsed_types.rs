@@ -5,7 +5,7 @@ use crate::compiler::{
         BlockItemNode, DeclarationNode, Declarator, EnumDeclaration, ExpressionWithoutType,
         InlineDeclaration, StructDeclaration,
     },
-    types::{Constant, EnumMember},
+    types::EnumMember,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
@@ -349,8 +349,8 @@ impl Parse<EnumMember> for VecDeque<Token> {
         };
         let value = if let Token::Assignment = self.peek()? {
             self.expect(Token::Assignment)?;
-            let c: Constant = self.parse(context)?;
-            c.value_int()
+            let c: ExpressionWithoutType = self.parse(context)?;
+            c.fold_to_constant(context)?.value_int()
         } else {
             context.last_enum_number + 1
         };
