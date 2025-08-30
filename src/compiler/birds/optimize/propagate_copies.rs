@@ -147,9 +147,9 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                         false
                     };
 
-                    if  !dst_is_volatile && src_type == dst_type
+                    if  !dst_is_volatile && (src_type == dst_type
                         || (src_type.is_signed() && dst_type.is_signed())
-                        || (!src_type.is_signed() && !dst_type.is_signed())
+                        || (!src_type.is_signed() && !dst_type.is_signed()))
                     {
                         reaching_copies.push((src.clone(), dst.clone()));
                     }
