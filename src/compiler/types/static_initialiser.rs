@@ -55,6 +55,7 @@ impl StaticInitialiser {
             Type::Array(..) => unreachable!(),
             Type::Void => unreachable!(),
             Type::Struct(_, _) => unreachable!(),
+            Type::Enum(_) => StaticInitialiser::integer_from_double(i),
         }
     }
 
@@ -87,6 +88,7 @@ impl StaticInitialiser {
             Type::Function(_, _) => unreachable!(),
             Type::Void => unreachable!(),
             Type::Struct(_, _) => unreachable!(),
+            Type::Enum(_) => StaticInitialiser::integer(i),
         }
     }
 

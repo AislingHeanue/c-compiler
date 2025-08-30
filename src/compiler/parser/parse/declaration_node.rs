@@ -1,14 +1,14 @@
 use itertools::Itertools;
 
 use super::{
-    parsed_types::{OutputWithStructs, ParseStructDeclaration, PopForType},
+    parsed_types::{OutputWithInline, ParseStructDeclaration, PopForType},
     Identity, Parse, ParseContext, Type,
 };
 use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::{
-        BlockItemNode, DeclarationNode, Declarator, DeclaratorWithStructs, FunctionDeclaration,
-        StructDeclaration, TypeDeclaration, VariableDeclaration,
+        BlockItemNode, DeclarationNode, Declarator, DeclaratorWithInline, FunctionDeclaration,
+        InlineDeclaration, TypeDeclaration, VariableDeclaration,
     },
     types::StorageClass,
 };
@@ -42,17 +42,17 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
 
         let must_have_body = is_constant && storage_class != Some(StorageClass::Extern);
 
-        let (base_type, declarator, struct_declarations): (
+        let (base_type, declarator, inline_declarations): (
             Type,
             Declarator,
-            Vec<StructDeclaration>,
+            Vec<InlineDeclaration>,
         ) = match self.peek()? {
             Token::KeywordTypedef => {
                 if storage_class.is_some() {
                     return Err("Cannot use static or extern in a typedef alias".into());
                 }
                 self.expect(Token::KeywordTypedef)?;
-                let (base_type, declarator, struct_declarations): OutputWithStructs =
+                let (base_type, declarator, struct_declarations): OutputWithInline =
                     self.parse(context)?;
                 self.expect(Token::SemiColon)?;
                 let declarator_output = declarator.apply_to_type(base_type, context)?;
@@ -71,10 +71,10 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                 return Ok(DeclarationNode::Type(TypeDeclaration {
                     target_type: out_type,
                     name,
-                    struct_declarations,
+                    inline_declarations: struct_declarations,
                 }));
             }
-            Token::KeywordStruct | Token::KeywordUnion => {
+            Token::KeywordStruct | Token::KeywordUnion | Token::KeywordEnum => {
                 // parsing the StructDeclaration here does the following
                 // 1. Consumes the entire struct type
                 // 2. If the struct type had a definition, adds it to the scope's struct map
@@ -96,7 +96,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         }
 
                         self.expect(Token::SemiColon)?;
-                        return Ok(DeclarationNode::Struct(struct_declaration));
+                        return Ok(struct_declaration.into_declaration());
                     }
                     _ => {
                         // this is a variable declaration, so continue to parse the declarator and
@@ -109,19 +109,21 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         }
                         let mut all_declarations = vec![struct_declaration.clone()];
 
-                        let (declarator, mut variable_structs): DeclaratorWithStructs =
+                        let (declarator, mut variable_structs): DeclaratorWithInline =
                             self.parse(context)?;
 
                         all_declarations.append(&mut variable_structs);
 
-                        (
-                            Type::Struct(
-                                struct_declaration.name.clone(),
-                                struct_declaration.is_union,
+                        match struct_declaration {
+                            InlineDeclaration::Struct(s) => (
+                                Type::Struct(s.name.clone(), s.is_union),
+                                declarator,
+                                all_declarations,
                             ),
-                            declarator,
-                            all_declarations,
-                        )
+                            InlineDeclaration::Enum(m) => {
+                                (Type::Enum(m.members.clone()), declarator, all_declarations)
+                            }
+                        }
                     }
                 }
             }
@@ -182,7 +184,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         params: new_params_names,
                         body: Some(body),
                         storage_class,
-                        struct_declarations,
+                        inline_declarations,
                         _inline: is_inline,
                         output_const: is_constant,
                         output_volatile: is_volatile,
@@ -195,7 +197,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         params: param_names,
                         body: None,
                         storage_class,
-                        struct_declarations,
+                        inline_declarations,
                         _inline: is_inline,
                         output_const: is_constant,
                         output_volatile: is_volatile,
@@ -225,7 +227,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                             name,
                             init: Some(initialiser),
                             storage_class,
-                            struct_declarations,
+                            inline_declarations,
                             constant: is_constant,
                             volatile: is_volatile,
                         }))
@@ -235,7 +237,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
                         name,
                         init: None,
                         storage_class,
-                        struct_declarations,
+                        inline_declarations,
                         constant: is_constant,
                         volatile: is_volatile,
                     })),
@@ -264,7 +266,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
 }
 
 impl DeclarationNode {
-    fn new_identifier(
+    pub fn new_identifier(
         name: String,
         is_file_scope: bool,
         context: &mut ParseContext,
@@ -298,5 +300,14 @@ impl DeclarationNode {
         }
 
         Ok(new_name)
+    }
+}
+
+impl InlineDeclaration {
+    fn into_declaration(self) -> DeclarationNode {
+        match self {
+            InlineDeclaration::Struct(s) => DeclarationNode::Struct(s),
+            InlineDeclaration::Enum(e) => DeclarationNode::Enum(e),
+        }
     }
 }

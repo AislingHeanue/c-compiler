@@ -1,10 +1,12 @@
 use itertools::Itertools;
 
+use crate::compiler::types::EnumMember;
+
 use super::{
-    BinaryOperatorNode, BlockItemNode, Constant, DeclarationNode, ExpressionNode,
+    BinaryOperatorNode, BlockItemNode, Constant, DeclarationNode, EnumDeclaration, ExpressionNode,
     ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
-    InitialiserWithoutType, ProgramNode, StatementNode, StructDeclaration, StructMember, Type,
-    TypeDeclaration, UnaryOperatorNode, VariableDeclaration,
+    InitialiserWithoutType, InlineDeclaration, ProgramNode, StatementNode, StructDeclaration,
+    StructMember, Type, TypeDeclaration, UnaryOperatorNode, VariableDeclaration,
 };
 use std::{borrow::Borrow, fmt::Display};
 
@@ -195,7 +197,7 @@ impl CodeDisplay for ForInitialiserNode {
 impl CodeDisplay for VariableDeclaration {
     fn show(&self, context: &mut DisplayContext) -> String {
         let mut struct_part = "".to_string();
-        for s in self.struct_declarations.iter() {
+        for s in self.inline_declarations.iter() {
             struct_part += &(s.show(context) + &context.new_line_start())
         }
         if let Some(init) = &self.init {
@@ -295,6 +297,16 @@ impl CodeDisplay for DeclarationNode {
             DeclarationNode::Function(f) => f.show(context),
             DeclarationNode::Type(t) => t.show(context),
             DeclarationNode::Struct(s) => s.show(context),
+            DeclarationNode::Enum(e) => e.show(context),
+        }
+    }
+}
+
+impl CodeDisplay for InlineDeclaration {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        match self {
+            InlineDeclaration::Struct(s) => s.show(context),
+            InlineDeclaration::Enum(e) => e.show(context),
         }
     }
 }
@@ -313,6 +325,17 @@ impl CodeDisplay for StructDeclaration {
         } else {
             format!("type {} {}{{?}}", self.name, word)
         }
+    }
+}
+
+impl CodeDisplay for EnumDeclaration {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        format!(
+            "type {} enum{{{}{}}}",
+            self.name,
+            self.members.show(&mut context.indent()),
+            context.new_line_start()
+        )
     }
 }
 
@@ -347,6 +370,7 @@ impl CodeDisplay for Type {
             Type::UnsignedShort => "uint16".to_string(),
             Type::LongLong => "longer_int64".to_string(),
             Type::UnsignedLongLong => "longer_uint64".to_string(),
+            Type::Enum(v) => format!("enum {{{}}}", v.show(context)),
         }
     }
 }
@@ -369,6 +393,21 @@ impl CodeDisplay for Vec<StructMember> {
                         member.member_type.show(context)
                     )
                 }
+            })
+            .join("")
+    }
+}
+
+impl CodeDisplay for Vec<EnumMember> {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        self.iter()
+            .map(|member| {
+                format!(
+                    "{}{} = {},",
+                    context.new_line_start(),
+                    member.name,
+                    member.init
+                )
             })
             .join("")
     }
@@ -457,9 +496,9 @@ impl CodeDisplay for ExpressionWithoutType {
                     args.show(&mut context.indent())
                 )
             }
-            ExpressionWithoutType::Cast(target_type, e, struct_declarations) => {
+            ExpressionWithoutType::Cast(target_type, e, inline_declarations) => {
                 let mut struct_part = "".to_string();
-                for s in struct_declarations.iter() {
+                for s in inline_declarations.iter() {
                     struct_part += &(s.show(context) + &context.new_line_start())
                 }
                 format!(

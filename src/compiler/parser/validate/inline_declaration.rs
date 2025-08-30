@@ -2,11 +2,23 @@ use std::{collections::HashSet, error::Error};
 
 use crate::compiler::{
     codegen::align_stack_size,
-    parser::{MemberEntry, StructDeclaration, StructInfo, StructMember},
-    types::Type,
+    parser::{
+        EnumDeclaration, InlineDeclaration, MemberEntry, StructDeclaration, StructInfo,
+        StructMember,
+    },
+    types::{ComparableStatic, StaticInitialiser, StorageInfo, SymbolInfo, Type},
 };
 
 use super::{CheckTypes, ValidateContext};
+
+impl CheckTypes for InlineDeclaration {
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        match self {
+            InlineDeclaration::Struct(s) => s.check_types(context),
+            InlineDeclaration::Enum(e) => e.check_types(context),
+        }
+    }
+}
 
 impl CheckTypes for StructDeclaration {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
@@ -37,7 +49,7 @@ impl CheckTypes for StructDeclaration {
                 context.current_struct_members.insert(name.clone());
             }
 
-            for s in m.struct_declarations.iter_mut() {
+            for s in m.inline_declarations.iter_mut() {
                 let original_checking_embedded_struct = context.checking_embedded_struct;
                 if m.name.is_none() {
                     context.checking_embedded_struct = true;
@@ -129,9 +141,32 @@ impl CheckTypes for StructMember {
             unreachable!()
         }
 
-        for s in self.struct_declarations.iter_mut() {
+        for s in self.inline_declarations.iter_mut() {
             // if m is itself a struct definition, bring said definition into scope
             s.check_types(context)?;
+        }
+        Ok(())
+    }
+}
+
+impl CheckTypes for EnumDeclaration {
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        for m in self.members.iter_mut() {
+            context.symbols.insert(
+                // if an enum was specified as part of an enum declaration, then it was given an
+                // internal name for this purpose
+                m.internal_name.clone().unwrap(),
+                SymbolInfo {
+                    symbol_type: Type::Integer,
+                    storage: StorageInfo::Constant(StaticInitialiser::Comparable(if m.init == 0 {
+                        ComparableStatic::ZeroBytes(4)
+                    } else {
+                        ComparableStatic::Integer(m.init)
+                    })),
+                    constant: true,
+                    volatile: false,
+                },
+            );
         }
         Ok(())
     }

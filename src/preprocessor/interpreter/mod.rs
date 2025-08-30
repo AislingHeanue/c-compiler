@@ -789,20 +789,6 @@ pub fn interpret(
     Ok((out, context.macros))
 }
 
-// fn resolve_string<'a, 'b>(
-//     s: &str,
-//     tokens_on_line: Peekable<Iter<'a, PreprocessorToken>>,
-//     lines: Peekable<Iter<'b, Vec<PreprocessorToken>>>,
-//     mut seen_identifiers: HashSet<String>,
-//     context: &mut InterpreterContext,
-// ) -> Result<(Vec<PreprocessorToken>, bool), Box<dyn Error>> {
-//     resolve_identifiers(
-//         vec![PreprocessorToken::Identifier(s.to_string())],
-//         HashSet::new(),
-//         context,
-//     )
-// }
-
 // 1. find file in either same path as C file or system dir
 // 2. lex and interpret that file and steal its list of definitions
 // 3. replace this line with the whole preprocessed file (but don't alter

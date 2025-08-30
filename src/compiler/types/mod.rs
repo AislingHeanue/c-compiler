@@ -32,6 +32,14 @@ pub enum Type {
     Void,
     // struct name, is_union
     Struct(String, bool),
+    Enum(Vec<EnumMember>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnumMember {
+    pub name: String,
+    pub internal_name: Option<String>,
+    pub init: i32,
 }
 
 #[derive(Clone, Debug)]

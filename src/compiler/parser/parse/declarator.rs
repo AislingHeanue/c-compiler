@@ -3,15 +3,15 @@ use itertools::process_results;
 use super::{Declarator, Parse, ParseContext, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::{DeclaratorWithStructs, StructDeclaration},
+    parser::{BlockItemNode, DeclaratorWithInline, InlineDeclaration},
 };
 use std::{collections::VecDeque, error::Error};
 
-impl Parse<DeclaratorWithStructs> for VecDeque<Token> {
+impl Parse<DeclaratorWithInline> for VecDeque<Token> {
     fn parse(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<DeclaratorWithStructs, Box<dyn Error>> {
+    ) -> Result<DeclaratorWithInline, Box<dyn Error>> {
         let declarator = self.parse_full_declarator(context)?;
 
         Ok(declarator)
@@ -25,23 +25,23 @@ pub struct DeclaratorApplicationOutput {
     pub param_names: Option<Vec<String>>,
 }
 
-pub type ParamList = (Vec<(Type, Declarator)>, Vec<StructDeclaration>);
+pub type ParamList = (Vec<(Type, Declarator)>, Vec<InlineDeclaration>);
 
 trait ParseDeclarator {
     fn parse_full_declarator(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Declarator, Vec<StructDeclaration>), Box<dyn Error>>;
+    ) -> Result<(Declarator, Vec<InlineDeclaration>), Box<dyn Error>>;
     fn parse_simple_declarator(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Declarator, Vec<StructDeclaration>), Box<dyn Error>>;
+    ) -> Result<(Declarator, Vec<InlineDeclaration>), Box<dyn Error>>;
     fn parse_param_list(&mut self, context: &mut ParseContext)
         -> Result<ParamList, Box<dyn Error>>;
     fn parse_param(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Type, Declarator, Vec<StructDeclaration>), Box<dyn Error>>;
+    ) -> Result<(Type, Declarator, Vec<InlineDeclaration>), Box<dyn Error>>;
     fn parse_array(
         &mut self,
         declarator: Declarator,
@@ -53,7 +53,7 @@ impl ParseDeclarator for VecDeque<Token> {
     fn parse_full_declarator(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Declarator, Vec<StructDeclaration>), Box<dyn Error>> {
+    ) -> Result<(Declarator, Vec<InlineDeclaration>), Box<dyn Error>> {
         if self.is_empty() {
             return Ok((Declarator::Base, Vec::new()));
         }
@@ -106,8 +106,15 @@ impl ParseDeclarator for VecDeque<Token> {
                         if matches!(simple_declarator, Declarator::Function(_, _)) {
                             return Err("A function cannot return another function".into());
                         }
+
+                        // enter a new scope for params!
+                        let scopes = BlockItemNode::enter_scope(context);
+
                         let (param_list, mut structs_from_params) =
                             self.parse_param_list(context)?;
+
+                        BlockItemNode::leave_scope(scopes, context);
+
                         structs.append(&mut structs_from_params);
                         Ok((
                             Declarator::Function(Box::new(simple_declarator), param_list),
@@ -130,7 +137,7 @@ impl ParseDeclarator for VecDeque<Token> {
     fn parse_simple_declarator(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Declarator, Vec<StructDeclaration>), Box<dyn Error>> {
+    ) -> Result<(Declarator, Vec<InlineDeclaration>), Box<dyn Error>> {
         match self.peek() {
             Ok(Token::Identifier(name)) => {
                 // do not process the scope of 'name' here, because it complicates parameters
@@ -151,7 +158,7 @@ impl ParseDeclarator for VecDeque<Token> {
     fn parse_param_list(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Vec<(Type, Declarator)>, Vec<StructDeclaration>), Box<dyn Error>> {
+    ) -> Result<(Vec<(Type, Declarator)>, Vec<InlineDeclaration>), Box<dyn Error>> {
         self.expect(Token::OpenParen)?;
         let mut param_list = Vec::new();
         let mut structs = Vec::new();
@@ -183,7 +190,7 @@ impl ParseDeclarator for VecDeque<Token> {
     fn parse_param(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Type, Declarator, Vec<StructDeclaration>), Box<dyn Error>> {
+    ) -> Result<(Type, Declarator, Vec<InlineDeclaration>), Box<dyn Error>> {
         self.parse(context)
     }
 

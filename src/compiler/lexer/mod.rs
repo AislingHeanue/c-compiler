@@ -94,6 +94,7 @@ pub enum Token {
     KeywordSizeof,
     KeywordStruct,
     KeywordUnion,
+    KeywordEnum,
     KeywordConst,
     KeywordRestrict,
     KeywordInline,
@@ -198,6 +199,7 @@ lazy_static! {
                 Token::KeywordSizeof => r"sizeof\b",
                 Token::KeywordStruct => r"struct\b",
                 Token::KeywordUnion => r"union\b",
+                Token::KeywordEnum => r"enum\b",
                 Token::KeywordConst => r"const\b",
                 Token::KeywordRestrict => r"restrict\b",
                 Token::KeywordInline => r"inline\b",
@@ -441,7 +443,6 @@ impl TokenVector for VecDeque<Token> {
     fn expect(&mut self, expected: Token) -> Result<(), Box<dyn Error>> {
         let token = self.read()?;
         if discriminant(&expected) != discriminant(&token) {
-            println!("{:?}", self);
             return Err(format!(
                 "Unexpected token, got {:?}, expecting {:?}",
                 token, expected

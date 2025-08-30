@@ -40,18 +40,7 @@ impl Constant {
             Constant::UnsignedLongLong(i) => StaticInitialiser::from_number(*i, target),
         }
     }
-    // pub fn static_convert_double_to(&self, target: &Type) -> StaticInitialiser {
-    //     // match target {}
-    //     match self {
-    //         Constant::Integer(i) => StaticInitialiser::from_number(*i, target),
-    //         Constant::Long(i) => StaticInitialiser::from_number(*i, target),
-    //         Constant::UnsignedInteger(i) => StaticInitialiser::from_number(*i, target),
-    //         Constant::UnsignedLong(i) => StaticInitialiser::from_number(*i, target),
-    //         Constant::Double(i) => StaticInitialiser::from_double(*i, target),
-    //         Constant::Char(i) => StaticInitialiser::from_number(*i, target),
-    //         Constant::UnsignedChar(i) => StaticInitialiser::from_number(*i, target),
-    //     }
-    // }
+
     pub fn static_convert_to_pointer(&self) -> StaticInitialiser {
         match self {
             Constant::Integer(0)
@@ -90,6 +79,7 @@ impl Constant {
             Type::LongDouble => panic!("Can't use get_typed_constant to generate a long double"),
             Type::Void => unreachable!(),
             Type::Struct(_, _) => unreachable!(),
+            Type::Enum(_) => Constant::Integer(value.try_into().unwrap()),
         }
     }
 
@@ -168,6 +158,7 @@ impl Constant {
             Type::UnsignedChar => self.to_uchar(),
             Type::Void => unreachable!(),
             Type::Struct(_, _) => unreachable!(),
+            Type::Enum(_) => self.to_int(),
             Type::Short => self.to_short(),
             Type::UnsignedShort => self.to_ushort(),
             Type::LongLong => self.to_long_long(),
@@ -189,6 +180,24 @@ impl Constant {
             Constant::Double(_) => unreachable!(),
             Constant::LongDouble(_) => unreachable!(),
             Constant::Char(i) => i.try_into().unwrap(),
+            Constant::UnsignedChar(i) => i.into(),
+        }
+    }
+
+    pub fn value_int(self) -> i32 {
+        match self {
+            Constant::Integer(i) => i,
+            Constant::Long(i) => i.try_into().unwrap(),
+            Constant::LongLong(i) => i.try_into().unwrap(),
+            Constant::Short(i) => i.into(),
+            Constant::UnsignedInteger(i) => i.try_into().unwrap(),
+            Constant::UnsignedLong(i) => i.try_into().unwrap(),
+            Constant::UnsignedLongLong(i) => i.try_into().unwrap(),
+            Constant::UnsignedShort(i) => i.into(),
+            Constant::Float(_) => unreachable!(),
+            Constant::Double(_) => unreachable!(),
+            Constant::LongDouble(_) => unreachable!(),
+            Constant::Char(i) => i.into(),
             Constant::UnsignedChar(i) => i.into(),
         }
     }

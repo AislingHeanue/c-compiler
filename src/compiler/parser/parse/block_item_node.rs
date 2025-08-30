@@ -1,4 +1,4 @@
-use super::{Identity, Parse, ParseContext};
+use super::{Identity, Parse, ParseContext, StructKind};
 use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::{BlockItemNode, DeclarationNode},
@@ -12,8 +12,8 @@ use std::{
 pub struct Scopes {
     current_vars: HashMap<String, Identity>,
     outer_vars: HashMap<String, Identity>,
-    current_structs: HashMap<String, (String, bool)>,
-    outer_structs: HashMap<String, (String, bool)>,
+    current_structs: HashMap<String, (String, StructKind)>,
+    outer_structs: HashMap<String, (String, StructKind)>,
 }
 
 impl Parse<Vec<BlockItemNode>> for VecDeque<Token> {

@@ -29,6 +29,7 @@ impl Convert<Vec<BirdsInstructionNode>> for DeclarationNode {
             DeclarationNode::Function(_f) => Ok(Vec::new()),
             DeclarationNode::Type(_t) => Ok(Vec::new()),
             DeclarationNode::Struct(_s) => Ok(Vec::new()),
+            DeclarationNode::Enum(_e) => Ok(Vec::new()),
         }
     }
 }

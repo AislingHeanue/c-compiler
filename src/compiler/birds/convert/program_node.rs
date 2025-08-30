@@ -20,6 +20,7 @@ impl Convert<BirdsProgramNode> for ProgramNode {
                     DeclarationNode::Type(_) => None,
                     DeclarationNode::Function(f) => Some(f.convert(context)),
                     DeclarationNode::Struct(_) => None,
+                    DeclarationNode::Enum(_) => None,
                 }),
             |iter| iter.flatten().collect(),
         )?;

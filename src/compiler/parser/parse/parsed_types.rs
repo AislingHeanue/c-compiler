@@ -1,7 +1,11 @@
-use super::{Parse, ParseContext, StructMember, Type};
+use super::{Parse, ParseContext, StructKind, StructMember, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::{Declarator, ExpressionWithoutType, StructDeclaration},
+    parser::{
+        BlockItemNode, DeclarationNode, Declarator, EnumDeclaration, ExpressionWithoutType,
+        InlineDeclaration, StructDeclaration,
+    },
+    types::{Constant, EnumMember},
 };
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
@@ -10,9 +14,19 @@ use std::{
 
 impl Parse<Type> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Type, Box<dyn Error>> {
-        if matches!(self.peek()?, Token::KeywordStruct | Token::KeywordUnion) {
-            let declaration: StructDeclaration = self.parse_struct(true, context)?;
-            return Ok(Type::Struct(declaration.name, declaration.is_union));
+        if matches!(
+            self.peek()?,
+            Token::KeywordStruct | Token::KeywordUnion | Token::KeywordEnum
+        ) {
+            let declaration: InlineDeclaration = self.parse_struct(true, context)?;
+            match declaration {
+                InlineDeclaration::Struct(s) => {
+                    return Ok(Type::Struct(s.name, s.is_union));
+                }
+                InlineDeclaration::Enum(_e) => {
+                    return Ok(Type::Integer);
+                }
+            }
         }
         let mut out = Vec::new();
         while !self.is_empty() && self.peek()?.is_type(context) {
@@ -117,17 +131,24 @@ impl Parse<Type> for VecDeque<Token> {
     }
 }
 
-impl Parse<(Type, Vec<StructDeclaration>)> for VecDeque<Token> {
+impl Parse<(Type, Vec<InlineDeclaration>)> for VecDeque<Token> {
     fn parse(
         &mut self,
         context: &mut ParseContext,
-    ) -> Result<(Type, Vec<StructDeclaration>), Box<dyn Error>> {
-        if matches!(self.peek()?, Token::KeywordStruct | Token::KeywordUnion) {
-            let declaration: StructDeclaration = self.parse_struct(true, context)?;
-            Ok((
-                Type::Struct(declaration.name.clone(), declaration.is_union),
-                vec![declaration],
-            ))
+    ) -> Result<(Type, Vec<InlineDeclaration>), Box<dyn Error>> {
+        if matches!(
+            self.peek()?,
+            Token::KeywordStruct | Token::KeywordUnion | Token::KeywordEnum
+        ) {
+            let declaration: InlineDeclaration = self.parse_struct(true, context)?;
+            match declaration {
+                InlineDeclaration::Struct(ref s) => {
+                    Ok((Type::Struct(s.name.clone(), s.is_union), vec![declaration]))
+                }
+                InlineDeclaration::Enum(ref m) => {
+                    Ok((Type::Enum(m.members.clone()), vec![declaration]))
+                }
+            }
         } else {
             let t: Type = self.parse(context)?;
             Ok((t, Vec::new()))
@@ -140,7 +161,7 @@ pub trait ParseStructDeclaration {
         &mut self,
         implicit: bool,
         context: &mut ParseContext,
-    ) -> Result<StructDeclaration, Box<dyn Error>>;
+    ) -> Result<InlineDeclaration, Box<dyn Error>>;
 }
 
 impl ParseStructDeclaration for VecDeque<Token> {
@@ -148,10 +169,11 @@ impl ParseStructDeclaration for VecDeque<Token> {
         &mut self,
         implicit: bool,
         context: &mut ParseContext,
-    ) -> Result<StructDeclaration, Box<dyn Error>> {
-        let is_union = match self.read()? {
-            Token::KeywordStruct => false,
-            Token::KeywordUnion => true,
+    ) -> Result<InlineDeclaration, Box<dyn Error>> {
+        let kind = match self.read()? {
+            Token::KeywordStruct => StructKind::Struct,
+            Token::KeywordUnion => StructKind::Union,
+            Token::KeywordEnum => StructKind::Enum,
             _ => return Err("Invalid token, expecting 'struct' or 'union'".into()),
         };
 
@@ -167,66 +189,139 @@ impl ParseStructDeclaration for VecDeque<Token> {
         // NOTE: DURING PARSING this step here, we resolve the struct name from the current scope,
         // or declare that this is a new struct. Then, we evaluate its members with the context
         // that this struct now exists.
-        let new_name = if implicit {
-            ExpressionWithoutType::resolve_struct_name(&name, is_union, context)?
+        let new_struct_name = if implicit {
+            ExpressionWithoutType::resolve_struct_name(&name, &kind, context)?
         } else {
-            ExpressionWithoutType::new_struct_name(&name, is_union, context)?
-        };
-        let members = if !self.is_empty() && self.peek()? == Token::OpenBrace {
-            self.expect(Token::OpenBrace)?;
-            let mut members: Vec<StructMember> = Vec::new();
-            while self.peek()? != Token::CloseBrace {
-                members.push(self.parse(context)?)
-            }
-            self.expect(Token::CloseBrace)?;
-
-            if members.is_empty() {
-                return Err(
-                    "Struct definition (eg. with '{}') must have at least one member".into(),
-                );
-            } else {
-                Some(members)
-            }
-        } else {
-            None
+            ExpressionWithoutType::new_struct_name(&name, &kind, context)?
         };
 
-        Ok(StructDeclaration {
-            name: new_name,
-            members,
-            is_union,
-            // nameless,
-        })
+        match kind {
+            StructKind::Enum => {
+                let members = if !self.is_empty() && self.peek()? == Token::OpenBrace {
+                    self.expect(Token::OpenBrace)?;
+                    context.last_enum_number = -1;
+                    let mut members: Vec<EnumMember> = Vec::new();
+                    while self.peek()? != Token::CloseBrace {
+                        let mut member: EnumMember = self.parse(context)?;
+                        // NOTE: enum options are brought into scope here!
+                        member.internal_name = Some(DeclarationNode::new_identifier(
+                            member.name.clone(),
+                            false,
+                            context,
+                            None,
+                        )?);
+                        members.push(member);
+                    }
+                    self.expect(Token::CloseBrace)?;
+
+                    context
+                        .enums
+                        .insert(new_struct_name.clone(), members.clone());
+                    if members.is_empty() {
+                        return Err(
+                            "Enum definition (eg. with '{}') must have at least one member".into(),
+                        );
+                    } else {
+                        members
+                    }
+                } else {
+                    // NOTE: this gets the enum from the enums map and sandwiches its members into
+                    // this declaration. This is the only type that does this in the parser step,
+                    // and it needs to do this at the moment because the type-checker lacks the
+                    // required scope information to do it there.
+                    let e = context.enums.get(&new_struct_name);
+                    if let Some(found_members) = e {
+                        found_members.to_vec()
+                    } else {
+                        return Err("Could not find a definition for enum options".into());
+                    }
+                };
+
+                Ok(InlineDeclaration::Enum(EnumDeclaration {
+                    name: new_struct_name,
+                    members,
+                }))
+            }
+            _ => {
+                let members = if !self.is_empty() && self.peek()? == Token::OpenBrace {
+                    // enter a new scope for struct body
+                    let scopes = BlockItemNode::enter_scope(context);
+
+                    self.expect(Token::OpenBrace)?;
+                    let mut members: Vec<StructMember> = Vec::new();
+                    while self.peek()? != Token::CloseBrace {
+                        let member: StructMember = self.parse(context)?;
+                        members.push(member);
+                    }
+                    self.expect(Token::CloseBrace)?;
+
+                    BlockItemNode::leave_scope(scopes, context);
+
+                    if members.is_empty() {
+                        return Err(
+                            "Struct definition (eg. with '{}') must have at least one member"
+                                .into(),
+                        );
+                    } else {
+                        Some(members)
+                    }
+                } else {
+                    None
+                };
+                Ok(InlineDeclaration::Struct(StructDeclaration {
+                    name: new_struct_name,
+                    members,
+                    is_union: kind == StructKind::Union,
+                }))
+            }
+        }
     }
 }
 
 impl Parse<StructMember> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<StructMember, Box<dyn Error>> {
         let mut type_tokens = self.pop_tokens_for_type(context)?.0;
-        match self.peek()? {
+        match (type_tokens.front(), self.peek()?) {
             // this deals with anonymous/inline structs which don't have a field name
-            Token::SemiColon => {
-                let embedded_struct_declaration: StructDeclaration =
+            (
+                Some(Token::KeywordStruct | Token::KeywordUnion | Token::KeywordEnum),
+                Token::SemiColon,
+            ) => {
+                let embedded_struct_declaration: InlineDeclaration =
                     type_tokens.parse_struct(true, context)?;
                 self.expect(Token::SemiColon)?;
-                Ok(StructMember {
-                    member_type: Type::Struct(
-                        embedded_struct_declaration.name.clone(),
-                        embedded_struct_declaration.is_union,
-                    ),
-                    name: None,
-                    struct_declarations: vec![embedded_struct_declaration],
-                })
+                match embedded_struct_declaration {
+                    InlineDeclaration::Struct(ref s) => Ok(StructMember {
+                        member_type: Type::Struct(s.name.clone(), s.is_union),
+                        name: None,
+                        inline_declarations: vec![embedded_struct_declaration],
+                    }),
+                    InlineDeclaration::Enum(ref m) => Ok(StructMember {
+                        member_type: Type::Enum(m.members.clone()),
+                        name: None,
+                        inline_declarations: vec![embedded_struct_declaration],
+                    }),
+                }
             }
+            // choosing to ignore this case for now because it's complicated and confusing
+            // (Some(Token::KeywordEnum), Token::SemiColon) => {
+            //     let embedded_enum_declaration: EnumDeclaration = self.parse_enum(context)?;
+            //     Ok(StructMember {
+            //         // special case, this declaration adds no fields to the struct
+            //         member_type: Type::Void,
+            //         name: None,
+            //         inline_declarations: vec![InlineDeclaration::Enum(embedded_enum_declaration)],
+            //     })
+            // }
             _ => {
                 // attempt to parse a declarator with the remaining tokens
                 type_tokens.append(self);
                 // put the tokens back the way they were
                 *self = type_tokens;
-                let (base_type, declarator, struct_declarations): (
+                let (base_type, declarator, inline_declarations): (
                     Type,
                     Declarator,
-                    Vec<StructDeclaration>,
+                    Vec<InlineDeclaration>,
                 ) = self.parse(context)?;
                 self.expect(Token::SemiColon)?;
                 let declarator_output = declarator.apply_to_type(base_type, context)?;
@@ -237,7 +332,7 @@ impl Parse<StructMember> for VecDeque<Token> {
                     Ok(StructMember {
                         member_type: declarator_output.out_type,
                         name: declarator_output.name,
-                        struct_declarations,
+                        inline_declarations,
                     })
                 }
             }
@@ -245,9 +340,37 @@ impl Parse<StructMember> for VecDeque<Token> {
     }
 }
 
-pub type OutputWithStructs = (Type, Declarator, Vec<StructDeclaration>);
-impl Parse<OutputWithStructs> for VecDeque<Token> {
-    fn parse(&mut self, context: &mut ParseContext) -> Result<OutputWithStructs, Box<dyn Error>> {
+impl Parse<EnumMember> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<EnumMember, Box<dyn Error>> {
+        let name = if let Token::Identifier(name) = self.read()? {
+            name
+        } else {
+            return Err("Expected identifier while reading an enum declaration".into());
+        };
+        let value = if let Token::Assignment = self.peek()? {
+            self.expect(Token::Assignment)?;
+            let c: Constant = self.parse(context)?;
+            c.value_int()
+        } else {
+            context.last_enum_number + 1
+        };
+        context.last_enum_number = value;
+
+        if let Token::Comma = self.peek()? {
+            self.expect(Token::Comma)?;
+        }
+
+        Ok(EnumMember {
+            name,
+            internal_name: None,
+            init: value,
+        })
+    }
+}
+
+pub type OutputWithInline = (Type, Declarator, Vec<InlineDeclaration>);
+impl Parse<OutputWithInline> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<OutputWithInline, Box<dyn Error>> {
         let (mut types_deque, specifier_locations) = self.pop_tokens_for_type(context)?;
 
         // DeclarationNode should already filter out any instances of static and extern from this
@@ -300,10 +423,10 @@ impl Parse<OutputWithStructs> for VecDeque<Token> {
             // try and get a valid type and declarator for the given expression
             let mut new_types_deque = types_deque.clone();
             let mut new_declarator_deque = declarator_deque.clone();
-            let mut type_result: Result<(Type, Vec<StructDeclaration>), Box<dyn Error>> =
+            let mut type_result: Result<(Type, Vec<InlineDeclaration>), Box<dyn Error>> =
                 new_types_deque.parse(context);
             let mut declarator_result: Result<
-                (Declarator, Vec<StructDeclaration>),
+                (Declarator, Vec<InlineDeclaration>),
                 Box<dyn Error>,
             > = new_declarator_deque.parse(context);
             if let (
@@ -425,7 +548,7 @@ impl PopForType for VecDeque<Token> {
         let mut specifier_locations = HashMap::new();
         while self.peek()?.is_start_of_declaration(context) {
             match self.peek()? {
-                Token::KeywordStruct | Token::KeywordUnion => {
+                Token::KeywordStruct | Token::KeywordUnion | Token::KeywordEnum => {
                     // READING A STRUCT TYPE //
                     // red the keyword
                     types_deque.push_back(self.read()?);
@@ -528,7 +651,10 @@ impl Token {
         self.is_specifier(context)
             || matches!(
                 self,
-                Token::KeywordTypedef | Token::KeywordStruct | Token::KeywordUnion
+                Token::KeywordTypedef
+                    | Token::KeywordStruct
+                    | Token::KeywordUnion
+                    | Token::KeywordEnum
             )
     }
 }

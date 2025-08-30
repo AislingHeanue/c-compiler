@@ -433,6 +433,14 @@ impl InitialiserNode {
                     Some(target_type.clone()),
                 )
             }
+            Type::Enum(_) => InitialiserNode(
+                InitialiserWithoutType::Single(ExpressionNode(
+                    ExpressionWithoutType::Constant(Constant::Integer(0)),
+                    Some(target_type.clone()),
+                    false,
+                )),
+                Some(target_type.clone()),
+            ),
             Type::Void => {
                 unreachable!()
             }

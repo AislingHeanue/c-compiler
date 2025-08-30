@@ -793,7 +793,8 @@ impl ExpressionWithoutType {
                 | Type::Char
                 | Type::SignedChar
                 | Type::Short
-                | Type::LongLong => {
+                | Type::LongLong
+                | Type::Enum(_) => {
                     instructions.push(BirdsInstructionNode::IntToFloat(src, dst.clone()));
                 }
                 Type::UnsignedInteger
@@ -817,7 +818,8 @@ impl ExpressionWithoutType {
                 | Type::Char
                 | Type::SignedChar
                 | Type::Short
-                | Type::LongLong => {
+                | Type::LongLong
+                | Type::Enum(_) => {
                     instructions.push(BirdsInstructionNode::FloatToInt(src, dst.clone()));
                 }
                 Type::UnsignedInteger

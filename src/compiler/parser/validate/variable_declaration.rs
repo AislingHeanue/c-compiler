@@ -18,7 +18,7 @@ impl Validate for VariableDeclaration {
             if self.variable_type == Type::Void {
                 return Err("Cannot declare a variable with a void type".into());
             }
-            for s in self.struct_declarations.iter_mut() {
+            for s in self.inline_declarations.iter_mut() {
                 s.check_types(context)?;
             }
 

@@ -175,20 +175,29 @@ impl CheckTypes for ExpressionNode {
                 }
             }
             ExpressionWithoutType::Var(ref name) => {
-                let type_info = context
-                    .symbols
-                    .get(name)
-                    .expect("Var should have been defined");
-
-                self.2 = type_info.constant;
-                // match &type_info.symbol_type {
-                //     // Type::Function(_, _) => {
-                //     //     println!("{:?}", self);
-                //     //     return Err("Function has been defined as a variable".into());
-                //     // }
-                //     t => t.clone(),
-                // }
-                type_info.symbol_type.clone()
+                let type_info = context.symbols.get(name);
+                if let Some(info) = type_info {
+                    self.2 = info.constant;
+                    // match &type_info.symbol_type {
+                    //     // Type::Function(_, _) => {
+                    //     //     println!("{:?}", self);
+                    //     //     return Err("Function has been defined as a variable".into());
+                    //     // }
+                    //     t => t.clone(),
+                    // }
+                    info.symbol_type.clone()
+                } else if let Some(member) =
+                    context.enum_names_in_scope.iter().find(|m| m.name == *name)
+                {
+                    *self = ExpressionNode(
+                        ExpressionWithoutType::Constant(Constant::Integer(member.init)),
+                        Some(Type::Integer),
+                        true,
+                    );
+                    self.1.clone().unwrap()
+                } else {
+                    return Err(format!("Variable {} is used before it is declared", name).into());
+                }
             }
             ExpressionWithoutType::Constant(ref c) => {
                 // marking that this is a constant
@@ -263,8 +272,15 @@ impl CheckTypes for ExpressionNode {
                 if dst.2 {
                     return Err("Cannot assign to a constant after initial declaration".into());
                 }
+                let original_enum_names_in_scope = context.enum_names_in_scope.clone();
+                if let Some(Type::Enum(members)) = &dst.1 {
+                    context.enum_names_in_scope.append(&mut members.clone())
+                }
                 src.check_types_and_convert(context)?;
                 src.convert_type_by_assignment(dst.1.as_ref().unwrap(), context)?;
+
+                context.enum_names_in_scope = original_enum_names_in_scope;
+
                 dst.1.clone().unwrap()
             }
             ExpressionWithoutType::Ternary(ref mut cond, ref mut then, ref mut other) => {

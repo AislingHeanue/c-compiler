@@ -6,10 +6,12 @@ use std::{
 mod expression_node;
 mod function_declaration;
 mod initialiser_node;
+mod inline_declaration;
 mod parsed_types;
 mod statement_node;
-mod struct_declaration;
 mod variable_declaration;
+
+use crate::compiler::types::EnumMember;
 
 use super::{
     BlockItemNode, DeclarationNode, ForInitialiserNode, ProgramNode, StructInfo, SwitchMapKey,
@@ -66,6 +68,7 @@ pub struct ValidateContext {
     checking_embedded_struct: bool,
     symbols: HashMap<String, SymbolInfo>,
     structs: HashMap<String, StructInfo>,
+    enum_names_in_scope: Vec<EnumMember>,
 }
 
 pub fn do_validate(parsed: &mut ProgramNode) -> Result<ValidateResult, Box<dyn Error>> {
@@ -94,6 +97,7 @@ pub fn do_validate(parsed: &mut ProgramNode) -> Result<ValidateResult, Box<dyn E
         checking_embedded_struct: false,
         symbols: HashMap::new(),
         structs: HashMap::new(),
+        enum_names_in_scope: Vec::new(),
     };
     for pass in passes {
         validate_context.pass = pass;
@@ -143,7 +147,7 @@ impl Validate for DeclarationNode {
             DeclarationNode::Function(f) => f.validate(context)?,
             DeclarationNode::Type(t) => {
                 if matches!(context.pass, ValidationPass::TypeChecking) {
-                    for s in t.struct_declarations.iter_mut() {
+                    for s in t.inline_declarations.iter_mut() {
                         s.check_types(context)?;
                     }
                     t.target_type.check_types(context)?;
@@ -152,6 +156,11 @@ impl Validate for DeclarationNode {
             DeclarationNode::Struct(s) => {
                 if matches!(context.pass, ValidationPass::TypeChecking) {
                     s.check_types(context)?;
+                }
+            }
+            DeclarationNode::Enum(e) => {
+                if matches!(context.pass, ValidationPass::TypeChecking) {
+                    e.check_types(context)?;
                 }
             }
         };

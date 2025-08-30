@@ -1,10 +1,10 @@
 use super::{
-    BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, Identity, Parse, ParseContext, Type,
-    UnaryOperatorNode,
+    BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, Identity, Parse, ParseContext,
+    StructKind, Type, UnaryOperatorNode,
 };
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::{Declarator, StructDeclaration},
+    parser::{Declarator, InlineDeclaration},
 };
 use std::{collections::VecDeque, error::Error};
 
@@ -86,9 +86,13 @@ impl ParseExpression for VecDeque<Token> {
                 // casting
                 self.expect(Token::OpenParen)?;
                 if self.peek()?.is_start_of_declaration(context) {
-                    let cast_type: Type = self.parse(context)?;
-                    let (declarator, struct_declarations): (Declarator, Vec<StructDeclaration>) =
+                    let (cast_type, mut inline_declarations): (Type, Vec<InlineDeclaration>) =
                         self.parse(context)?;
+                    let (declarator, mut struct_declarations_from_declarator): (
+                        Declarator,
+                        Vec<InlineDeclaration>,
+                    ) = self.parse(context)?;
+                    inline_declarations.append(&mut struct_declarations_from_declarator);
                     let declarator_output = declarator.apply_to_type(cast_type, context)?;
                     if declarator_output.name.is_some() {
                         return Err(
@@ -101,7 +105,7 @@ impl ParseExpression for VecDeque<Token> {
                     Some(ExpressionWithoutType::Cast(
                         declarator_output.out_type,
                         Box::new(factor.into()),
-                        struct_declarations,
+                        inline_declarations,
                     ))
                 } else {
                     // baited, not actually a cast, go further down the chain...
@@ -225,8 +229,10 @@ impl ParseExpression for VecDeque<Token> {
                             self.expect(Token::OpenParen)?;
                             if self.peek()?.is_start_of_declaration(context) {
                                 let target_type: Type = self.parse(context)?;
-                                let (declarator, structs): (Declarator, Vec<StructDeclaration>) =
-                                    self.parse(context)?;
+                                let (declarator, inline_declarations): (
+                                    Declarator,
+                                    Vec<InlineDeclaration>,
+                                ) = self.parse(context)?;
                                 let declarator_output =
                                     declarator.apply_to_type(target_type, context)?;
                                 if declarator_output.name.is_some() {
@@ -235,7 +241,7 @@ impl ParseExpression for VecDeque<Token> {
                                 self.expect(Token::CloseParen)?;
                                 Some(ExpressionWithoutType::SizeOfType(
                                     declarator_output.out_type,
-                                    structs,
+                                    inline_declarations,
                                 ))
                             } else {
                                 self.push_front(Token::OpenParen);
@@ -480,7 +486,13 @@ impl ExpressionWithoutType {
                 .into())
             }
         } else {
-            Err(format!("Identifier used before declaration: {}", name).into())
+            // Err(format!("Identifier used before declaration: {}", name).into())
+
+            // new requirement: this can only be checked during the type-checking stage, because
+            // assignment to enums can bring new names into scope. That being said, that only
+            // applies to variable names which are not already found in the current scope, so the
+            // majority of (valid) variables won't be affected by this change.
+            Ok((name.to_string(), false))
         }
     }
 
@@ -519,7 +531,7 @@ impl ExpressionWithoutType {
 
     pub fn resolve_struct_name(
         name: &str,
-        expecting_union: bool,
+        expecting_kind: &StructKind,
         context: &mut ParseContext,
     ) -> Result<String, Box<dyn Error>> {
         // println!(
@@ -527,7 +539,7 @@ impl ExpressionWithoutType {
         //     context.outer_struct_names, context.current_struct_names
         // );
         if let Some(info) = context.current_struct_names.get(name) {
-            if info.1 != expecting_union {
+            if info.1 != *expecting_kind {
                 return Err(format!(
                     "Conflicting definitions of struct and union with tag {}",
                     name
@@ -536,7 +548,7 @@ impl ExpressionWithoutType {
             }
             Ok(info.0.clone())
         } else if let Some(info) = context.outer_struct_names.get(name) {
-            if info.1 != expecting_union {
+            if info.1 != *expecting_kind {
                 return Err(format!(
                     "Conflicting definitions of struct and union with tag {}",
                     name
@@ -552,7 +564,7 @@ impl ExpressionWithoutType {
             if name != "anonymous.struct" {
                 context
                     .current_struct_names
-                    .insert(name.to_string(), (new_name.clone(), expecting_union));
+                    .insert(name.to_string(), (new_name.clone(), *expecting_kind));
             }
 
             Ok(new_name)
@@ -561,7 +573,7 @@ impl ExpressionWithoutType {
 
     pub fn new_struct_name(
         name: &str,
-        expecting_union: bool,
+        expecting_kind: &StructKind,
         context: &mut ParseContext,
     ) -> Result<String, Box<dyn Error>> {
         // println!(
@@ -569,7 +581,7 @@ impl ExpressionWithoutType {
         //     context.outer_struct_names, context.current_struct_names
         // );
         if let Some(info) = context.current_struct_names.get(name) {
-            if info.1 != expecting_union {
+            if info.1 != *expecting_kind {
                 return Err(format!(
                     "Conflicting definitions of struct and union with tag {}",
                     name
@@ -586,7 +598,7 @@ impl ExpressionWithoutType {
             if name != "anonymous.struct" {
                 context
                     .current_struct_names
-                    .insert(name.to_string(), (new_name.clone(), expecting_union));
+                    .insert(name.to_string(), (new_name.clone(), *expecting_kind));
             }
 
             Ok(new_name)

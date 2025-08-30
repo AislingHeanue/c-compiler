@@ -5,14 +5,13 @@ use super::{
 };
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    types::Constant,
+    types::{Constant, EnumMember},
 };
 use std::{
     collections::{HashMap, VecDeque},
     error::Error,
 };
 
-mod abstract_declarator;
 mod block_item_node;
 mod constant;
 mod declaration_node;
@@ -33,8 +32,10 @@ pub struct ParseContext {
     current_scope_identifiers: HashMap<String, Identity>,
     outer_scope_identifiers: HashMap<String, Identity>,
     // map from struct name to unique name and whether it's a union
-    current_struct_names: HashMap<String, (String, bool)>,
-    outer_struct_names: HashMap<String, (String, bool)>,
+    current_struct_names: HashMap<String, (String, StructKind)>,
+    outer_struct_names: HashMap<String, (String, StructKind)>,
+    enums: HashMap<String, Vec<EnumMember>>,
+    last_enum_number: i32,
     // all_struct_types: HashMap<String, StructTypeEntry>,
     num_variables: usize,
     num_structs: usize,
@@ -44,14 +45,12 @@ pub struct ParseContext {
     current_scope_is_file: bool,
 }
 
-// pub struct StructTypeEntry {
-//     alignment: u32,
-//     size: u64,
-//     members: Vec<StructMemberEntry>,
-// }
-
-// struct member with offset within the struct
-// type StructMemberEntry = (StructMember, u32);
+#[derive(PartialEq, Clone, Copy)]
+pub enum StructKind {
+    Struct,
+    Union,
+    Enum,
+}
 
 #[derive(Clone, Debug)]
 pub enum Identity {
@@ -68,9 +67,12 @@ pub fn do_parse(
         outer_scope_identifiers: HashMap::new(),
         current_struct_names: HashMap::new(),
         outer_struct_names: HashMap::new(),
+        enums: HashMap::new(),
+        last_enum_number: -1,
         // all_struct_types: HashMap::new(),
         num_variables: 0,
         num_structs: 0,
+        // num_anonymous_params: 0,
         do_not_validate,
         current_block_is_function_body: false,
         current_scope_is_file: true,

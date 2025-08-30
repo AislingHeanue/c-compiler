@@ -1,7 +1,7 @@
 use parse::do_parse;
 use validate::do_validate;
 
-use super::types::{ComparableStatic, Constant, MemberEntry, StorageClass, Type};
+use super::types::{ComparableStatic, Constant, EnumMember, MemberEntry, StorageClass, Type};
 
 use super::{lexer::Token, types::SymbolInfo};
 use std::{
@@ -27,7 +27,7 @@ pub struct FunctionDeclaration {
     pub params: Vec<String>,
     pub body: Option<Vec<BlockItemNode>>,
     pub storage_class: Option<StorageClass>,
-    pub struct_declarations: Vec<StructDeclaration>,
+    pub inline_declarations: Vec<InlineDeclaration>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -44,14 +44,20 @@ pub struct VariableDeclaration {
     pub storage_class: Option<StorageClass>,
     // variable declarations may also include an inline struct declaration, make sure to include
     // them here
-    pub struct_declarations: Vec<StructDeclaration>,
+    pub inline_declarations: Vec<InlineDeclaration>,
 }
 
 #[derive(Debug)]
 pub struct TypeDeclaration {
     pub target_type: Type,
     pub name: String,
-    pub struct_declarations: Vec<StructDeclaration>,
+    pub inline_declarations: Vec<InlineDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InlineDeclaration {
+    Struct(StructDeclaration),
+    Enum(EnumDeclaration),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,10 +68,16 @@ pub struct StructDeclaration {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct EnumDeclaration {
+    pub name: String,
+    pub members: Vec<EnumMember>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct StructMember {
     pub member_type: Type,
     pub name: Option<String>,
-    pub struct_declarations: Vec<StructDeclaration>,
+    pub inline_declarations: Vec<InlineDeclaration>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +101,7 @@ pub enum DeclarationNode {
     Variable(VariableDeclaration),
     Function(FunctionDeclaration),
     Struct(StructDeclaration),
+    Enum(EnumDeclaration),
 }
 
 #[derive(Debug)]
@@ -176,12 +189,12 @@ pub enum ExpressionWithoutType {
     FunctionCall(String, Vec<ExpressionNode>),
     IndirectFunctionCall(Box<ExpressionNode>, Vec<ExpressionNode>),
     // target type to cast expression to
-    Cast(Type, Box<ExpressionNode>, Vec<StructDeclaration>),
+    Cast(Type, Box<ExpressionNode>, Vec<InlineDeclaration>),
     Dereference(Box<ExpressionNode>),
     AddressOf(Box<ExpressionNode>),
     String(Vec<i8>),
     SizeOf(Box<ExpressionNode>),
-    SizeOfType(Type, Vec<StructDeclaration>),
+    SizeOfType(Type, Vec<InlineDeclaration>),
     // operates only on structs
     Dot(Box<ExpressionNode>, String),
     // operates only on pointers (to structs)
@@ -245,23 +258,7 @@ pub enum Declarator {
 }
 
 // declarator, struct_declarations
-pub type DeclaratorWithStructs = (Declarator, Vec<StructDeclaration>);
-
-// #[derive(Debug, Clone)]
-// pub enum AbstractDeclarator {
-//     // is_restricted
-//     Pointer(Box<AbstractDeclarator>, bool),
-//     Array(Box<AbstractDeclarator>, ExpressionWithoutType),
-//     Function(Box<AbstractDeclarator>, Vec<ParamDeclarator>),
-//     Base,
-// }
-// pub type AbstractDeclaratorWithStructs = (AbstractDeclarator, Vec<StructDeclaration>);
-
-// #[derive(Debug, Clone)]
-// pub enum ParamDeclarator {
-//     Plain(Type, Declarator),
-//     Anonymous(AbstractDeclarator),
-// }
+pub type DeclaratorWithInline = (Declarator, Vec<InlineDeclaration>);
 
 pub fn parse(lexed: VecDeque<Token>, do_not_validate: bool) -> Result<ProgramNode, Box<dyn Error>> {
     do_parse(lexed, do_not_validate)

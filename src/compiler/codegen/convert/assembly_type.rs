@@ -37,6 +37,7 @@ impl Convert<AssemblyType> for Type {
                 Ok(AssemblyType::ByteArray(info.size, info.alignment as u32))
             }
             Type::Void => unreachable!(),
+            Type::Enum(_) => Ok(AssemblyType::Longword),
         }
     }
 }

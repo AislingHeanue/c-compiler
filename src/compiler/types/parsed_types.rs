@@ -38,6 +38,7 @@ impl Type {
                 align_stack_size(t.get_size(structs), t.get_alignment(structs)) * (size.unwrap())
             } // arrays are like pointers except that they aren't
             Type::Struct(name, _) => structs.get(name).unwrap().size,
+            Type::Enum(_) => 4,
         }
     }
 
@@ -63,6 +64,7 @@ impl Type {
                 | Type::SignedChar
                 | Type::Short
                 | Type::LongLong
+                | Type::Enum(_)
         )
     }
 
@@ -83,6 +85,7 @@ impl Type {
                 | Type::Char
                 | Type::SignedChar
                 | Type::UnsignedChar
+                | Type::Enum(_)
         )
     }
 

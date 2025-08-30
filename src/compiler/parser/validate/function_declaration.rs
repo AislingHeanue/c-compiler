@@ -45,7 +45,7 @@ impl CheckTypes for FunctionDeclaration {
         }
 
         // bring any used structs into existence
-        for s in self.struct_declarations.iter_mut() {
+        for s in self.inline_declarations.iter_mut() {
             s.check_types(context)?;
         }
         if is_defined
