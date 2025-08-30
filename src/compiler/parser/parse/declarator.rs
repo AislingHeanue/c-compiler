@@ -227,13 +227,22 @@ impl Declarator {
                 declarator.apply_to_type(Type::Pointer(Box::new(base_type), false), context)
             }
             Declarator::Function(declarator, params) => {
+                let mut num_anonymous_params = 0;
                 let (param_types, param_names): (Vec<Type>, Vec<String>) = process_results(
                     params
                         .into_iter()
                         .map(|(t, declarator)| declarator.apply_to_type(t, context)),
                     |iter| {
-                        iter.map(|o| (o.out_type, o.name.unwrap_or(".anonymous".to_string())))
-                            .unzip()
+                        iter.map(|o| {
+                            (
+                                o.out_type,
+                                o.name.unwrap_or_else(|| {
+                                    num_anonymous_params += 1;
+                                    format!("anonymous.param.{}", num_anonymous_params)
+                                }),
+                            )
+                        })
+                        .unzip()
                     },
                 )?;
 
