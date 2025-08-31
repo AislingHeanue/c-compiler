@@ -9,6 +9,7 @@ typedef struct {
 } __va_list[1];
 
 typedef __va_list va_list;
+typedef __va_list __gnuc_va_list;
 
 #define va_start(ap, last_named_param) __builtin_va_start(ap, last_named_param)
 #define va_arg(ap, type)               __builtin_va_arg(ap, type)

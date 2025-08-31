@@ -304,24 +304,16 @@ impl Parse<StructMember> for VecDeque<Token> {
                         member_type: Type::Struct(s.name.clone(), s.is_union),
                         name: None,
                         inline_declarations: vec![embedded_struct_declaration],
+                        _num_bits: None,
                     }),
                     InlineDeclaration::Enum(ref m) => Ok(StructMember {
                         member_type: Type::Enum(m.members.clone()),
                         name: None,
                         inline_declarations: vec![embedded_struct_declaration],
+                        _num_bits: None,
                     }),
                 }
             }
-            // choosing to ignore this case for now because it's complicated and confusing
-            // (Some(Token::KeywordEnum), Token::SemiColon) => {
-            //     let embedded_enum_declaration: EnumDeclaration = self.parse_enum(context)?;
-            //     Ok(StructMember {
-            //         // special case, this declaration adds no fields to the struct
-            //         member_type: Type::Void,
-            //         name: None,
-            //         inline_declarations: vec![InlineDeclaration::Enum(embedded_enum_declaration)],
-            //     })
-            // }
             _ => {
                 // attempt to parse a declarator with the remaining tokens
                 type_tokens.append(self);
@@ -332,6 +324,21 @@ impl Parse<StructMember> for VecDeque<Token> {
                     Declarator,
                     Vec<InlineDeclaration>,
                 ) = self.parse(context)?;
+
+                // bitfield specifiers
+                // we don't support these (at least not for the time being), so they are
+                // silently ignored.
+                let num_bits = if let Token::Colon = self.peek()? {
+                    self.expect(Token::Colon)?;
+                    if let Token::IntegerConstant(num) = self.read()? {
+                        Some(num as u32)
+                    } else {
+                        return Err("Bitfield specifier in a struct member must be followed by an integer constant".into());
+                    }
+                } else {
+                    None
+                };
+
                 self.expect(Token::SemiColon)?;
                 let declarator_output = declarator.apply_to_type(base_type, context)?;
 
@@ -342,6 +349,7 @@ impl Parse<StructMember> for VecDeque<Token> {
                         member_type: declarator_output.out_type,
                         name: declarator_output.name,
                         inline_declarations,
+                        _num_bits: num_bits,
                     })
                 }
             }
@@ -414,6 +422,7 @@ impl Parse<OutputWithInline> for VecDeque<Token> {
                         | Token::SemiColon
                         | Token::Assignment
                         | Token::OpenBrace
+                        | Token::Colon
                 )))
         {
             match self.peek()? {
