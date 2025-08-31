@@ -833,7 +833,7 @@ fn resolve_include(
             //     context.macros.insert(k, v);
             // }
 
-            return Ok(text);
+            return Ok(text.trim_end().to_string());
         }
     }
 

@@ -39,15 +39,22 @@ impl BirdsTopLevel {
             .iter()
             .map(|name| BirdsValueNode::Var(name.to_string()))
             .collect_vec();
-        let return_uses_memory = if let Some(Type::Function(return_type, _, _)) =
-            context.symbols.get(&name).map(|a| &a.symbol_type)
-        {
-            classify_return_by_type(&return_type.clone(), context)?.0
-        } else {
-            unreachable!()
-        };
+        let (return_uses_memory, is_variadic) =
+            if let Some(Type::Function(return_type, _, is_variadic)) =
+                context.symbols.get(&name).map(|a| &a.symbol_type)
+            {
+                let is_variadic = *is_variadic;
+                (
+                    classify_return_by_type(&return_type.clone(), context)?.0,
+                    is_variadic,
+                )
+            } else {
+                unreachable!()
+            };
 
         let params = pass_args_to_callee(params_vars, return_uses_memory, context)?;
+
+        let params_clone = params.clone();
 
         let mut instructions: Vec<Instruction> = Vec::new();
         let register_offset = if return_uses_memory {
@@ -114,6 +121,12 @@ impl BirdsTopLevel {
             |iter| iter.flatten().collect(),
         )?);
 
-        Ok(TopLevel::Function(name, instructions, global))
+        Ok(TopLevel::Function(
+            name,
+            instructions,
+            global,
+            params_clone,
+            is_variadic,
+        ))
     }
 }

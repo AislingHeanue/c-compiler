@@ -103,7 +103,9 @@ impl ExpressionWithoutType {
             ExpressionWithoutType::IndirectFunctionCall(_, _) => {
                 return Err("Cannot use a function call in a constant".into())
             }
-
+            ExpressionWithoutType::BuiltinFunctionCall(_) => {
+                return Err("Cannot use a builtin function call in a constant".into())
+            }
             ExpressionWithoutType::Cast(t, e, _) => {
                 if !t.is_integer() {
                     return Err("Cannot cast to a non-integer type in a constant".into());

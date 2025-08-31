@@ -1,8 +1,11 @@
 use std::{collections::HashMap, error::Error};
 
+use itertools::{EitherOrBoth, Itertools};
+
 use crate::compiler::{
     parser::{
-        BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, StructInfo, UnaryOperatorNode,
+        BinaryOperatorNode, BuiltinVa, ExpressionNode, ExpressionWithoutType, StructInfo,
+        UnaryOperatorNode,
     },
     types::{Constant, FindMemberName, Type},
 };
@@ -52,6 +55,9 @@ impl Validate for ExpressionNode {
                 left.validate(context)?;
                 params.validate(context)?;
             }
+            ExpressionWithoutType::BuiltinFunctionCall(ref mut b) => {
+                b.validate(context)?;
+            }
             ExpressionWithoutType::Cast(_, ref mut expression, _) => {
                 expression.validate(context)?;
             }
@@ -76,6 +82,7 @@ impl Validate for ExpressionNode {
         Ok(())
     }
 }
+
 impl CheckTypes for ExpressionNode {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         if self.1.is_some() {
@@ -96,12 +103,22 @@ impl CheckTypes for ExpressionNode {
                                 "Can't call a function with an incomplete return type".into()
                             );
                         }
-                        if params.len() != args.len() {
+                        if params.len() != args.len() && !is_variadic {
                             return Err("Function call has the wrong number of arguments".into());
+                        } else if *is_variadic && params.len() > args.len() {
+                            return Err("Variadic function call has too few arguments".into());
                         }
-                        for (arg, param) in args.iter_mut().zip(params.iter()) {
-                            arg.check_types_and_convert(context)?;
-                            arg.convert_type_by_assignment(param, context)?;
+                        for pair in args.iter_mut().zip_longest(params.iter()) {
+                            match pair {
+                                EitherOrBoth::Both(arg, param) => {
+                                    arg.check_types_and_convert(context)?; // args is always longed
+                                    arg.convert_type_by_assignment(param, context)?;
+                                }
+                                EitherOrBoth::Left(arg) => {
+                                    arg.check_types_and_convert(context)?; // args is always longed
+                                }
+                                EitherOrBoth::Right(_) => unreachable!(),
+                            }
                         }
 
                         *out.clone()
@@ -120,10 +137,12 @@ impl CheckTypes for ExpressionNode {
                                     "Can't call a function with an incomplete return type".into()
                                 );
                             }
-                            if params.len() != args.len() {
+                            if params.len() != args.len() && !is_variadic {
                                 return Err(
                                     "Function call has the wrong number of arguments".into()
                                 );
+                            } else if *is_variadic && params.len() > args.len() {
+                                return Err("Variadic function call has too few arguments".into());
                             }
                             for (arg, param) in args.iter_mut().zip(params.iter()) {
                                 arg.check_types_and_convert(context)?;
@@ -147,17 +166,29 @@ impl CheckTypes for ExpressionNode {
                     _ => return Err("Variable has been called as a function".into()),
                 }
             }
+            ExpressionWithoutType::BuiltinFunctionCall(ref mut b) => {
+                b.check_types(context)?;
+
+                match b {
+                    BuiltinVa::Start(_, _) => Type::Void,
+                    BuiltinVa::Arg(_, t, _inline) => t.clone(),
+                    BuiltinVa::End(_) => Type::Void,
+                    BuiltinVa::Copy(_, _) => Type::Void,
+                }
+            }
             ExpressionWithoutType::IndirectFunctionCall(ref mut left, ref mut args) => {
                 left.check_types_and_convert(context)?;
                 if let Some(Type::Pointer(ref p, _)) = &left.1 {
-                    if let Type::Function(ref out, ref params, is_variadic) = **p {
+                    if let Type::Function(ref out, ref params, ref is_variadic) = **p {
                         if **out != Type::Void && !out.is_complete(&mut context.structs) {
                             return Err(
                                 "Can't call a function with an incomplete return type".into()
                             );
                         }
-                        if params.len() != args.len() {
+                        if params.len() != args.len() && !is_variadic {
                             return Err("Function call has the wrong number of arguments".into());
+                        } else if *is_variadic && params.len() > args.len() {
+                            return Err("Variadic function call has too few arguments".into());
                         }
                         for (arg, param) in args.iter_mut().zip(params.iter()) {
                             arg.check_types_and_convert(context)?;
@@ -841,5 +872,74 @@ impl ExpressionNode {
             | BinaryOperatorNode::LessEqual
             | BinaryOperatorNode::GreaterEqual => Type::Integer,
         })
+    }
+}
+
+impl Validate for BuiltinVa {
+    fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        match self {
+            BuiltinVa::Start(v, i) => {
+                v.validate(context)?;
+                i.validate(context)?;
+            }
+            BuiltinVa::Arg(v, _t, _inline) => {
+                v.validate(context)?;
+            }
+
+            BuiltinVa::End(v) => {
+                v.validate(context)?;
+            }
+
+            BuiltinVa::Copy(dst, src) => {
+                dst.validate(context)?;
+                src.validate(context)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl CheckTypes for BuiltinVa {
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        match self {
+            BuiltinVa::Start(v, i) => {
+                v.check_types(context)?;
+                if !v.1.as_ref().unwrap().is_va_list(&mut context.structs) {
+                    return Err("Invalid type passed to va_start".into());
+                }
+                i.check_types(context)?;
+            }
+            BuiltinVa::Arg(v, t, inline_declarations) => {
+                v.check_types(context)?;
+                if !v.1.as_ref().unwrap().is_va_list(&mut context.structs) {
+                    return Err("Invalid type passed to va_arg".into());
+                }
+
+                // bring inline struct declarations into scope
+                for i in inline_declarations.iter_mut() {
+                    i.check_types(context)?;
+                }
+                t.check_types(context)?;
+            }
+
+            BuiltinVa::End(v) => {
+                v.check_types(context)?;
+                if !v.1.as_ref().unwrap().is_va_list(&mut context.structs) {
+                    return Err("Invalid type passed to va_end".into());
+                }
+            }
+
+            BuiltinVa::Copy(dst, src) => {
+                dst.check_types(context)?;
+                if !dst.1.as_ref().unwrap().is_va_list(&mut context.structs) {
+                    return Err("Invalid target type passed to va_end".into());
+                }
+                src.check_types(context)?;
+                if !src.1.as_ref().unwrap().is_va_list(&mut context.structs) {
+                    return Err("Invalid source type passed to va_end".into());
+                }
+            }
+        }
+        Ok(())
     }
 }

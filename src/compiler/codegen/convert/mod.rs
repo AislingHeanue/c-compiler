@@ -58,10 +58,11 @@ impl ConvertContext {
     }
 }
 
-struct Args {
-    double: Vec<(Operand, AssemblyType)>,
-    integer: Vec<(Operand, bool, AssemblyType)>,
-    stack: Vec<(Operand, bool, AssemblyType)>,
+#[derive(Clone, Debug)]
+pub struct Args {
+    pub double: Vec<(Operand, AssemblyType)>,
+    pub integer: Vec<(Operand, bool, AssemblyType)>,
+    pub stack: Vec<(Operand, bool, AssemblyType)>,
 }
 
 #[derive(Debug)]
@@ -105,6 +106,7 @@ fn pass_args_to_callee(
             // because that's also crimes.
             let var_name = get_var_name(&v);
             let struct_type = context.symbols.get(&var_name).unwrap().symbol_type.clone();
+
             let classes = classify_struct(&struct_type, context)?;
 
             let mut throw_it_onto_the_stack = true;

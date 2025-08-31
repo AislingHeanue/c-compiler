@@ -188,6 +188,7 @@ pub enum ExpressionWithoutType {
     // function name, args...
     FunctionCall(String, Vec<ExpressionNode>),
     IndirectFunctionCall(Box<ExpressionNode>, Vec<ExpressionNode>),
+    BuiltinFunctionCall(BuiltinVa),
     // target type to cast expression to
     Cast(Type, Box<ExpressionNode>, Vec<InlineDeclaration>),
     Dereference(Box<ExpressionNode>),
@@ -199,6 +200,14 @@ pub enum ExpressionWithoutType {
     Dot(Box<ExpressionNode>, String),
     // operates only on pointers (to structs)
     Arrow(Box<ExpressionNode>, String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BuiltinVa {
+    Start(Box<ExpressionNode>, Box<ExpressionNode>),
+    Arg(Box<ExpressionNode>, Type, Vec<InlineDeclaration>),
+    End(Box<ExpressionNode>),
+    Copy(Box<ExpressionNode>, Box<ExpressionNode>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -165,7 +165,7 @@ pub enum Class {
     Integer,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MemberEntry {
     pub member_type: Type,
     pub name: Option<String>,

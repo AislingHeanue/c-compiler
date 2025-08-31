@@ -61,6 +61,8 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
             | BirdsInstructionNode::DoubleToFloat(ref mut src, _)
             | BirdsInstructionNode::CopyToOffset(ref mut src, _, _)
             | BirdsInstructionNode::LoadFromPointer(ref mut src, _)
+            | BirdsInstructionNode::VaStart(ref mut src)
+            // | BirdsInstructionNode::VaArg(ref mut src, _)
             | BirdsInstructionNode::StoreInPointer(ref mut src, _) => {
                 Self::replace_value(src, &reaching_copies);
                 Some(instruction)
@@ -142,19 +144,21 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                     // DO NOT propagate copies that are into volatile variables, because there
                     // is no guarantee that this value will remain the same, ever.
                     let dst_is_volatile = if let BirdsValueNode::Var(name) = dst {
-                         context.symbols.get(name).unwrap().volatile
+                        context.symbols.get(name).unwrap().volatile
                     } else {
                         false
                     };
 
-                    if  !dst_is_volatile && (src_type == dst_type
-                        || (src_type.is_signed() && dst_type.is_signed())
-                        || (!src_type.is_signed() && !dst_type.is_signed()))
+                    if !dst_is_volatile
+                        && (src_type == dst_type
+                            || (src_type.is_signed() && dst_type.is_signed())
+                            || (!src_type.is_signed() && !dst_type.is_signed()))
                     {
                         reaching_copies.push((src.clone(), dst.clone()));
                     }
                 }
-                BirdsInstructionNode::FunctionCall(_, _, maybe_dst) => {
+                BirdsInstructionNode::FunctionCall(_, _, maybe_dst)
+                | BirdsInstructionNode::IndirectFunctionCall(_, _, maybe_dst) => {
                     for (i, copy) in reaching_copies.clone().iter().enumerate().rev() {
                         if let Some(ref dst) = maybe_dst {
                             if copy.0 == *dst || copy.1 == *dst {
@@ -193,14 +197,11 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 | BirdsInstructionNode::UintToFloat(_, dst)
                 | BirdsInstructionNode::FloatToDouble(_, dst)
                 | BirdsInstructionNode::DoubleToFloat(_, dst)
-                // | BirdsInstructionNode::FloatToInt(_, dst)
-                // | BirdsInstructionNode::FloatToUint(_, dst)
-                // | BirdsInstructionNode::UintToFloat(_, dst)
-                // | BirdsInstructionNode::IntToFloat(_, dst)
                 | BirdsInstructionNode::GetAddress(_, dst)
                 | BirdsInstructionNode::LoadFromPointer(_, dst)
                 | BirdsInstructionNode::AddPointer(_, _, _, dst)
                 | BirdsInstructionNode::CopyFromOffset(_, _, dst)
+                // | BirdsInstructionNode::VaArg(_, dst)
                 | BirdsInstructionNode::Binary(_, _, _, dst) => {
                     for (i, copy) in reaching_copies.clone().iter().enumerate().rev() {
                         if copy.0 == *dst || copy.1 == *dst {
@@ -216,7 +217,13 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                         }
                     }
                 }
-                _ => {}
+                BirdsInstructionNode::Return(_)
+                | BirdsInstructionNode::Jump(_)
+                | BirdsInstructionNode::JumpZero(_, _)
+                | BirdsInstructionNode::JumpNotZero(_, _)
+                | BirdsInstructionNode::JumpCondition(_, _, _, _)
+                | BirdsInstructionNode::Label(_)
+                | BirdsInstructionNode::VaStart(_) => {}
             }
         }
         context

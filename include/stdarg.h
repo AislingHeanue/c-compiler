@@ -8,6 +8,8 @@ typedef struct {
     void *reg_save_area;      // copy of regs
 } __va_list[1];
 
+typedef __va_list va_list;
+
 #define va_start(ap, last_named_param) __builtin_va_start(ap, last_named_param)
 #define va_arg(ap, type)               __builtin_va_arg(ap, type)
 #define va_end(ap)                     __builtin_va_end(ap)

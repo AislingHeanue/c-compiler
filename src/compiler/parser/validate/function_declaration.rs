@@ -34,14 +34,16 @@ impl CheckTypes for FunctionDeclaration {
         let mut is_defined = self.body.is_some();
         let mut is_global = !matches!(self.storage_class, Some(StorageClass::Static));
 
-        let (return_type, arg_types) =
-            if let Type::Function(ref return_type, ref mut arg_types, ref is_variadic) =
-                &mut self.function_type
-            {
-                (return_type, arg_types)
-            } else {
-                return Err("Function is not a function type".into());
-            };
+        let (return_type, arg_types) = if let Type::Function(
+            ref return_type,
+            ref mut arg_types,
+            _,
+        ) = &mut self.function_type
+        {
+            (return_type, arg_types)
+        } else {
+            return Err("Function is not a function type".into());
+        };
         if matches!(**return_type, Type::Array(_, _)) {
             return Err("Function cannot return an array".into());
         }

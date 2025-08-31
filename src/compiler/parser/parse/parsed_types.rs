@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 use super::{Parse, ParseContext, StructKind, StructMember, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
@@ -29,11 +31,18 @@ impl Parse<Type> for VecDeque<Token> {
             }
         }
         let mut out = Vec::new();
-        while !self.is_empty() && self.peek()?.is_type(context) {
+        let mut _is_constant = false;
+        while !self.is_empty()
+            && (self.peek()?.is_type(context) || self.peek()? == Token::KeywordConst)
+        {
             out.push(self.read()?)
         }
         if out.is_empty() {
             return Err("No type tokens found".into());
+        }
+        if let Some((loc, _)) = out.iter().find_position(|t| **t == Token::KeywordConst) {
+            _is_constant = true;
+            out.remove(loc);
         }
         let mut seen = Vec::new();
         let mut is_long_long = false;

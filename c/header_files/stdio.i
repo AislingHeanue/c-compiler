@@ -2,8 +2,6 @@ typedef long ptrdiff_t;
 typedef unsigned long size_t;
 typedef char wchar_t;
 
-
-
 typedef struct {
     unsigned int gp_offset;
     unsigned int fp_offset;
@@ -11,7 +9,7 @@ typedef struct {
     void *reg_save_area;
 } __va_list[1];
 
-
+typedef __va_list va_list;
 
 typedef unsigned char __u_char;
 typedef unsigned short int __u_short;
@@ -96,8 +94,6 @@ typedef long int __intptr_t;
 typedef unsigned int __socklen_t;
 
 typedef int __sig_atomic_t;
-
-
 typedef struct
 {
   int __count;
@@ -108,31 +104,21 @@ typedef struct
   } __value;
 } __mbstate_t;
 
-
-
 typedef struct _G_fpos_t
 {
   __off_t __pos;
   __mbstate_t __state;
 } __fpos_t;
-
-
 typedef struct _G_fpos64_t
 {
   __off64_t __pos;
   __mbstate_t __state;
 } __fpos64_t;
-
-
 struct _IO_FILE;
 typedef struct _IO_FILE __FILE;
-
-
 struct _IO_FILE;
 
 typedef struct _IO_FILE FILE;
-
-
 struct _IO_FILE;
 struct _IO_marker;
 struct _IO_codecvt;
@@ -186,8 +172,6 @@ struct _IO_FILE
   char _unused2[12 * sizeof (int) - 5 * sizeof (void *)];
 };
 
-
-
 typedef __ssize_t cookie_read_function_t (void *__cookie, char *__buf,
                                           size_t __nbytes);
 
@@ -205,8 +189,6 @@ typedef struct _IO_cookie_io_functions_t
   cookie_seek_function_t *seek;
   cookie_close_function_t *close;
 } cookie_io_functions_t;
-
-
 
 typedef __off_t off_t;
 
@@ -329,10 +311,6 @@ typedef double _Float64;
 typedef double _Float32x;
 
 typedef long double _Float64x;
-
-
-
-
 extern int __isoc99_fscanf (FILE *restrict __stream,
 			    const char *restrict __format, ...) 
   ;
@@ -468,8 +446,6 @@ extern void funlockfile (FILE *__stream)  ;
 
 extern int __uflow (FILE *);
 extern int __overflow (FILE *, int);
-
-
 
 int main(void) {
   return 1;

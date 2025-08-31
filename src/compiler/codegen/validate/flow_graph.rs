@@ -141,7 +141,7 @@ impl FlowGraph<Instruction, InstructionInfo> {
                     .symbols
                     .get(context.current_function_name.as_ref().unwrap())
                     .unwrap();
-                if let AssemblySymbolInfo::Function(_, _, _, return_registers) = function_info {
+                if let AssemblySymbolInfo::Function(_, _, _, return_registers, _) = function_info {
                     let return_operands = return_registers
                         .iter()
                         .map(|r| Operand::Reg(r.clone()))

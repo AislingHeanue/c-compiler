@@ -68,6 +68,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 }
             }
             BirdsInstructionNode::FunctionCall(_, _, _)
+            // | BirdsInstructionNode::VaArg(_, _) // never kill a VaArg
             | BirdsInstructionNode::IndirectFunctionCall(_, _, _)
             | BirdsInstructionNode::Return(_)
             | BirdsInstructionNode::Jump(_)
@@ -75,6 +76,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
             | BirdsInstructionNode::JumpNotZero(_, _)
             | BirdsInstructionNode::JumpCondition(_, _, _, _)
             | BirdsInstructionNode::Label(_)
+            | BirdsInstructionNode::VaStart(_)
             | BirdsInstructionNode::StoreInPointer(_, _) => Some(instruction),
         }
     }
@@ -105,7 +107,9 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 | BirdsInstructionNode::AddPointer(_, _, _, dst)
                 | BirdsInstructionNode::CopyFromOffset(_, _, dst)
                 | BirdsInstructionNode::Copy(_, dst)
+                | BirdsInstructionNode::VaStart(dst)
                 | BirdsInstructionNode::FunctionCall(_, _, Some(dst))
+                | BirdsInstructionNode::IndirectFunctionCall(_, _, Some(dst))
                 | BirdsInstructionNode::Binary(_, _, _, dst) => {
                     for (i, value) in live_variables.clone().iter().enumerate().rev() {
                         if value == dst {
@@ -114,10 +118,17 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                     }
                 }
                 // an address does not kill a variable
-                BirdsInstructionNode::StoreInPointer(_, _dst_pointer) => {}
                 // nor does copying to part of an array, eg.
-                BirdsInstructionNode::CopyToOffset(_, _, _) => {}
-                _ => {}
+                BirdsInstructionNode::StoreInPointer(_, _dst_pointer) => {}
+                BirdsInstructionNode::Return(_)
+                | BirdsInstructionNode::Jump(_)
+                | BirdsInstructionNode::JumpZero(_, _)
+                | BirdsInstructionNode::JumpNotZero(_, _)
+                | BirdsInstructionNode::JumpCondition(_, _, _, _)
+                | BirdsInstructionNode::Label(_)
+                | BirdsInstructionNode::FunctionCall(_, _, None)
+                | BirdsInstructionNode::IndirectFunctionCall(_, _, None)
+                | BirdsInstructionNode::CopyToOffset(_, _, _) => {}
             }
             match &instruction.0 {
                 BirdsInstructionNode::Copy(src, _)
@@ -132,8 +143,8 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 | BirdsInstructionNode::FloatToUint(src, _)
                 | BirdsInstructionNode::IntToFloat(src, _)
                 | BirdsInstructionNode::UintToFloat(src, _)
-                | BirdsInstructionNode::FloatToDouble(src,_)
-                | BirdsInstructionNode::DoubleToFloat(src,_)
+                | BirdsInstructionNode::FloatToDouble(src, _)
+                | BirdsInstructionNode::DoubleToFloat(src, _)
                 | BirdsInstructionNode::CopyToOffset(src, _, _) => {
                     if matches!(src, BirdsValueNode::Var(_)) && !live_variables.contains(src) {
                         live_variables.push(src.clone())
@@ -159,7 +170,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                     // }
                 }
                 BirdsInstructionNode::Binary(_, left, right, _)
-                |BirdsInstructionNode::JumpCondition(_, left, right, _)
+                | BirdsInstructionNode::JumpCondition(_, left, right, _)
                 | BirdsInstructionNode::AddPointer(left, right, _, _) => {
                     if matches!(left, BirdsValueNode::Var(_)) && !live_variables.contains(left) {
                         live_variables.push(left.clone())
@@ -168,7 +179,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                         live_variables.push(right.clone())
                     }
                 }
-                BirdsInstructionNode::FunctionCall(_, args, _)=> {
+                BirdsInstructionNode::FunctionCall(_, args, _) => {
                     for arg in args.iter() {
                         if matches!(arg, BirdsValueNode::Var(_)) && !live_variables.contains(arg) {
                             live_variables.push(arg.clone())
@@ -185,7 +196,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                         }
                     }
                 }
-                BirdsInstructionNode::IndirectFunctionCall(src, args ,_ ) => {
+                BirdsInstructionNode::IndirectFunctionCall(src, args, _) => {
                     if matches!(src, BirdsValueNode::Var(_)) && !live_variables.contains(src) {
                         live_variables.push(src.clone())
                     }
@@ -211,10 +222,11 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                         live_variables.push(BirdsValueNode::Var(name.clone()))
                     }
                 }
-                BirdsInstructionNode::Jump(_)
                 // GetAddress doesn't gen because getting the address of a register doesn't Use the
                 // value stored inside it
-                | BirdsInstructionNode::GetAddress(_, _)
+                BirdsInstructionNode::GetAddress(_, _)
+                | BirdsInstructionNode::Jump(_)
+                | BirdsInstructionNode::VaStart(_)
                 | BirdsInstructionNode::Return(None)
                 | BirdsInstructionNode::Label(_) => {}
             }
@@ -275,7 +287,14 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
             let incoming = self.meet_dead_stores(&index, context);
             self.transfer_dead_stores(&index, incoming, context);
 
-            if previous_reaching != *context.block_live_variables.get(&index).unwrap() {
+            let current_reaching = context.block_live_variables.get(&index).unwrap();
+
+            // better list comparison
+            if current_reaching
+                .iter()
+                .any(|v| !previous_reaching.contains(v))
+                || current_reaching.len() > previous_reaching.len()
+            {
                 let node = self.nodes.get(&index).unwrap();
                 for before_index in node.befores.iter() {
                     if *before_index == 0

@@ -124,6 +124,9 @@ impl AllocateRegisters for Vec<Instruction> {
                     src.replace_mock_register_with_map(context);
                     dst.replace_mock_register_with_map(context);
                 }
+                Instruction::VaStart(ref mut dst) => {
+                    dst.replace_mock_register_with_map(context);
+                }
             }
             let delete_this_instruction = if let Instruction::Mov(_, ref src, ref dst) = instruction
             {
@@ -178,6 +181,9 @@ impl AllocateRegisters for Vec<Instruction> {
                         // registers cannot be coalesced into non-registers ever
                         unreachable!()
                     }
+                }
+                Instruction::VaStart(ref mut dst) => {
+                    *dst = true_register_value(dst, &coalesced_registers);
                 }
                 Instruction::Cdq(_)
                 | Instruction::Jmp(_)

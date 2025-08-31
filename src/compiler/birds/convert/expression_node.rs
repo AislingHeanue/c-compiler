@@ -7,7 +7,9 @@ use crate::compiler::{
         BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsUnaryOperatorNode, BirdsValueNode,
         Destination,
     },
-    parser::{BinaryOperatorNode, ExpressionNode, ExpressionWithoutType, UnaryOperatorNode},
+    parser::{
+        BinaryOperatorNode, BuiltinVa, ExpressionNode, ExpressionWithoutType, UnaryOperatorNode,
+    },
     types::{
         ComparableStatic, Constant, FindMemberName, InitialValue, StaticInitialiser, StorageInfo,
         SymbolInfo, Type,
@@ -530,6 +532,104 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                     Ok((instructions, new_dst.into()))
                 }
             }
+            ExpressionWithoutType::BuiltinFunctionCall(b) => match b {
+                BuiltinVa::Start(v, _) => {
+                    let (mut instructions, new_v): E = v.convert(context)?;
+                    instructions.push(BirdsInstructionNode::VaStart(new_v));
+
+                    Ok((instructions, BirdsValueNode::Var("!".to_string()).into()))
+                }
+                BuiltinVa::Arg(v, t, _) => {
+                    let (mut instructions, new_v): E = v.convert(context)?;
+                    let name = if let BirdsValueNode::Var(name) = new_v {
+                        name
+                    } else {
+                        return Err(
+                            "Value of va_list is a constant somehow, this should never happen"
+                                .into(),
+                        );
+                    };
+
+                    let new_dst = new_temp_variable(&t, context);
+                    context.last_true_label_number += 1;
+                    let true_label_name = format!("true_{}", context.last_true_label_number);
+                    context.last_end_label_number += 1;
+                    let end_label_name = format!("end_{}", context.last_end_label_number);
+                    let offset_dst = new_temp_variable(&Type::UnsignedInteger, context);
+                    let address_dst =
+                        new_temp_variable(&Type::Pointer(Box::new(Type::Void), false), context);
+                    let new_address_dst =
+                        new_temp_variable(&Type::Pointer(Box::new(Type::Void), false), context);
+                    let (offset_loc, max_offset, arg_bytes) = if t.is_float() {
+                        (4, 176, 16)
+                    } else {
+                        (0, 48, 8)
+                    };
+                    instructions.append(&mut vec![
+                        BirdsInstructionNode::CopyFromOffset(
+                            name.clone(),
+                            // differentiate between gp_offset and fp_offset
+                            offset_loc,
+                            offset_dst.clone(),
+                        ),
+                        BirdsInstructionNode::JumpCondition(
+                            BirdsBinaryOperatorNode::Less,
+                            offset_dst.clone(),
+                            BirdsValueNode::Constant(Constant::UnsignedInteger(max_offset)),
+                            true_label_name.clone(),
+                        ),
+                        // load from the overflow blob (stored at overflow_arg_area), pointer
+                        // add offset
+                        BirdsInstructionNode::CopyFromOffset(name.clone(), 8, address_dst.clone()),
+                        BirdsInstructionNode::AddPointer(
+                            address_dst.clone(),
+                            BirdsValueNode::Constant(Constant::UnsignedLong(8)),
+                            1,
+                            new_address_dst.clone(),
+                        ),
+                        BirdsInstructionNode::CopyToOffset(
+                            new_address_dst.clone(),
+                            name.clone(),
+                            8,
+                        ),
+                        BirdsInstructionNode::LoadFromPointer(address_dst.clone(), new_dst.clone()),
+                        BirdsInstructionNode::Jump(end_label_name.clone()),
+                        BirdsInstructionNode::Label(true_label_name),
+                        // load from the register blob (stored at reg_save_area), pointer add
+                        // offset
+                        BirdsInstructionNode::CopyFromOffset(name.clone(), 16, address_dst.clone()),
+                        BirdsInstructionNode::AddPointer(
+                            address_dst.clone(),
+                            offset_dst.clone(),
+                            1,
+                            address_dst.clone(),
+                        ),
+                        BirdsInstructionNode::Binary(
+                            BirdsBinaryOperatorNode::Add,
+                            offset_dst.clone(),
+                            BirdsValueNode::Constant(Constant::UnsignedInteger(arg_bytes as u32)),
+                            offset_dst.clone(),
+                        ),
+                        BirdsInstructionNode::CopyToOffset(offset_dst.clone(), name, offset_loc),
+                        BirdsInstructionNode::LoadFromPointer(address_dst, new_dst.clone()),
+                        BirdsInstructionNode::Label(end_label_name),
+                    ]);
+
+                    Ok((instructions, new_dst.into()))
+                }
+                // __builtin_va_end doesn't do anything. va_list is kept in scope until redeclared
+                // with __builtin_va_start
+                BuiltinVa::End(_v) => Ok((Vec::new(), BirdsValueNode::Var("!".to_string()).into())),
+                BuiltinVa::Copy(dst, src) => {
+                    // dst and src are swapped here
+                    let (mut instructions, new_src): E = src.convert(context)?;
+                    let (mut instructions_from_dst, new_dst): E = dst.convert(context)?;
+                    instructions.append(&mut instructions_from_dst);
+                    instructions.push(BirdsInstructionNode::Copy(new_src, new_dst.clone()));
+
+                    Ok((instructions, BirdsValueNode::Var("!".to_string()).into()))
+                }
+            },
             ExpressionWithoutType::IndirectFunctionCall(left, args) => {
                 let (mut instructions, left_ptr): E = left.convert(context)?;
                 let (mut instructions_from_args, values): Ve = args.convert(context)?;

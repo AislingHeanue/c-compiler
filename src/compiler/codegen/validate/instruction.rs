@@ -2,11 +2,13 @@ use std::collections::{HashMap, VecDeque};
 
 use itertools::Itertools;
 
-use crate::compiler::codegen::{align_stack_size, AssemblySymbolInfo};
+use crate::compiler::codegen::{
+    align_stack_size, AssemblySymbolInfo, DOUBLE_PARAM_REGISTERS, FUNCTION_PARAM_REGISTERS,
+};
 
 use super::{
     allocation::AllocateRegisters, AssemblyType, BinaryOperator, ConditionCode, ImmediateValue,
-    Instruction, Operand, Register, Validate, ValidateContext, ValidationPass,
+    Instruction, Operand, Register, VaList, Validate, ValidateContext, ValidationPass,
 };
 
 impl Validate for Vec<Instruction> {
@@ -34,28 +36,28 @@ impl Validate for Vec<Instruction> {
                 // a map from register names to stack locations
                 context.current_stack_locations = HashMap::new();
                 context.current_stack_size = 0;
-                if let AssemblySymbolInfo::Function(_, true, _, _) = context
+                if let AssemblySymbolInfo::Function(_, return_uses_memory, _, _, _) = context
                     .symbols
                     .get(context.current_function_name.as_ref().unwrap())
                     .unwrap()
                 {
                     // start the stack size at 8, so that we can read the location to store the
                     // return value from the first 8 bytes on the stack
-                    context.current_stack_size = 8;
+                    context.current_stack_size = if *return_uses_memory { 8 } else { 0 };
                 }
                 *self = Instruction::update_instructions(
                     self.drain(..).collect_vec(),
                     context,
                     Instruction::replace_mock_registers,
                 );
-                context.stack_sizes.insert(
+                context.function_stack_sizes.insert(
                     context.current_function_name.clone().unwrap(),
                     context.current_stack_size,
                 );
             }
             ValidationPass::AllocateFunctionStack => {
                 let stack_size = context
-                    .stack_sizes
+                    .function_stack_sizes
                     .get(context.current_function_name.as_ref().unwrap())
                     .unwrap();
                 let callee_registers = context
@@ -64,8 +66,15 @@ impl Validate for Vec<Instruction> {
                     .cloned()
                     .unwrap_or(Vec::new());
                 let callee_registers_size = (8 * callee_registers.len()) as u32;
+                let stack_size = if context.current_function_is_variadic {
+                    // allocate 176 extra bytes to store variadic args
+                    stack_size + 176
+                } else {
+                    *stack_size
+                };
                 let aligned_total_stack_size =
                     align_stack_size((stack_size + callee_registers_size).into(), 16);
+
                 // THIRD PASS: use the value of current_max_pointer to add an instruction to the start of
                 // the function
                 let mut initial_vec = vec![
@@ -85,9 +94,7 @@ impl Validate for Vec<Instruction> {
                         Instruction::Binary(
                             BinaryOperator::Sub,
                             AssemblyType::Quadword,
-                            Operand::Imm(ImmediateValue::Unsigned(
-                                aligned_total_stack_size - callee_registers_size as u64,
-                            )),
+                            Operand::Imm(ImmediateValue::Unsigned(offset)),
                             Operand::Reg(Register::SP),
                         ),
                     )
@@ -95,6 +102,42 @@ impl Validate for Vec<Instruction> {
                 for r in callee_registers.into_iter() {
                     initial_vec.push(Instruction::Push(Operand::Reg(r)));
                 }
+
+                if context.current_function_is_variadic {
+                    for (i, reg) in FUNCTION_PARAM_REGISTERS.iter().enumerate() {
+                        initial_vec.push(Instruction::Mov(
+                            AssemblyType::Quadword,
+                            Operand::Reg(reg.clone()),
+                            Operand::Memory(Register::BP, -(stack_size as i32) + (i * 8) as i32),
+                        ))
+                    }
+                    for (i, reg) in DOUBLE_PARAM_REGISTERS.iter().enumerate() {
+                        initial_vec.push(Instruction::Mov(
+                            AssemblyType::Quadword,
+                            Operand::Reg(reg.clone()),
+                            Operand::Memory(
+                                Register::BP,
+                                -(stack_size as i32) + 48 + (i * 16) as i32,
+                            ),
+                        ))
+                    }
+                }
+                context.function_va_lists.insert(
+                    context.current_function_name.clone().unwrap(),
+                    VaList {
+                        gp_offset: context.current_function_args.clone().unwrap().integer.len()
+                            as u64
+                            * 8,
+                        fp_offset: context.current_function_args.clone().unwrap().double.len()
+                            as u64
+                            * 16
+                            + 48,
+                        overflow_arg_area: 16
+                            + context.current_function_args.clone().unwrap().stack.len() as i32 * 8,
+                        reg_save_area: -(stack_size as i32),
+                    },
+                );
+
                 *self = initial_vec.into_iter().chain(self.drain(..)).collect();
             }
             ValidationPass::RewriteRet => {
@@ -102,6 +145,13 @@ impl Validate for Vec<Instruction> {
                     self.drain(..).collect_vec(),
                     context,
                     Instruction::rewrite_ret,
+                );
+            }
+            ValidationPass::RewriteVaStart => {
+                *self = Instruction::update_instructions(
+                    self.drain(..).collect_vec(),
+                    context,
+                    Instruction::rewrite_va_start,
                 );
             }
             ValidationPass::CheckNaNComparisons => {
@@ -196,6 +246,42 @@ impl Instruction {
         }
     }
 
+    fn rewrite_va_start(self, context: &mut ValidateContext) -> Vec<Instruction> {
+        match self {
+            Instruction::VaStart(dst) => {
+                let va_list = if let Some(va_list) = context
+                    .function_va_lists
+                    .get(context.current_function_name.as_ref().unwrap())
+                {
+                    va_list
+                } else {
+                    panic!("__builtin_va_start called in a non-variadic function")
+                };
+                vec![
+                    Instruction::Mov(
+                        AssemblyType::Longword,
+                        Operand::Imm(ImmediateValue::Unsigned(va_list.gp_offset)),
+                        dst.clone(),
+                    ),
+                    Instruction::Mov(
+                        AssemblyType::Longword,
+                        Operand::Imm(ImmediateValue::Unsigned(va_list.fp_offset)),
+                        dst.offset(4),
+                    ),
+                    Instruction::Lea(
+                        Operand::Memory(Register::BP, va_list.overflow_arg_area),
+                        dst.offset(8),
+                    ),
+                    Instruction::Lea(
+                        Operand::Memory(Register::BP, va_list.reg_save_area),
+                        dst.offset(16),
+                    ),
+                ]
+            }
+            _ => vec![self],
+        }
+    }
+
     fn replace_mock_registers(mut self, context: &mut ValidateContext) -> Vec<Instruction> {
         match self {
             Instruction::Mov(_, ref mut src, ref mut dst) => {
@@ -262,6 +348,9 @@ impl Instruction {
             Instruction::Cvtsd2ss(ref mut src, ref mut dst) => {
                 src.replace_mock_register(context);
                 dst.replace_mock_register(context);
+            }
+            Instruction::VaStart(ref mut src) => {
+                src.replace_mock_register(context);
             }
         };
         vec![self]
@@ -735,13 +824,39 @@ impl Instruction {
             Instruction::Push(src) => convert_uses_and_updates((vec![src.clone()], vec![])),
             Instruction::Call(name) => {
                 let symbol = context.symbols.get(name).unwrap();
-                let used = if let AssemblySymbolInfo::Function(_, _, registers_used_for_params, _) =
-                    symbol
+                let used = if let AssemblySymbolInfo::Function(
+                    _,
+                    _,
+                    registers_used_for_params,
+                    _,
+                    is_variadic,
+                ) = symbol
                 {
-                    registers_used_for_params
-                        .iter()
-                        .map(|r| Operand::Reg(r.clone()))
-                        .collect()
+                    if *is_variadic {
+                        vec![
+                            Operand::Reg(Register::DI),
+                            Operand::Reg(Register::SI),
+                            Operand::Reg(Register::DX),
+                            Operand::Reg(Register::CX),
+                            Operand::Reg(Register::R8),
+                            Operand::Reg(Register::R9),
+                            Operand::Reg(Register::XMM0),
+                            Operand::Reg(Register::XMM1),
+                            Operand::Reg(Register::XMM2),
+                            Operand::Reg(Register::XMM3),
+                            Operand::Reg(Register::XMM4),
+                            Operand::Reg(Register::XMM5),
+                            Operand::Reg(Register::XMM6),
+                            Operand::Reg(Register::XMM7),
+                            Operand::Reg(Register::XMM7),
+                            Operand::Reg(Register::XMM8),
+                        ]
+                    } else {
+                        registers_used_for_params
+                            .iter()
+                            .map(|r| Operand::Reg(r.clone()))
+                            .collect()
+                    }
                 } else {
                     unreachable!()
                 };
@@ -823,6 +938,7 @@ impl Instruction {
                 ];
                 convert_uses_and_updates((used, updated))
             }
+            Instruction::VaStart(dst) => convert_uses_and_updates((vec![], vec![dst.clone()])),
             Instruction::Jmp(_)
             | Instruction::JmpCondition(_, _, _)
             | Instruction::Label(_)

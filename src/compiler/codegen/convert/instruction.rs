@@ -959,6 +959,7 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                     }
                 }
             }
+            BirdsInstructionNode::VaStart(src) => vec![Instruction::VaStart(src.convert(context)?)],
         })
     }
 }
@@ -1280,7 +1281,7 @@ impl Instruction {
 }
 
 impl Operand {
-    fn offset(&self, offset: i32) -> Operand {
+    pub fn offset(&self, offset: i32) -> Operand {
         match self {
             // Operand::MockReg(_s) if offset == 0 => self.clone(),
             Operand::MockReg(s) => Operand::MockMemory(s.to_string(), offset),

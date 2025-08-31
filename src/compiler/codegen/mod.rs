@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, error::Error, mem::swap};
 
-use convert::{classify_params_by_type, classify_return_by_type, Convert, ConvertContext};
+use convert::{classify_params_by_type, classify_return_by_type, Args, Convert, ConvertContext};
 use display::DisplayContext;
 use validate::{Validate, ValidateContext, VALIDATION_PASSES};
 
@@ -26,8 +26,8 @@ pub struct Program {
 
 #[derive(Debug)]
 enum TopLevel {
-    // header instructions, name, body, global, return_value_uses_memory
-    Function(String, Vec<Instruction>, bool),
+    // name, body, global, return_value_uses_memory, args, is_variadic
+    Function(String, Vec<Instruction>, bool, Args, bool),
     // name global alignment init
     StaticVariable(String, bool, u32, Vec<StaticInitialiser>),
     // used for all floating point constants. Needed anytime we need eg.
@@ -53,8 +53,9 @@ pub enum AssemblyType {
 pub enum AssemblySymbolInfo {
     // type, is_static is_a_top_level_constant
     Object(AssemblyType, bool, bool),
-    // is_defined, return_value_uses_memory, registers_used_for_params, registers_used_for_return
-    Function(bool, bool, Vec<Register>, Vec<Register>),
+    // is_defined, return_value_uses_memory, registers_used_for_params, registers_used_for_return,
+    // is_variadic
+    Function(bool, bool, Vec<Register>, Vec<Register>, bool), //Args),
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +109,10 @@ enum Instruction {
     Call(String),
     CallIndirect(Operand),
     Ret,
+
+    // temporary instructions which are rewritten after the function stack has been allocated
+    VaStart(Operand),
+    // VaArg(AssemblyType, Operand, Operand),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -128,35 +133,6 @@ pub enum Operand {
 pub enum ImmediateValue {
     Signed(i64),
     Unsigned(u64),
-}
-
-impl ImmediateValue {
-    fn can_fit_in_longword(&self) -> bool {
-        match self {
-            ImmediateValue::Signed(value) => *value <= i32::MAX.into() && *value >= i32::MIN.into(),
-            // the boundary for immediate values being too big is ALWAYS 2^31 - 1, not 2^32 - 1 for
-            // unsigned
-            ImmediateValue::Unsigned(value) => *value <= i32::MAX as u64,
-        }
-    }
-    fn can_fit_in_byte(&self) -> bool {
-        match self {
-            ImmediateValue::Signed(value) => *value <= i8::MAX.into() && *value >= i8::MIN.into(),
-            ImmediateValue::Unsigned(value) => *value <= u8::MAX as u64,
-        }
-    }
-    fn truncate(&mut self) {
-        match self {
-            ImmediateValue::Signed(ref mut value) => *value = (*value as i32).into(),
-            ImmediateValue::Unsigned(ref mut value) => *value = (*value as u32).into(),
-        }
-    }
-    fn truncate_to_byte(&mut self) {
-        match self {
-            ImmediateValue::Signed(ref mut value) => *value = (*value as u8).into(),
-            ImmediateValue::Unsigned(ref mut value) => *value = (*value as u8).into(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -274,16 +250,18 @@ pub fn codegen(
         if let Type::Function(_, _, _) = v.symbol_type {
             if let StorageInfo::Function(defined, _) = v.storage {
                 let type_info = v.symbol_type.clone();
-                let (uses_memory, return_registers, param_registers) =
+                let (uses_memory, return_registers, param_registers, is_variadic) =
                     if let Type::Function(returns, params, is_variadic) = type_info {
                         let (uses_memory, return_registers) =
                             classify_return_by_type(&returns, &mut context)?;
                         let param_registers =
                             classify_params_by_type(&params, uses_memory, &mut context)?;
-                        (uses_memory, return_registers, param_registers)
+                        (uses_memory, return_registers, param_registers, is_variadic)
                     } else {
-                        (false, Vec::new(), Vec::new())
+                        (false, Vec::new(), Vec::new(), false)
                     };
+
+                // let args = context.function_args.get(&k).unwrap();
 
                 assembly_map.insert(
                     k.clone(),
@@ -292,6 +270,7 @@ pub fn codegen(
                         uses_memory,
                         param_registers,
                         return_registers,
+                        is_variadic,
                     ),
                 );
             } else {

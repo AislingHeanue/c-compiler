@@ -148,7 +148,7 @@ impl Display for Program {
 impl CodeDisplay for TopLevel {
     fn show(&self, context: &mut DisplayContext) -> String {
         match self {
-            TopLevel::Function(name, instructions, global) => {
+            TopLevel::Function(name, instructions, global, _, _) => {
                 let function_name = if context.is_mac {
                     "_".to_string() + name
                 } else {
@@ -719,7 +719,7 @@ impl CodeDisplay for Instruction {
                 let function_name = if context.is_mac {
                     "_".to_string() + s
                 } else if context.is_linux {
-                    if let AssemblySymbolInfo::Function(false, _, _, _) =
+                    if let AssemblySymbolInfo::Function(false, _, _, _, _) =
                         context.symbols.get(s).unwrap()
                     {
                         // if a function isn't defined in this file, call it from another file (ie
@@ -773,6 +773,10 @@ impl CodeDisplay for Instruction {
                     indent = context.indent
                 )
             }
+            Instruction::VaStart(o) => format!("FAKE VA_START({})", o.show(context)),
+            // Instruction::VaArg(_t, o, dst) => {
+            //     format!("FAKE VA_ARG({}, {})", o.show(context), dst.show(context))
+            // }
         }
     }
 }
@@ -814,7 +818,7 @@ impl CodeDisplay for Operand {
                         }
                     }
                     // extern variables with no definition in the current file follow this code path
-                    Some(AssemblySymbolInfo::Function(_, _, _, _)) => "",
+                    Some(AssemblySymbolInfo::Function(_, _, _, _, _)) => "",
                     None => {
                         if context.is_mac {
                             "_"

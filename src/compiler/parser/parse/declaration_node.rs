@@ -136,7 +136,7 @@ impl Parse<DeclarationNode> for VecDeque<Token> {
         let param_names = declarator_output.param_names.unwrap_or(Vec::new());
 
         let out = match out_type {
-            Type::Function(_, ref param_types, is_variadic) => {
+            Type::Function(_, ref param_types, _c) => {
                 let declaration_name = if let Some(name) = declarator_output.name {
                     name
                 } else {

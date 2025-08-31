@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::compiler::{codegen::align_stack_size, parser::StructInfo};
 
-use super::{Class, Type};
+use super::{Class, MemberEntry, Type};
 
 impl Type {
     pub fn get_alignment(&self, structs: &mut HashMap<String, StructInfo>) -> u64 {
@@ -161,6 +161,44 @@ impl Type {
         match (self, other) {
             (Type::Pointer(a, _), Type::Pointer(b, _)) => a == b,
             _ => self == other,
+        }
+    }
+
+    pub fn is_va_list(&self, structs: &mut HashMap<String, StructInfo>) -> bool {
+        if let Type::Array(b, Some(1)) = self {
+            if let Type::Struct(ref s, false) = **b {
+                if let Some(info) = structs.get(s) {
+                    info.members
+                        == vec![
+                            MemberEntry {
+                                member_type: Type::UnsignedInteger,
+                                name: Some("gp_offset".to_string()),
+                                offset: 0,
+                            },
+                            MemberEntry {
+                                member_type: Type::UnsignedInteger,
+                                name: Some("fp_offset".to_string()),
+                                offset: 4,
+                            },
+                            MemberEntry {
+                                member_type: Type::Pointer(Box::new(Type::Void), false),
+                                name: Some("overflow_arg_area".to_string()),
+                                offset: 8,
+                            },
+                            MemberEntry {
+                                member_type: Type::Pointer(Box::new(Type::Void), false),
+                                name: Some("reg_save_area".to_string()),
+                                offset: 16,
+                            },
+                        ]
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
         }
     }
 }

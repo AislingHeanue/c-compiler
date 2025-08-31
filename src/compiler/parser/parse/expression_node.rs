@@ -4,7 +4,7 @@ use super::{
 };
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::{Declarator, InlineDeclaration},
+    parser::{BuiltinVa, Declarator, InlineDeclaration},
 };
 use std::{collections::VecDeque, error::Error};
 
@@ -376,24 +376,84 @@ impl ParseExpression for VecDeque<Token> {
                 match self.peek()? {
                     // this is a function call !!
                     Token::OpenParen => {
-                        let (new_name, _external_link) =
-                            ExpressionWithoutType::resolve_identifier(&name, context)?;
-
                         self.expect(Token::OpenParen)?;
-                        let mut arguments: Vec<ExpressionWithoutType> = Vec::new();
-                        if !matches!(self.peek()?, Token::CloseParen) {
-                            arguments.push(self.parse(context)?);
-                        }
-                        while matches!(self.peek()?, Token::Comma) {
-                            self.expect(Token::Comma)?;
-                            arguments.push(self.parse(context)?);
-                        }
-                        self.expect(Token::CloseParen)?;
+                        match name.as_str() {
+                            "__builtin_va_start" => {
+                                let va_list: ExpressionNode = self.parse(context)?;
+                                self.expect(Token::Comma)?;
+                                let last_arg: ExpressionNode = self.parse(context)?;
+                                self.expect(Token::CloseParen)?;
 
-                        Some(ExpressionWithoutType::FunctionCall(
-                            new_name,
-                            arguments.into_iter().map(|a| a.into()).collect(),
-                        ))
+                                Some(ExpressionWithoutType::BuiltinFunctionCall(
+                                    BuiltinVa::Start(Box::new(va_list), Box::new(last_arg)),
+                                ))
+                            }
+                            "__builtin_va_arg" => {
+                                let va_list: ExpressionNode = self.parse(context)?;
+                                self.expect(Token::Comma)?;
+
+                                let (t, mut inline_declarations): (Type, Vec<InlineDeclaration>) =
+                                    self.parse(context)?;
+                                let (d, mut declarations_from_declarator): (
+                                    Declarator,
+                                    Vec<InlineDeclaration>,
+                                ) = self.parse(context)?;
+                                let declaration_output = d.apply_to_type(t, context)?;
+
+                                inline_declarations.append(&mut declarations_from_declarator);
+                                self.expect(Token::CloseParen)?;
+
+                                if declaration_output.name.is_some() {
+                                    return Err(
+                                        "Non-abstract declarator used in __builtin_va_arg".into()
+                                    );
+                                }
+
+                                Some(ExpressionWithoutType::BuiltinFunctionCall(BuiltinVa::Arg(
+                                    Box::new(va_list),
+                                    declaration_output.out_type,
+                                    inline_declarations,
+                                )))
+                            }
+                            "__builtin_va_end" => {
+                                let va_list: ExpressionNode = self.parse(context)?;
+                                self.expect(Token::CloseParen)?;
+
+                                Some(ExpressionWithoutType::BuiltinFunctionCall(BuiltinVa::End(
+                                    Box::new(va_list),
+                                )))
+                            }
+                            "__builtin_va_copy" => {
+                                let va_list: ExpressionNode = self.parse(context)?;
+                                self.expect(Token::Comma)?;
+                                let va_list_2: ExpressionNode = self.parse(context)?;
+                                self.expect(Token::CloseParen)?;
+
+                                Some(ExpressionWithoutType::BuiltinFunctionCall(BuiltinVa::Copy(
+                                    Box::new(va_list),
+                                    Box::new(va_list_2),
+                                )))
+                            }
+                            _ => {
+                                let (new_name, _external_link) =
+                                    ExpressionWithoutType::resolve_identifier(&name, context)?;
+
+                                let mut arguments: Vec<ExpressionWithoutType> = Vec::new();
+                                if !matches!(self.peek()?, Token::CloseParen) {
+                                    arguments.push(self.parse(context)?);
+                                }
+                                while matches!(self.peek()?, Token::Comma) {
+                                    self.expect(Token::Comma)?;
+                                    arguments.push(self.parse(context)?);
+                                }
+                                self.expect(Token::CloseParen)?;
+
+                                Some(ExpressionWithoutType::FunctionCall(
+                                    new_name,
+                                    arguments.into_iter().map(|a| a.into()).collect(),
+                                ))
+                            }
+                        }
                     }
                     _ => {
                         // VALIDATION STEP: Check the variable has been declared

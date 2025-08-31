@@ -194,6 +194,7 @@ impl InterferenceGraph {
                 Instruction::Pop(_r) => {} // pop only pops Reg
                 Instruction::Call(_f) => {}
                 Instruction::Ret => {}
+                Instruction::VaStart(_) => {}
             }
         }
     }

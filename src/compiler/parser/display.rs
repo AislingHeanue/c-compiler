@@ -3,10 +3,10 @@ use itertools::Itertools;
 use crate::compiler::types::EnumMember;
 
 use super::{
-    BinaryOperatorNode, BlockItemNode, Constant, DeclarationNode, EnumDeclaration, ExpressionNode,
-    ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration, InitialiserNode,
-    InitialiserWithoutType, InlineDeclaration, ProgramNode, StatementNode, StructDeclaration,
-    StructMember, Type, TypeDeclaration, UnaryOperatorNode, VariableDeclaration,
+    BinaryOperatorNode, BlockItemNode, BuiltinVa, Constant, DeclarationNode, EnumDeclaration,
+    ExpressionNode, ExpressionWithoutType, ForInitialiserNode, FunctionDeclaration,
+    InitialiserNode, InitialiserWithoutType, InlineDeclaration, ProgramNode, StatementNode,
+    StructDeclaration, StructMember, Type, TypeDeclaration, UnaryOperatorNode, VariableDeclaration,
 };
 use std::{borrow::Borrow, fmt::Display};
 
@@ -123,39 +123,35 @@ impl CodeDisplay for StatementNode {
                 format!("{}break{}", context.new_line_start(), s.show(context))
             }
             StatementNode::Continue(s) => format!("continue{}", s.show(context)),
-            StatementNode::While(expression, body, label) => {
+            StatementNode::While(expression, body, _label) => {
                 format!(
-                    "{}while{} ({}) {}",
+                    "{}while ({}) {}",
                     context.new_line_start(),
-                    label.show(context),
                     expression.show(&mut context.indent()),
                     body.show(&mut context.indent())
                 )
             }
-            StatementNode::DoWhile(body, expression, label) => {
+            StatementNode::DoWhile(body, expression, _label) => {
                 format!(
-                    "{}do{} {} while ({})",
+                    "{}do {} while ({})",
                     context.new_line_start(),
-                    label.show(context),
                     expression.show(&mut context.indent()),
                     body.show(&mut context.indent())
                 )
             }
-            StatementNode::For(init, cond, post, body, label) => {
+            StatementNode::For(init, cond, post, body, _label) => {
                 format!(
-                    "{}for{}({}; {}; {}) {}",
+                    "{}for ({}; {}; {}) {}",
                     context.new_line_start(),
-                    label.show(context),
                     init.show(&mut context.indent()),
                     cond.show(&mut context.indent()),
                     post.show(&mut context.indent()),
                     body.show(context)
                 )
             }
-            StatementNode::Switch(expression, body, label, _) => format!(
-                "{}switch{}({}) {}",
+            StatementNode::Switch(expression, body, _label, _) => format!(
+                "{}switch ({}) {}",
                 context.new_line_start(),
-                label.show(context),
                 expression.show(&mut context.indent()),
                 body.show(context)
             ),
@@ -263,15 +259,35 @@ impl CodeDisplay for FunctionDeclaration {
             .join(", ");
 
         if let Some(body) = &self.body {
+            if *is_variadic {
+                format!(
+                    "func {}({}, ...) {} {{{}\n{:indent$}}}",
+                    // self.function_type.show(context),
+                    self.name,
+                    show_params,
+                    out_type.show(context),
+                    body.show(&mut context.indent()),
+                    "",
+                    indent = context.indent
+                )
+            } else {
+                format!(
+                    "func {}({}) {} {{{}\n{:indent$}}}",
+                    // self.function_type.show(context),
+                    self.name,
+                    show_params,
+                    out_type.show(context),
+                    body.show(&mut context.indent()),
+                    "",
+                    indent = context.indent
+                )
+            }
+        } else if *is_variadic {
             format!(
-                "func {}({}) {} {{{}\n{:indent$}}}",
-                // self.function_type.show(context),
+                "var {} func({}, ...) {};",
                 self.name,
                 show_params,
                 out_type.show(context),
-                body.show(&mut context.indent()),
-                "",
-                indent = context.indent
             )
         } else {
             format!(
@@ -347,7 +363,15 @@ impl CodeDisplay for Type {
             Type::UnsignedInteger => "uint32".to_string(),
             Type::UnsignedLong => "uint64".to_string(),
             Type::Function(output, inputs, is_variadic) => {
-                format!("func ({}) {}", inputs.show(context), output.show(context))
+                if *is_variadic {
+                    format!(
+                        "func ({}, ...) {}",
+                        inputs.show(context),
+                        output.show(context)
+                    )
+                } else {
+                    format!("func ({}) {}", inputs.show(context), output.show(context))
+                }
             }
             Type::Float => "float32".to_string(),
             Type::Double => "float64".to_string(),
@@ -451,6 +475,16 @@ impl CodeDisplay for ExpressionWithoutType {
     fn show(&self, context: &mut DisplayContext) -> String {
         match self {
             ExpressionWithoutType::Constant(c) => c.show(context),
+            ExpressionWithoutType::Unary(operator, exp)
+                if *operator == UnaryOperatorNode::SuffixIncrement
+                    || *operator == UnaryOperatorNode::SuffixDecrement =>
+            {
+                format!(
+                    "{}{}",
+                    exp.show(&mut context.indent()),
+                    operator.show(&mut context.indent()),
+                )
+            }
             ExpressionWithoutType::Unary(operator, exp) => {
                 format!(
                     "{}{}",
@@ -489,6 +523,7 @@ impl CodeDisplay for ExpressionWithoutType {
             ExpressionWithoutType::FunctionCall(name, args) => {
                 format!("{}({})", name, args.show(&mut context.indent()))
             }
+            ExpressionWithoutType::BuiltinFunctionCall(b) => b.show(context),
             ExpressionWithoutType::IndirectFunctionCall(left, args) => {
                 format!(
                     "({})({})",
@@ -575,6 +610,36 @@ impl CodeDisplay for Constant {
     }
 }
 
+impl CodeDisplay for BuiltinVa {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        match self {
+            BuiltinVa::Start(v, i) => format!(
+                "__builtin_va_start({}, {})",
+                v.show(context),
+                i.show(context)
+            ),
+            BuiltinVa::Arg(v, t, inline_declarations) => {
+                let mut struct_part = "".to_string();
+                for s in inline_declarations.iter() {
+                    struct_part += &(s.show(context) + &context.new_line_start())
+                }
+                format!(
+                    "{}__builtin_va_arg({}, {})",
+                    struct_part,
+                    v.show(context),
+                    t.show(context)
+                )
+            }
+            BuiltinVa::End(v) => format!("__builtin_va_end({})", v.show(context)),
+            BuiltinVa::Copy(dst, src) => format!(
+                "__builtin_va_copy({}, {})",
+                dst.show(context),
+                src.show(context)
+            ),
+        }
+    }
+}
+
 impl CodeDisplay for Vec<ExpressionNode> {
     fn show(&self, context: &mut DisplayContext) -> String {
         self.iter().map(|e| e.show(context)).join(", ")
@@ -590,8 +655,8 @@ impl CodeDisplay for UnaryOperatorNode {
             UnaryOperatorNode::Identity => "+",
             UnaryOperatorNode::PrefixIncrement => "++",
             UnaryOperatorNode::PrefixDecrement => "--",
-            UnaryOperatorNode::SuffixIncrement => "(this is a suffix)++",
-            UnaryOperatorNode::SuffixDecrement => "(this is a suffix)--",
+            UnaryOperatorNode::SuffixIncrement => "++",
+            UnaryOperatorNode::SuffixDecrement => "--",
         }
         .to_string()
     }

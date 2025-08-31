@@ -4,7 +4,7 @@ use std::{
 };
 
 use super::{
-    AssemblySymbolInfo, AssemblyType, BinaryOperator, ConditionCode, ConvertContext,
+    convert::Args, AssemblySymbolInfo, AssemblyType, BinaryOperator, ConditionCode, ConvertContext,
     ImmediateValue, Instruction, Operand, Program, Register, TopLevel,
 };
 
@@ -21,7 +21,7 @@ where
     fn validate(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>>;
 }
 
-pub static VALIDATION_PASSES: [ValidationPass; 10] = [
+pub static VALIDATION_PASSES: [ValidationPass; 11] = [
     // always first
     ValidationPass::AllocateRegisters,
     ValidationPass::ReplaceMockRegisters,
@@ -29,6 +29,7 @@ pub static VALIDATION_PASSES: [ValidationPass; 10] = [
     // also saves and restores any callee-saved registers used while allocating registers
     ValidationPass::AllocateFunctionStack,
     ValidationPass::RewriteRet,
+    ValidationPass::RewriteVaStart,
     // other validation steps
     ValidationPass::CheckNaNComparisons,
     ValidationPass::FixShiftOperatorRegister,
@@ -46,6 +47,7 @@ pub enum ValidationPass {
     ReplaceMockRegisters,
     AllocateFunctionStack,
     RewriteRet,
+    RewriteVaStart,
     CheckNaNComparisons,
     FixShiftOperatorRegister,
     RewriteMovZeroExtend,
@@ -58,15 +60,21 @@ pub struct ValidateContext {
     pub pass: Option<ValidationPass>,
     pub symbols: HashMap<String, AssemblySymbolInfo>,
     current_stack_size: u32,
-    current_stack_locations: HashMap<String, i32>,
-    stack_sizes: HashMap<String, u32>,
-    current_function_name: Option<String>,
     num_labels: u32,
+
     block_live_variables: HashMap<usize, HashSet<Operand>>,
     aliased_variables: Vec<Operand>,
     static_variables: Vec<Operand>,
-    function_callee_saved_registers: HashMap<String, Vec<Register>>,
     register_map: HashMap<String, Register>,
+
+    current_function_is_variadic: bool,
+    current_stack_locations: HashMap<String, i32>,
+    current_function_name: Option<String>,
+    current_function_args: Option<Args>,
+
+    function_stack_sizes: HashMap<String, u32>,
+    function_callee_saved_registers: HashMap<String, Vec<Register>>,
+    function_va_lists: HashMap<String, VaList>,
 }
 
 impl ValidateContext {
@@ -78,17 +86,30 @@ impl ValidateContext {
             symbols,
             pass: None,
             current_stack_size: 0,
-            current_stack_locations: HashMap::new(),
-            stack_sizes: HashMap::new(),
-            current_function_name: None,
             num_labels: context.num_labels,
+
             block_live_variables: HashMap::new(),
             aliased_variables: Vec::new(),
             static_variables: Vec::new(),
-            function_callee_saved_registers: HashMap::new(),
             register_map: HashMap::new(),
+
+            current_stack_locations: HashMap::new(),
+            current_function_name: None,
+            current_function_is_variadic: false,
+            current_function_args: None,
+
+            function_stack_sizes: HashMap::new(),
+            function_callee_saved_registers: HashMap::new(),
+            function_va_lists: HashMap::new(),
         }
     }
+}
+
+pub struct VaList {
+    gp_offset: u64,         // positive bytes
+    fp_offset: u64,         // positive bytes
+    overflow_arg_area: i32, // negative, only used if args spill over in function CALL
+    reg_save_area: i32,     // negative, relative to RBP. 6xGP(8 bytes) + 8xFP(16 bytes) = 176 bytes
 }
 
 impl Validate for Program {
@@ -109,14 +130,47 @@ impl Validate for TopLevel {
         context: &mut ValidateContext,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            TopLevel::Function(name, instructions, _global) => {
+            TopLevel::Function(name, instructions, _global, args, is_variadic) => {
                 context.current_function_name = Some(name.to_string());
+                context.current_function_args = Some(args.clone());
+                context.current_function_is_variadic = *is_variadic;
+
                 instructions.validate(context)?;
-                context.current_function_name = None
+                context.current_function_name = None;
+                context.current_function_args = None;
             }
             TopLevel::StaticVariable(_name, _global, _alignment, _init) => {}
             TopLevel::StaticConstant(_name, _alignment, _init) => {}
         }
         Ok(())
+    }
+}
+
+impl ImmediateValue {
+    fn can_fit_in_longword(&self) -> bool {
+        match self {
+            ImmediateValue::Signed(value) => *value <= i32::MAX.into() && *value >= i32::MIN.into(),
+            // the boundary for immediate values being too big is ALWAYS 2^31 - 1, not 2^32 - 1 for
+            // unsigned
+            ImmediateValue::Unsigned(value) => *value <= i32::MAX as u64,
+        }
+    }
+    fn can_fit_in_byte(&self) -> bool {
+        match self {
+            ImmediateValue::Signed(value) => *value <= i8::MAX.into() && *value >= i8::MIN.into(),
+            ImmediateValue::Unsigned(value) => *value <= u8::MAX as u64,
+        }
+    }
+    fn truncate(&mut self) {
+        match self {
+            ImmediateValue::Signed(ref mut value) => *value = (*value as i32).into(),
+            ImmediateValue::Unsigned(ref mut value) => *value = (*value as u32).into(),
+        }
+    }
+    fn truncate_to_byte(&mut self) {
+        match self {
+            ImmediateValue::Signed(ref mut value) => *value = (*value as u8).into(),
+            ImmediateValue::Unsigned(ref mut value) => *value = (*value as u8).into(),
+        }
     }
 }

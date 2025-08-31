@@ -79,9 +79,11 @@ pub enum BirdsInstructionNode {
     CopyToOffset(BirdsValueNode, String, i32),
     // src name, offset, dst
     CopyFromOffset(String, i32, BirdsValueNode),
+    VaStart(BirdsValueNode),
+    // VaArg(BirdsValueNode, BirdsValueNode),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum BirdsValueNode {
     Constant(Constant),
     Var(String),
