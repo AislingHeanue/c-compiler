@@ -367,7 +367,7 @@ impl Parse<EnumMember> for VecDeque<Token> {
         let value = if let Token::Assignment = self.peek()? {
             self.expect(Token::Assignment)?;
             let c: ExpressionWithoutType = self.parse(context)?;
-            c.fold_to_constant(context)?.value_int()
+            c.fold_to_constant()?.value_int()
         } else {
             context.last_enum_number + 1
         };

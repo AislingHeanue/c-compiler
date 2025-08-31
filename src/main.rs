@@ -51,6 +51,7 @@ fn main() {
             "--parse" => only_parse = true,
             "--validate" => only_validate = true,
             "--tacky" => only_birds = true,
+            "--birds" => only_birds = true,
             "--codegen" => only_codegen = true,
             "-S" => assembly_out = true,
             "-s" => assembly_out = true,

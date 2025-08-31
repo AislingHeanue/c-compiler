@@ -5,10 +5,8 @@ use crate::compiler::{
     types::{Constant, Type},
 };
 
-use super::ParseContext;
-
 impl ExpressionWithoutType {
-    pub fn fold_to_constant(&self, _context: &ParseContext) -> Result<Constant, Box<dyn Error>> {
+    pub fn fold_to_constant(&self) -> Result<Constant, Box<dyn Error>> {
         let c = match self {
             ExpressionWithoutType::Constant(c) => {
                 if matches!(
@@ -21,7 +19,7 @@ impl ExpressionWithoutType {
                 c.clone()
             }
             ExpressionWithoutType::Unary(op, e) => {
-                let c = e.0.fold_to_constant(_context)?;
+                let c = e.0.fold_to_constant()?;
                 match &op {
                     UnaryOperatorNode::Complement => c.complement(),
                     UnaryOperatorNode::Negate => -c,
@@ -42,8 +40,8 @@ impl ExpressionWithoutType {
                 }
             }
             ExpressionWithoutType::Binary(op, left, right) => {
-                let mut left = left.0.fold_to_constant(_context)?;
-                let mut right = right.0.fold_to_constant(_context)?;
+                let mut left = left.0.fold_to_constant()?;
+                let mut right = right.0.fold_to_constant()?;
 
                 let original_left = left.clone();
                 let original_right = right.clone();
@@ -88,11 +86,11 @@ impl ExpressionWithoutType {
             }
 
             ExpressionWithoutType::Ternary(cond, left, right) => {
-                let cond = cond.0.fold_to_constant(_context)?;
+                let cond = cond.0.fold_to_constant()?;
                 if cond.is_zero() {
-                    right.0.fold_to_constant(_context)?
+                    right.0.fold_to_constant()?
                 } else {
-                    left.0.fold_to_constant(_context)?
+                    left.0.fold_to_constant()?
                 }
             }
 
@@ -110,7 +108,7 @@ impl ExpressionWithoutType {
                 if !t.is_integer() {
                     return Err("Cannot cast to a non-integer type in a constant".into());
                 }
-                let e = e.0.fold_to_constant(_context)?;
+                let e = e.0.fold_to_constant()?;
                 e.convert_to(t)
             }
 

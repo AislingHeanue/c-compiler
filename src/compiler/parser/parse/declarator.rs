@@ -280,7 +280,7 @@ impl Declarator {
             }
             Declarator::Array(declarator, size_expression) => {
                 if let Some(expression) = size_expression {
-                    let size = expression.0.fold_to_constant(context)?.value_unsigned();
+                    let size = expression.0.fold_to_constant()?.value_unsigned();
                     declarator.apply_to_type(Type::Array(Box::new(base_type), Some(size)), context)
                 } else {
                     declarator.apply_to_type(Type::Array(Box::new(base_type), None), context)
