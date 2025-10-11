@@ -221,7 +221,7 @@ impl Declarator {
     pub fn apply_to_type(
         self,
         base_type: Type,
-        context: &mut ParseContext,
+        _context: &mut ParseContext,
         // returns the type, name and list of parameter names associated with the type
     ) -> Result<DeclaratorApplicationOutput, Box<dyn Error>> {
         match self {
@@ -235,20 +235,19 @@ impl Declarator {
                 name: None,
                 param_names: None,
             }),
-            Declarator::Pointer(declarator, is_restricted) => {
-                declarator.apply_to_type(Type::Pointer(Box::new(base_type), is_restricted), context)
-            }
+            Declarator::Pointer(declarator, is_restricted) => declarator
+                .apply_to_type(Type::Pointer(Box::new(base_type), is_restricted), _context),
             Declarator::ConstPointer(declarator) => {
                 // TODO: this const is thrown out the window. Once there's a mechanism to const-ify
                 // a type, it needs to be added here
-                declarator.apply_to_type(Type::Pointer(Box::new(base_type), false), context)
+                declarator.apply_to_type(Type::Pointer(Box::new(base_type), false), _context)
             }
             Declarator::Function(declarator, params, is_variadic) => {
                 let mut num_anonymous_params = 0;
                 let (param_types, param_names): (Vec<Type>, Vec<String>) = process_results(
                     params
                         .into_iter()
-                        .map(|(t, declarator)| declarator.apply_to_type(t, context)),
+                        .map(|(t, declarator)| declarator.apply_to_type(t, _context)),
                     |iter| {
                         iter.map(|o| {
                             (
@@ -274,16 +273,16 @@ impl Declarator {
                     // because we know this isn't a function definition with a body.
                     declarator.apply_to_type(
                         Type::Function(Box::new(base_type), param_types, is_variadic),
-                        context,
+                        _context,
                     )
                 }
             }
             Declarator::Array(declarator, size_expression) => {
                 if let Some(expression) = size_expression {
                     let size = expression.0.fold_to_constant()?.value_unsigned();
-                    declarator.apply_to_type(Type::Array(Box::new(base_type), Some(size)), context)
+                    declarator.apply_to_type(Type::Array(Box::new(base_type), Some(size)), _context)
                 } else {
-                    declarator.apply_to_type(Type::Array(Box::new(base_type), None), context)
+                    declarator.apply_to_type(Type::Array(Box::new(base_type), None), _context)
                 }
             }
         }

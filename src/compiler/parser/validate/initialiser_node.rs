@@ -3,10 +3,7 @@ use std::error::Error;
 use itertools::process_results;
 
 use crate::compiler::{
-    parser::{
-        parse::ParseContext, ExpressionNode, ExpressionWithoutType, InitialiserNode,
-        InitialiserWithoutType,
-    },
+    parser::{ExpressionNode, ExpressionWithoutType, InitialiserNode, InitialiserWithoutType},
     types::{
         ComparableStatic, Constant, Count, Flatten, StaticInitialiser, StorageInfo, SymbolInfo,
         Type,
@@ -127,13 +124,6 @@ impl InitialiserNode {
                     return Err("Cannot initialise a static pointer with a non-pointer type".into());
                 }
                 vec![i.0.fold_to_constant()?.static_convert_to(target_type)]
-                // if let ExpressionWithoutType::Constant(c) = &i.0 {
-                //     vec![c.static_convert_to(target_type)]
-                // } else {
-                //     return Err(
-                //         "Static variables must be initialised with a constant expression".into(),
-                //     );
-                // }
             }
             (Type::Array(t, size), InitialiserWithoutType::Compound(ref mut initialisers)) => {
                 let size =

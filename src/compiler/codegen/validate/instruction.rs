@@ -67,8 +67,10 @@ impl Validate for Vec<Instruction> {
                     .unwrap_or(Vec::new());
                 let callee_registers_size = (8 * callee_registers.len()) as u32;
                 let stack_size = if context.current_function_is_variadic {
-                    // allocate 176 extra bytes to store variadic args
-                    stack_size + 176
+                    // allocate 176 *16-byte aligned* extra bytes to store variadic args
+                    (align_stack_size((*stack_size).into(), 16) + 176)
+                        .try_into()
+                        .unwrap()
                 } else {
                     *stack_size
                 };
