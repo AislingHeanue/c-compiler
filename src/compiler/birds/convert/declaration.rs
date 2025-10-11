@@ -21,7 +21,7 @@ impl Convert<Vec<BirdsInstructionNode>> for DeclarationNode {
         context: &mut ConvertContext,
     ) -> Result<Vec<BirdsInstructionNode>, Box<dyn Error>> {
         match self {
-            DeclarationNode::Variable(v) => Ok(v.convert(context)?),
+            DeclarationNode::Variable(v) => v.convert(context),
             // function declaration at the top scope does not use this path, since it is read
             // directly in ProgramNode.
             // function declarations without a body do not emit instructions, so this branch is

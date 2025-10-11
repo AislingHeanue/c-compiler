@@ -93,7 +93,7 @@ pub enum InitialiserWithoutType {
 #[derive(Debug)]
 pub enum BlockItemNode {
     Statement(StatementNode),
-    Declaration(DeclarationNode),
+    Declaration(Vec<DeclarationNode>),
 }
 
 #[derive(Debug)]
@@ -158,7 +158,7 @@ pub enum SwitchMapKey {
 
 #[derive(Debug)]
 pub enum ForInitialiserNode {
-    Declaration(VariableDeclaration),
+    Declaration(Vec<VariableDeclaration>),
     Expression(Option<ExpressionNode>),
 }
 
@@ -268,7 +268,10 @@ pub enum Declarator {
 }
 
 // declarator, struct_declarations
-pub type DeclaratorWithInline = (Declarator, Vec<InlineDeclaration>);
+#[derive(Debug, Clone)]
+pub struct DeclaratorsWithAssignment(pub Vec<(Declarator, VecDeque<Token>)>);
+
+pub type DeclaratorsWithInline = (DeclaratorsWithAssignment, Vec<InlineDeclaration>);
 
 pub fn parse(lexed: VecDeque<Token>, do_not_validate: bool) -> Result<ProgramNode, Box<dyn Error>> {
     do_parse(lexed, do_not_validate)

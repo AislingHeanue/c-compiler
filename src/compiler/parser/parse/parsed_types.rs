@@ -1,11 +1,13 @@
 use itertools::Itertools;
 
-use super::{Parse, ParseContext, StructKind, StructMember, Type};
+use super::{
+    expression_node::PopForExpression, Parse, ParseContext, StructKind, StructMember, Type,
+};
 use crate::compiler::{
     lexer::{Token, TokenVector},
     parser::{
-        BlockItemNode, DeclarationNode, Declarator, EnumDeclaration, ExpressionWithoutType,
-        InlineDeclaration, StructDeclaration,
+        BlockItemNode, DeclarationNode, DeclaratorsWithAssignment, EnumDeclaration,
+        ExpressionWithoutType, InlineDeclaration, StructDeclaration,
     },
     types::EnumMember,
 };
@@ -259,8 +261,8 @@ impl ParseStructDeclaration for VecDeque<Token> {
                     self.expect(Token::OpenBrace)?;
                     let mut members: Vec<StructMember> = Vec::new();
                     while self.peek()? != Token::CloseBrace {
-                        let member: StructMember = self.parse(context)?;
-                        members.push(member);
+                        let mut member: Vec<StructMember> = self.parse(context)?;
+                        members.append(&mut member);
                     }
                     self.expect(Token::CloseBrace)?;
 
@@ -287,9 +289,10 @@ impl ParseStructDeclaration for VecDeque<Token> {
     }
 }
 
-impl Parse<StructMember> for VecDeque<Token> {
-    fn parse(&mut self, context: &mut ParseContext) -> Result<StructMember, Box<dyn Error>> {
+impl Parse<Vec<StructMember>> for VecDeque<Token> {
+    fn parse(&mut self, context: &mut ParseContext) -> Result<Vec<StructMember>, Box<dyn Error>> {
         let mut type_tokens = self.pop_tokens_for_type(context)?.0;
+        let mut out = Vec::new();
         match (type_tokens.front(), self.peek()?) {
             // this deals with anonymous/inline structs which don't have a field name
             (
@@ -300,28 +303,29 @@ impl Parse<StructMember> for VecDeque<Token> {
                     type_tokens.parse_struct(true, context)?;
                 self.expect(Token::SemiColon)?;
                 match embedded_struct_declaration {
-                    InlineDeclaration::Struct(ref s) => Ok(StructMember {
+                    InlineDeclaration::Struct(ref s) => out.push(StructMember {
                         member_type: Type::Struct(s.name.clone(), s.is_union),
                         name: None,
                         inline_declarations: vec![embedded_struct_declaration],
                         _num_bits: None,
                     }),
-                    InlineDeclaration::Enum(ref m) => Ok(StructMember {
+                    InlineDeclaration::Enum(ref m) => out.push(StructMember {
                         member_type: Type::Enum(m.members.clone()),
                         name: None,
                         inline_declarations: vec![embedded_struct_declaration],
                         _num_bits: None,
                     }),
                 }
+                Ok(out)
             }
             _ => {
                 // attempt to parse a declarator with the remaining tokens
                 type_tokens.append(self);
                 // put the tokens back the way they were
                 *self = type_tokens;
-                let (base_type, declarator, inline_declarations): (
+                let (base_type, declarators, inline_declarations): (
                     Type,
-                    Declarator,
+                    DeclaratorsWithAssignment,
                     Vec<InlineDeclaration>,
                 ) = self.parse(context)?;
 
@@ -340,18 +344,24 @@ impl Parse<StructMember> for VecDeque<Token> {
                 };
 
                 self.expect(Token::SemiColon)?;
-                let declarator_output = declarator.apply_to_type(base_type, context)?;
+                let declarator_output = declarators.apply_to_type(base_type, context)?;
 
-                if let Type::Function(_, _, _) = declarator_output.out_type {
-                    Err("A struct member may not have a function type".into())
-                } else {
-                    Ok(StructMember {
-                        member_type: declarator_output.out_type,
-                        name: declarator_output.name,
-                        inline_declarations,
-                        _num_bits: num_bits,
-                    })
+                for declarator_output_member in declarator_output.into_iter() {
+                    if !declarator_output_member.init.is_empty() {
+                        return Err("Struct member may not have an initialiser".into());
+                    }
+                    if let Type::Function(_, _, _) = declarator_output_member.out_type {
+                        return Err("A struct member may not have a function type".into());
+                    } else {
+                        out.push(StructMember {
+                            member_type: declarator_output_member.out_type,
+                            name: declarator_output_member.name,
+                            inline_declarations: inline_declarations.clone(),
+                            _num_bits: num_bits,
+                        });
+                    }
                 }
+                Ok(out)
             }
         }
     }
@@ -385,7 +395,7 @@ impl Parse<EnumMember> for VecDeque<Token> {
     }
 }
 
-pub type OutputWithInline = (Type, Declarator, Vec<InlineDeclaration>);
+pub type OutputWithInline = (Type, DeclaratorsWithAssignment, Vec<InlineDeclaration>);
 impl Parse<OutputWithInline> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<OutputWithInline, Box<dyn Error>> {
         let (mut types_deque, specifier_locations) = self.pop_tokens_for_type(context)?;
@@ -406,36 +416,7 @@ impl Parse<OutputWithInline> for VecDeque<Token> {
             false
         };
 
-        let mut declarator_deque = VecDeque::new();
-        let mut paren_nesting = 0;
-        let mut brace_nesting = 0;
-        let mut square_nesting = 0;
-        while !(self.is_empty()
-            || (paren_nesting == 0
-                && square_nesting == 0
-                && brace_nesting == 0
-                && matches!(
-                    self.peek()?,
-                    Token::CloseParen
-                        | Token::CloseSquareBracket
-                        | Token::Comma
-                        | Token::SemiColon
-                        | Token::Assignment
-                        | Token::OpenBrace
-                        | Token::Colon
-                )))
-        {
-            match self.peek()? {
-                Token::OpenParen => paren_nesting += 1,
-                Token::CloseParen => paren_nesting -= 1,
-                Token::OpenSquareBracket => square_nesting += 1,
-                Token::CloseSquareBracket => square_nesting -= 1,
-                Token::OpenBrace => brace_nesting += 1,
-                Token::CloseBrace => brace_nesting -= 1,
-                _ => {}
-            }
-            declarator_deque.push_back(self.read()?);
-        }
+        let mut declarator_deque = self.pop_tokens_for_expression(context)?;
 
         while !types_deque.is_empty() {
             // try and get a valid type and declarator for the given expression
@@ -444,17 +425,17 @@ impl Parse<OutputWithInline> for VecDeque<Token> {
             let mut type_result: Result<(Type, Vec<InlineDeclaration>), Box<dyn Error>> =
                 new_types_deque.parse(context);
             let mut declarator_result: Result<
-                (Declarator, Vec<InlineDeclaration>),
+                (DeclaratorsWithAssignment, Vec<InlineDeclaration>),
                 Box<dyn Error>,
             > = new_declarator_deque.parse(context);
             if let (
                 Ok((ref t, ref mut struct_declarations)),
-                Ok((ref declarator, ref mut structs_from_declarator)),
+                Ok((ref declarators, ref mut structs_from_declarator)),
             ) = (&mut type_result, &mut declarator_result)
             {
                 if new_types_deque.is_empty() && new_declarator_deque.is_empty() {
                     struct_declarations.append(structs_from_declarator);
-                    return Ok((t.clone(), declarator.clone(), struct_declarations.clone()));
+                    return Ok((t.clone(), declarators.clone(), struct_declarations.clone()));
                 }
             }
             // Entering this section means that we failed to properly split the type and the

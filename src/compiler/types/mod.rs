@@ -70,7 +70,7 @@ pub enum InitialValue {
 pub enum StorageInfo {
     // is_defined and global (ie non-static)
     Function(bool, bool),
-    // initializer and global
+    // initialiser and global
     Static(InitialValue, bool),
     Constant(StaticInitialiser),
     Automatic,

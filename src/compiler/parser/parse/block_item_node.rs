@@ -36,7 +36,6 @@ impl Parse<Vec<BlockItemNode>> for VecDeque<Token> {
         while !matches!(self.peek()?, Token::CloseBrace) {
             items.push(self.parse(context)?)
         }
-
         if let Some(original) = original_outer_scope_variables {
             BlockItemNode::leave_scope(original, context);
         } else {
@@ -56,17 +55,20 @@ impl Parse<BlockItemNode> for VecDeque<Token> {
         }
 
         if self.peek()?.is_start_of_declaration(context) {
-            let declaration = self.parse(context)?;
-            if let DeclarationNode::Function(ref f) = declaration {
-                if f.body.is_some() && !context.do_not_validate {
-                    return Err("Block-scope function declaration may not have a body".into());
-                }
-                if matches!(f.storage_class, Some(StorageClass::Static)) && !context.do_not_validate
-                {
-                    return Err("Block-scope function declaration may not be static".into());
+            let declarations: Vec<DeclarationNode> = self.parse(context)?;
+            for declaration in declarations.iter() {
+                if let DeclarationNode::Function(ref f) = declaration {
+                    if f.body.is_some() && !context.do_not_validate {
+                        return Err("Block-scope function declaration may not have a body".into());
+                    }
+                    if matches!(f.storage_class, Some(StorageClass::Static))
+                        && !context.do_not_validate
+                    {
+                        return Err("Block-scope function declaration may not be static".into());
+                    }
                 }
             }
-            Ok(BlockItemNode::Declaration(declaration))
+            Ok(BlockItemNode::Declaration(declarations))
         } else {
             Ok(BlockItemNode::Statement(self.parse(context)?))
         }

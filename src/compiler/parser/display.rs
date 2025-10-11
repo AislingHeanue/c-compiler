@@ -184,7 +184,11 @@ impl CodeDisplay for StatementNode {
 impl CodeDisplay for ForInitialiserNode {
     fn show(&self, context: &mut DisplayContext) -> String {
         match self {
-            ForInitialiserNode::Declaration(d) => d.show(context),
+            ForInitialiserNode::Declaration(ds) => ds
+                .iter()
+                .map(|d| d.show(context))
+                .collect_vec()
+                .show(context),
             ForInitialiserNode::Expression(e) => e.show(context),
         }
     }

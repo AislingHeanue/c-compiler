@@ -4,13 +4,25 @@ use super::{
 };
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::{BuiltinVa, Declarator, InlineDeclaration},
+    parser::{BuiltinVa, DeclaratorsWithAssignment, InlineDeclaration},
 };
 use std::{collections::VecDeque, error::Error};
 
 impl Parse<ExpressionNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<ExpressionNode, Box<dyn Error>> {
         let e1: ExpressionWithoutType = self.parse(context)?;
+        if !self.is_empty()
+            && !matches!(
+                self.peek()?,
+                Token::SemiColon
+                    | Token::CloseParen
+                    | Token::CloseBrace
+                    | Token::CloseSquareBracket
+                    | Token::Comma
+            )
+        {
+            return Err("Extra tokens found after expression".into());
+        }
         Ok(e1.into())
     }
 }
@@ -88,13 +100,18 @@ impl ParseExpression for VecDeque<Token> {
                 if self.peek()?.is_start_of_declaration(context) {
                     let (cast_type, mut inline_declarations): (Type, Vec<InlineDeclaration>) =
                         self.parse(context)?;
-                    let (declarator, mut struct_declarations_from_declarator): (
-                        Declarator,
+                    let (declarators, mut struct_declarations_from_declarator): (
+                        DeclaratorsWithAssignment,
                         Vec<InlineDeclaration>,
                     ) = self.parse(context)?;
                     inline_declarations.append(&mut struct_declarations_from_declarator);
-                    let declarator_output = declarator.apply_to_type(cast_type, context)?;
-                    if declarator_output.name.is_some() {
+                    let declarator_output = declarators.apply_to_type(cast_type, context)?;
+                    if declarator_output.len() != 1 {
+                        return Err(
+                            "Sizeof must not be used with a comma-separated declarator list".into(),
+                        );
+                    }
+                    if declarator_output[0].name.is_some() {
                         return Err(
                             "Cast must be used with an abstract declarator, but a name was found"
                                 .into(),
@@ -103,7 +120,7 @@ impl ParseExpression for VecDeque<Token> {
                     self.expect(Token::CloseParen)?;
                     let factor = self.parse_cast(context, false)?.unwrap();
                     Some(ExpressionWithoutType::Cast(
-                        declarator_output.out_type,
+                        declarator_output[0].out_type.clone(),
                         Box::new(factor.into()),
                         inline_declarations,
                     ))
@@ -135,7 +152,7 @@ impl ParseExpression for VecDeque<Token> {
             if precedence < level {
                 break;
             }
-            if self.peek()?.is_assignment() {
+            if !self.is_empty() && self.peek()?.is_assignment() {
                 let operator_token = self.read()?;
                 let right = self.parse_with_level(context, precedence, false)?;
                 left = if let Token::Assignment = operator_token {
@@ -229,18 +246,21 @@ impl ParseExpression for VecDeque<Token> {
                             self.expect(Token::OpenParen)?;
                             if self.peek()?.is_start_of_declaration(context) {
                                 let target_type: Type = self.parse(context)?;
-                                let (declarator, inline_declarations): (
-                                    Declarator,
+                                let (declarators, inline_declarations): (
+                                    DeclaratorsWithAssignment,
                                     Vec<InlineDeclaration>,
                                 ) = self.parse(context)?;
                                 let declarator_output =
-                                    declarator.apply_to_type(target_type, context)?;
-                                if declarator_output.name.is_some() {
+                                    declarators.apply_to_type(target_type, context)?;
+                                if declarator_output.len() != 1 {
+                                    return Err("Sizeof must not be used with a comma-separated declarator list".into());
+                                }
+                                if declarator_output[0].name.is_some() {
                                     return Err("Sizeof must be used with an abstract declarator, but a name was found".into());
                                 }
                                 self.expect(Token::CloseParen)?;
                                 Some(ExpressionWithoutType::SizeOfType(
-                                    declarator_output.out_type,
+                                    declarator_output[0].out_type.clone(),
                                     inline_declarations,
                                 ))
                             } else {
@@ -280,7 +300,7 @@ impl ParseExpression for VecDeque<Token> {
         if left.is_none() {
             return Ok(left);
         }
-        while self.peek()?.is_suffix_operator() {
+        while !self.is_empty() && self.peek()?.is_suffix_operator() {
             match self.peek()? {
                 Token::Increment | Token::Decrement => {
                     left = Some(ExpressionWithoutType::Unary(
@@ -373,94 +393,108 @@ impl ParseExpression for VecDeque<Token> {
         let expression = match self.peek()? {
             Token::Identifier(name) => {
                 self.expect(Token::Identifier("".to_string()))?;
-                match self.peek()? {
-                    // this is a function call !!
-                    Token::OpenParen => {
-                        self.expect(Token::OpenParen)?;
-                        match name.as_str() {
-                            "__builtin_va_start" => {
-                                let va_list: ExpressionNode = self.parse(context)?;
-                                self.expect(Token::Comma)?;
-                                let last_arg: ExpressionNode = self.parse(context)?;
-                                self.expect(Token::CloseParen)?;
+                if self.is_empty() {
+                    let (new_name, _external_link) =
+                        ExpressionWithoutType::resolve_identifier(&name, context)?;
 
-                                Some(ExpressionWithoutType::BuiltinFunctionCall(
-                                    BuiltinVa::Start(Box::new(va_list), Box::new(last_arg)),
-                                ))
-                            }
-                            "__builtin_va_arg" => {
-                                let va_list: ExpressionNode = self.parse(context)?;
-                                self.expect(Token::Comma)?;
-
-                                let (t, mut inline_declarations): (Type, Vec<InlineDeclaration>) =
-                                    self.parse(context)?;
-                                let (d, mut declarations_from_declarator): (
-                                    Declarator,
-                                    Vec<InlineDeclaration>,
-                                ) = self.parse(context)?;
-                                let declaration_output = d.apply_to_type(t, context)?;
-
-                                inline_declarations.append(&mut declarations_from_declarator);
-                                self.expect(Token::CloseParen)?;
-
-                                if declaration_output.name.is_some() {
-                                    return Err(
-                                        "Non-abstract declarator used in __builtin_va_arg".into()
-                                    );
-                                }
-
-                                Some(ExpressionWithoutType::BuiltinFunctionCall(BuiltinVa::Arg(
-                                    Box::new(va_list),
-                                    declaration_output.out_type,
-                                    inline_declarations,
-                                )))
-                            }
-                            "__builtin_va_end" => {
-                                let va_list: ExpressionNode = self.parse(context)?;
-                                self.expect(Token::CloseParen)?;
-
-                                Some(ExpressionWithoutType::BuiltinFunctionCall(BuiltinVa::End(
-                                    Box::new(va_list),
-                                )))
-                            }
-                            "__builtin_va_copy" => {
-                                let va_list: ExpressionNode = self.parse(context)?;
-                                self.expect(Token::Comma)?;
-                                let va_list_2: ExpressionNode = self.parse(context)?;
-                                self.expect(Token::CloseParen)?;
-
-                                Some(ExpressionWithoutType::BuiltinFunctionCall(BuiltinVa::Copy(
-                                    Box::new(va_list),
-                                    Box::new(va_list_2),
-                                )))
-                            }
-                            _ => {
-                                let (new_name, _external_link) =
-                                    ExpressionWithoutType::resolve_identifier(&name, context)?;
-
-                                let mut arguments: Vec<ExpressionWithoutType> = Vec::new();
-                                if !matches!(self.peek()?, Token::CloseParen) {
-                                    arguments.push(self.parse(context)?);
-                                }
-                                while matches!(self.peek()?, Token::Comma) {
+                    Some(ExpressionWithoutType::Var(new_name))
+                } else {
+                    match self.peek()? {
+                        // this is a function call !!
+                        Token::OpenParen => {
+                            self.expect(Token::OpenParen)?;
+                            match name.as_str() {
+                                "__builtin_va_start" => {
+                                    let va_list: ExpressionNode = self.parse(context)?;
                                     self.expect(Token::Comma)?;
-                                    arguments.push(self.parse(context)?);
-                                }
-                                self.expect(Token::CloseParen)?;
+                                    let last_arg: ExpressionNode = self.parse(context)?;
+                                    self.expect(Token::CloseParen)?;
 
-                                Some(ExpressionWithoutType::FunctionCall(
-                                    new_name,
-                                    arguments.into_iter().map(|a| a.into()).collect(),
-                                ))
+                                    Some(ExpressionWithoutType::BuiltinFunctionCall(
+                                        BuiltinVa::Start(Box::new(va_list), Box::new(last_arg)),
+                                    ))
+                                }
+                                "__builtin_va_arg" => {
+                                    let va_list: ExpressionNode = self.parse(context)?;
+                                    self.expect(Token::Comma)?;
+
+                                    let (t, mut inline_declarations): (
+                                        Type,
+                                        Vec<InlineDeclaration>,
+                                    ) = self.parse(context)?;
+                                    let (d, mut declarations_from_declarator): (
+                                        DeclaratorsWithAssignment,
+                                        Vec<InlineDeclaration>,
+                                    ) = self.parse(context)?;
+                                    let declarator_output = d.apply_to_type(t, context)?;
+                                    inline_declarations.append(&mut declarations_from_declarator);
+                                    self.expect(Token::CloseParen)?;
+
+                                    if declarator_output.len() != 1 {
+                                        return Err("va_arg must not be used with a comma-separated declarator list".into());
+                                    }
+
+                                    if declarator_output[0].name.is_some() {
+                                        return Err(
+                                            "Non-abstract declarator used in __builtin_va_arg"
+                                                .into(),
+                                        );
+                                    }
+
+                                    Some(ExpressionWithoutType::BuiltinFunctionCall(
+                                        BuiltinVa::Arg(
+                                            Box::new(va_list),
+                                            declarator_output[0].out_type.clone(),
+                                            inline_declarations,
+                                        ),
+                                    ))
+                                }
+                                "__builtin_va_end" => {
+                                    let va_list: ExpressionNode = self.parse(context)?;
+                                    self.expect(Token::CloseParen)?;
+
+                                    Some(ExpressionWithoutType::BuiltinFunctionCall(
+                                        BuiltinVa::End(Box::new(va_list)),
+                                    ))
+                                }
+                                "__builtin_va_copy" => {
+                                    let va_list: ExpressionNode = self.parse(context)?;
+                                    self.expect(Token::Comma)?;
+                                    let va_list_2: ExpressionNode = self.parse(context)?;
+                                    self.expect(Token::CloseParen)?;
+
+                                    Some(ExpressionWithoutType::BuiltinFunctionCall(
+                                        BuiltinVa::Copy(Box::new(va_list), Box::new(va_list_2)),
+                                    ))
+                                }
+                                _ => {
+                                    let (new_name, _external_link) =
+                                        ExpressionWithoutType::resolve_identifier(&name, context)?;
+
+                                    let mut arguments: Vec<ExpressionWithoutType> = Vec::new();
+                                    if !matches!(self.peek()?, Token::CloseParen) {
+                                        arguments.push(self.parse(context)?);
+                                    }
+                                    while matches!(self.peek()?, Token::Comma) {
+                                        self.expect(Token::Comma)?;
+                                        arguments.push(self.parse(context)?);
+                                    }
+                                    self.expect(Token::CloseParen)?;
+
+                                    Some(ExpressionWithoutType::FunctionCall(
+                                        new_name,
+                                        arguments.into_iter().map(|a| a.into()).collect(),
+                                    ))
+                                }
                             }
                         }
-                    }
-                    _ => {
-                        // VALIDATION STEP: Check the variable has been declared
-                        let (new_name, _external_link) =
-                            ExpressionWithoutType::resolve_identifier(&name, context)?;
+                        _ => {
+                            // VALIDATION STEP: Check the variable has been declared
+                            let (new_name, _external_link) =
+                                ExpressionWithoutType::resolve_identifier(&name, context)?;
 
-                        Some(ExpressionWithoutType::Var(new_name))
+                            Some(ExpressionWithoutType::Var(new_name))
+                        }
                     }
                 }
             }
@@ -473,7 +507,7 @@ impl ParseExpression for VecDeque<Token> {
             Token::StringLiteral(v) => {
                 self.expect(Token::StringLiteral(Vec::new()))?;
                 let mut out = v.clone();
-                while matches!(self.peek()?, Token::StringLiteral(_)) {
+                while !self.is_empty() && matches!(self.peek()?, Token::StringLiteral(_)) {
                     if let Token::StringLiteral(new_v) = self.read()? {
                         out.append(&mut new_v.clone())
                     } else {
@@ -520,8 +554,8 @@ impl ExpressionWithoutType {
         context: &mut ParseContext,
     ) -> Result<(String, bool), Box<dyn Error>> {
         // println!(
-        //     "resolve {:?} {:?}",
-        //     context.outer_scope_identifiers, context.current_scope_identifiers
+        //     "resolve {} {:?} {:?}",
+        //     name, context.outer_scope_identifiers, context.current_scope_identifiers
         // );
         if context.do_not_validate {
             Ok((name.to_string(), false))
@@ -663,5 +697,54 @@ impl ExpressionWithoutType {
 
             Ok(new_name)
         }
+    }
+}
+
+pub trait PopForExpression {
+    fn pop_tokens_for_expression(
+        &mut self,
+        context: &mut ParseContext,
+        // type tokens and storage class tokens
+    ) -> Result<VecDeque<Token>, Box<dyn Error>>;
+}
+impl PopForExpression for VecDeque<Token> {
+    fn pop_tokens_for_expression(
+        &mut self,
+        context: &mut ParseContext,
+        // type tokens and storage class tokens
+    ) -> Result<VecDeque<Token>, Box<dyn Error>> {
+        let mut out = VecDeque::new();
+        let mut paren_nesting = 0;
+        let mut brace_nesting = 0;
+        let mut square_nesting = 0;
+        // expressions can't end with =
+        // expression can't be completely empty
+        while !(self.is_empty()
+            || (paren_nesting == 0
+                && square_nesting == 0
+                && brace_nesting == 0
+                && out.back() != Some(&Token::Assignment)
+                && !out.is_empty()
+                && matches!(
+                    self.peek()?,
+                    Token::CloseParen
+                        | Token::CloseSquareBracket
+                        | Token::OpenBrace
+                        | Token::SemiColon
+                )
+                || (context.parsing_param && matches!(self.peek()?, Token::Comma))))
+        {
+            match self.peek()? {
+                Token::OpenParen => paren_nesting += 1,
+                Token::CloseParen => paren_nesting -= 1,
+                Token::OpenSquareBracket => square_nesting += 1,
+                Token::CloseSquareBracket => square_nesting -= 1,
+                Token::OpenBrace => brace_nesting += 1,
+                Token::CloseBrace => brace_nesting -= 1,
+                _ => {}
+            }
+            out.push_back(self.read()?);
+        }
+        Ok(out)
     }
 }

@@ -1,5 +1,7 @@
 use std::error::Error;
 
+use itertools::{process_results, Itertools};
+
 use crate::compiler::{
     birds::{BirdsBinaryOperatorNode, BirdsInstructionNode, BirdsValueNode},
     parser::{
@@ -143,7 +145,9 @@ impl Convert<Vec<BirdsInstructionNode>> for StatementNode {
 
                 //init
                 let mut instructions = match init {
-                    ForInitialiserNode::Declaration(d) => d.convert(context)?,
+                    ForInitialiserNode::Declaration(ds) => {
+                        process_results(ds.into_iter().map(|d| d.convert(context)), |a| a.concat())?
+                    }
                     ForInitialiserNode::Expression(Some(expression)) => {
                         let (instructions, _): D = expression.convert(context)?;
                         instructions

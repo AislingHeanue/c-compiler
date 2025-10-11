@@ -43,6 +43,7 @@ pub struct ParseContext {
     // this prevent creating an extra new scope entering function bodies
     current_block_is_function_body: bool,
     current_scope_is_file: bool,
+    parsing_param: bool,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -76,6 +77,7 @@ pub fn do_parse(
         do_not_validate,
         current_block_is_function_body: false,
         current_scope_is_file: true,
+        parsing_param: false,
     })
 }
 
@@ -83,7 +85,7 @@ impl Parse<ProgramNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<ProgramNode, Box<dyn Error>> {
         let mut declarations: Vec<DeclarationNode> = Vec::new();
         while !self.is_empty() {
-            declarations.push(self.parse(context)?)
+            declarations.append(&mut self.parse(context)?)
         }
 
         Ok(ProgramNode { declarations })
@@ -94,11 +96,27 @@ impl Parse<ForInitialiserNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<ForInitialiserNode, Box<dyn Error>> {
         if self.peek()?.is_start_of_declaration(context) {
             let block_item = self.parse(context)?;
-            if let BlockItemNode::Declaration(DeclarationNode::Variable(v)) = block_item {
-                if !context.do_not_validate && v.storage_class.is_some() {
-                    return Err("For initialiser must not be declared as static or extern".into());
+            if let BlockItemNode::Declaration(ds) = block_item {
+                let mut vs = Vec::new();
+                for d in ds.into_iter() {
+                    match d {
+                        DeclarationNode::Variable(v) => {
+                            if !context.do_not_validate && v.storage_class.is_some() {
+                                return Err(
+                                    "For initialiser must not be declared as static or extern"
+                                        .into(),
+                                );
+                            }
+                            vs.push(v)
+                        }
+                        _ => {
+                            return Err(
+                                "For initialiser must be a variable or list of variables".into()
+                            );
+                        }
+                    }
                 }
-                Ok(ForInitialiserNode::Declaration(v))
+                Ok(ForInitialiserNode::Declaration(vs))
             } else if let BlockItemNode::Statement(StatementNode::Expression(expression)) =
                 block_item
             {
@@ -118,6 +136,7 @@ impl Parse<ForInitialiserNode> for VecDeque<Token> {
 
 impl Parse<InitialiserNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<InitialiserNode, Box<dyn Error>> {
+        println!("{:?}", self);
         let init = match self.peek()? {
             Token::OpenBrace => {
                 self.expect(Token::OpenBrace)?;
@@ -246,51 +265,55 @@ impl Parse<BinaryOperatorNode> for VecDeque<Token> {
 }
 impl BinaryOperatorNode {
     fn precedence(tokens: &mut VecDeque<Token>) -> Result<Option<usize>, Box<dyn Error>> {
-        Ok(Some(match tokens.peek()? {
-            Token::Increment => 60,
-            Token::Decrement => 60,
+        if tokens.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(match tokens.peek()? {
+                Token::Increment => 60,
+                Token::Decrement => 60,
 
-            Token::Star => 50,
-            Token::Slash => 50,
-            Token::Percent => 50,
+                Token::Star => 50,
+                Token::Slash => 50,
+                Token::Percent => 50,
 
-            Token::Plus => 45,
-            Token::Hyphen => 45,
+                Token::Plus => 45,
+                Token::Hyphen => 45,
 
-            Token::ShiftLeft => 40,
-            Token::ShiftRight => 40,
+                Token::ShiftLeft => 40,
+                Token::ShiftRight => 40,
 
-            Token::Less => 35,
-            Token::LessEqual => 35,
-            Token::Greater => 35,
-            Token::GreaterEqual => 35,
+                Token::Less => 35,
+                Token::LessEqual => 35,
+                Token::Greater => 35,
+                Token::GreaterEqual => 35,
 
-            Token::Equal => 30,
-            Token::NotEqual => 30,
+                Token::Equal => 30,
+                Token::NotEqual => 30,
 
-            Token::BitwiseAnd => 25,
-            Token::BitwiseXor => 20,
-            Token::BitwiseOr => 15,
+                Token::BitwiseAnd => 25,
+                Token::BitwiseXor => 20,
+                Token::BitwiseOr => 15,
 
-            Token::And => 10,
+                Token::And => 10,
 
-            Token::Or => 5,
+                Token::Or => 5,
 
-            Token::Question => 3,
+                Token::Question => 3,
 
-            Token::Assignment => 1,
-            Token::AddAssign => 1,
-            Token::SubtractAssign => 1,
-            Token::MultiplyAssign => 1,
-            Token::DivideAssign => 1,
-            Token::ModAssign => 1,
-            Token::BitwiseAndAssign => 1,
-            Token::BitwiseXorAssign => 1,
-            Token::BitwiseOrAssign => 1,
-            Token::ShiftLeftAssign => 1,
-            Token::ShiftRightAssign => 1,
+                Token::Assignment => 1,
+                Token::AddAssign => 1,
+                Token::SubtractAssign => 1,
+                Token::MultiplyAssign => 1,
+                Token::DivideAssign => 1,
+                Token::ModAssign => 1,
+                Token::BitwiseAndAssign => 1,
+                Token::BitwiseXorAssign => 1,
+                Token::BitwiseOrAssign => 1,
+                Token::ShiftLeftAssign => 1,
+                Token::ShiftRightAssign => 1,
 
-            _ => return Ok(None),
-        }))
+                _ => return Ok(None),
+            }))
+        }
     }
 }

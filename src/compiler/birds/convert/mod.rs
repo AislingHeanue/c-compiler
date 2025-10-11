@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 
-use itertools::process_results;
+use itertools::{process_results, Itertools};
 
 use crate::compiler::{
     parser::{BinaryOperatorNode, BlockItemNode, ProgramNode, StructInfo},
@@ -96,7 +96,12 @@ impl Convert<Vec<BirdsInstructionNode>> for Vec<BlockItemNode> {
         process_results(
             self.into_iter().map(|node| match node {
                 BlockItemNode::Statement(statement) => statement.convert(context),
-                BlockItemNode::Declaration(declaration) => declaration.convert(context),
+                BlockItemNode::Declaration(declarations) => process_results(
+                    declarations
+                        .into_iter()
+                        .map(|declaration| declaration.convert(context)),
+                    |a| a.concat(),
+                ),
             }),
             |iter| iter.flatten().collect(),
         )
