@@ -8,16 +8,7 @@ use crate::compiler::{
 impl ExpressionWithoutType {
     pub fn fold_to_constant(&self) -> Result<Constant, Box<dyn Error>> {
         let c = match self {
-            ExpressionWithoutType::Constant(c) => {
-                if matches!(
-                    c,
-                    Constant::Float(_) | Constant::Double(_) | Constant::LongDouble(_)
-                ) {
-                    return Err("Constant expression may not include a floating point value".into());
-                }
-
-                c.clone()
-            }
+            ExpressionWithoutType::Constant(c) => c.clone(),
             ExpressionWithoutType::Unary(op, e) => {
                 let c = e.0.fold_to_constant()?;
                 match &op {

@@ -179,11 +179,14 @@ impl ParseDeclarator for VecDeque<Token> {
         }
 
         let mut is_variadic = false;
-        let (t, param, mut structs_from_param) = self.parse_param(context)?;
-        param_list.push((t, param));
-        structs.append(&mut structs_from_param);
+        // let (t, param, mut structs_from_param) = self.parse_param(context)?;
+        // param_list.push((t, param));
+        // structs.append(&mut structs_from_param);
+        let mut found_arg = false;
         while self.peek()? != Token::CloseParen {
-            self.expect(Token::Comma)?;
+            if found_arg {
+                self.expect(Token::Comma)?;
+            }
             if matches!(self.peek()?, Token::Ellipses) {
                 self.expect(Token::Ellipses)?;
                 is_variadic = true;
@@ -192,6 +195,7 @@ impl ParseDeclarator for VecDeque<Token> {
             let (t, param, mut structs_from_param) = self.parse_param(context)?;
             param_list.push((t, param));
             structs.append(&mut structs_from_param);
+            found_arg = true
         }
         self.expect(Token::CloseParen)?;
         Ok((param_list, structs, is_variadic))
