@@ -375,6 +375,8 @@ pub fn interpret(
 
                 PreprocessorToken::Identifier(s) => {
                     //TODO: add __func__ to the main compiler
+                    // FIXME: uh oh, if statements can't read __LINE__ in this form, it needs to be
+                    // a macro (callback?)
                     if s == "__LINE__" {
                         line_text += &context.line_num.to_string();
                     } else if s == "__FILE__" {
@@ -640,6 +642,7 @@ pub fn interpret(
                     expect_end_of_line = true;
                 }
                 PreprocessorToken::DirectiveIf => {
+                    println!("The current line number is {}", context.line_num);
                     current_if_nesting = 1;
                     let if_tokens;
                     (if_tokens, token_iter, line_iter) =
@@ -692,11 +695,12 @@ pub fn interpret(
                         }
                     }
                     if invalid_token_found || number.is_none() {
+                        invalid_token_found = false;
                         //= resolve_identifier(tokens.clone(), HashSet::new(), &mut context)?;
 
                         let new_tokens;
                         (new_tokens, token_iter, line_iter) = resolve_identifier(
-                            vec![token.clone()].into(),
+                            tokens.clone().into(),
                             token_iter,
                             line_iter,
                             HashSet::new(),
@@ -708,12 +712,12 @@ pub fn interpret(
                         for t in new_tokens.iter() {
                             match t {
                                 PreprocessorToken::Number(s) if number.is_none() => {
-                                    number = Some(s.parse::<usize>()?)
+                                    number = Some(s.parse::<usize>()?);
                                 }
                                 PreprocessorToken::StringLiteral(s)
                                     if number.is_some() && filename.is_none() =>
                                 {
-                                    filename = Some(s.clone())
+                                    filename = Some(s.clone());
                                 }
                                 _ => {
                                     invalid_token_found = true;
@@ -731,7 +735,7 @@ pub fn interpret(
                         );
                     };
                     // this line number is meant to apply to the NEXT line, so subtract 1
-                    context.line_num = number.unwrap();
+                    context.line_num = number.unwrap() - 1;
                     if let Some(f) = filename {
                         context.filename = PreprocessorToken::StringLiteral(f).to_string();
                     }

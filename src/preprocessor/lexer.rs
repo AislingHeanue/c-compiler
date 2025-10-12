@@ -64,11 +64,11 @@ lazy_static! {
                 PreprocessorToken::WhiteSpace(_) => r#"[^\S\n]+"#,
 
                 PreprocessorToken::DirectiveDefine => r"\s*#\s*define\s*\b",
-                PreprocessorToken::DirectiveUndef => r"#\s*undef\b",
+                PreprocessorToken::DirectiveUndef => r"\s*#\s*undef\b",
                 // interpret the full include line here, accounting for the fact that escape
                 // sequences and comments in "" and <> are not processed here.
-                PreprocessorToken::DirectiveInclude(_,_) => r#"#\s*include\s+("[^\n"]*"|<[^\n>]*>)\s*$"#,
-                PreprocessorToken::DirectiveIncludeWithMacro => r#"#\s*include\s*"#,
+                PreprocessorToken::DirectiveInclude(_,_) => r#"\s*#\s*include\s+("[^\n"]*"|<[^\n>]*>)\s*$"#,
+                PreprocessorToken::DirectiveIncludeWithMacro => r#"\s*#\s*include\s*"#,
                 PreprocessorToken::DirectiveIfdef => r"\s*#\s*ifdef\s*",
                 PreprocessorToken::DirectiveIfndef => r"\s*#\s*ifndef\s*",
                 PreprocessorToken::DirectiveIf => r"\s*#\s*if\s*",

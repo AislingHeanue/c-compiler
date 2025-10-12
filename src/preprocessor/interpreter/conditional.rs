@@ -176,27 +176,31 @@ impl ConditionNode {
         context: &mut InterpreterContext,
     ) -> i64 {
         let left = left.evaluate(context);
-        let right = right.evaluate(context);
-
         match op {
-            BinaryOp::Add => left + right,
-            BinaryOp::Subtract => left - right,
-            BinaryOp::Multiply => left * right,
-            BinaryOp::Divide => left / right,
-            BinaryOp::Mod => left % right,
-            BinaryOp::ShiftLeft => left << right,
-            BinaryOp::ShiftRight => left >> right,
-            BinaryOp::And => (left != 0 && right != 0) as i64,
-            BinaryOp::Or => (left != 0 || right != 0) as i64,
-            BinaryOp::BitwiseAnd => left & right,
-            BinaryOp::BitwiseOr => left | right,
-            BinaryOp::BitwiseXor => left ^ right,
-            BinaryOp::Greater => (left > right) as i64,
-            BinaryOp::Less => (left < right) as i64,
-            BinaryOp::GreaterEqual => (left >= right) as i64,
-            BinaryOp::LessEqual => (left <= right) as i64,
-            BinaryOp::Equal => (left == right) as i64,
-            BinaryOp::NotEqual => (left != right) as i64,
+            BinaryOp::And => (left != 0 && right.evaluate(context) != 0) as i64,
+            BinaryOp::Or => (left != 0 || right.evaluate(context) != 0) as i64,
+            op => {
+                let right = right.evaluate(context);
+                match op {
+                    BinaryOp::Add => left + right,
+                    BinaryOp::Subtract => left - right,
+                    BinaryOp::Multiply => left * right,
+                    BinaryOp::Divide => left / right,
+                    BinaryOp::Mod => left % right,
+                    BinaryOp::ShiftLeft => left << right,
+                    BinaryOp::ShiftRight => left >> right,
+                    BinaryOp::BitwiseAnd => left & right,
+                    BinaryOp::BitwiseOr => left | right,
+                    BinaryOp::BitwiseXor => left ^ right,
+                    BinaryOp::Greater => (left > right) as i64,
+                    BinaryOp::Less => (left < right) as i64,
+                    BinaryOp::GreaterEqual => (left >= right) as i64,
+                    BinaryOp::LessEqual => (left <= right) as i64,
+                    BinaryOp::Equal => (left == right) as i64,
+                    BinaryOp::NotEqual => (left != right) as i64,
+                    BinaryOp::And | BinaryOp::Or => unreachable!(),
+                }
+            }
         }
     }
 }

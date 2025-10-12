@@ -24,7 +24,7 @@ pub fn resolve_identifier<'a, 'b: 'a>(
     mut seen_identifiers: HashSet<String>,
     context: &mut InterpreterContext,
 ) -> Result<ResolveReturn<'a, 'b>, Box<dyn Error>> {
-    // println!("resolving {:?}", tokens);
+    println!("resolving {:?}", tokens);
     let mut new_tokens = Vec::new();
     while let Some(token) = tokens.pop_front() {
         let next_is_concatenation = next_token_is_concatenation(&tokens);
