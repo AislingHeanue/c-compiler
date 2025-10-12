@@ -24,7 +24,7 @@ pub fn resolve_identifier<'a, 'b: 'a>(
     mut seen_identifiers: HashSet<String>,
     context: &mut InterpreterContext,
 ) -> Result<ResolveReturn<'a, 'b>, Box<dyn Error>> {
-    println!("resolving {:?}", tokens);
+    // println!("resolving {:?}", tokens);
     let mut new_tokens = Vec::new();
     while let Some(token) = tokens.pop_front() {
         let next_is_concatenation = next_token_is_concatenation(&tokens);
@@ -50,6 +50,14 @@ pub fn resolve_identifier<'a, 'b: 'a>(
                             seen_identifiers.remove(identifier);
 
                             resolved_inner_tokens
+                        }
+                        Macro::SpecialLine => {
+                            vec![PreprocessorToken::Number(context.line_num.to_string())]
+                        }
+                        Macro::SpecialFile => {
+                            vec![PreprocessorToken::StringLiteral(
+                                PreprocessorToken::parse_string(context.filename.to_string()),
+                            )]
                         }
                         Macro::Function(params, body) => {
                             // println!("resolved to function with {:?}, {:?}", params, body);

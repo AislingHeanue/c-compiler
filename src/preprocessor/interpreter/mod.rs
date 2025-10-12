@@ -21,6 +21,8 @@ mod macros;
 
 lazy_static! {
     static ref PREDEFINED_MACROS: HashMap<String,Macro> = HashMap::from([
+        ("__LINE__".to_string(),                    Macro::SpecialLine),
+        ("__FILE__".to_string(),                    Macro::SpecialFile),
         ("__DATE__".to_string(),                    Macro::string_constant_from(format!(r#""{}""#, Local::now().format("%b %d %y")).as_str())),
         ("__TIME__".to_string(),                    Macro::string_constant_from(format!(r#""{}""#, Local::now().format("%X")).as_str())),
         ("__STDC__".to_string(),                    Macro::from_number(1)),
@@ -199,6 +201,8 @@ pub enum Macro {
     Plain(Vec<PreprocessorToken>),
     // function name, param names, tokens in function body (maybe could be string?)
     Function(Vec<(String, bool)>, Vec<PreprocessorToken>),
+    SpecialLine,
+    SpecialFile,
     Undef,
 }
 
@@ -642,7 +646,6 @@ pub fn interpret(
                     expect_end_of_line = true;
                 }
                 PreprocessorToken::DirectiveIf => {
-                    println!("The current line number is {}", context.line_num);
                     current_if_nesting = 1;
                     let if_tokens;
                     (if_tokens, token_iter, line_iter) =

@@ -3,7 +3,10 @@ use itertools::{process_results, Itertools};
 use super::{expression_node::PopForExpression, Declarator, Parse, ParseContext, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::{BlockItemNode, DeclaratorsWithAssignment, DeclaratorsWithInline, InlineDeclaration},
+    parser::{
+        BlockItemNode, DeclaratorsWithAssignment, DeclaratorsWithInline, ExpressionNode,
+        InlineDeclaration,
+    },
 };
 use std::{collections::VecDeque, error::Error};
 
@@ -112,6 +115,19 @@ impl ParseDeclarator for VecDeque<Token> {
                         } else {
                             let (declarator, structs) = self.parse_full_declarator(context)?;
                             Ok((Declarator::ConstPointer(Box::new(declarator)), structs))
+                        }
+                    }
+                    Ok(Token::KeywordVolatile) => {
+                        // NOTE: Volatile discarded
+                        self.expect(Token::KeywordVolatile)?;
+                        if self.is_empty() {
+                            Ok((
+                                Declarator::Pointer(Box::new(Declarator::Base), false),
+                                Vec::new(),
+                            ))
+                        } else {
+                            let (declarator, structs) = self.parse_full_declarator(context)?;
+                            Ok((Declarator::Pointer(Box::new(declarator), false), structs))
                         }
                     }
                     _ => {
@@ -251,9 +267,40 @@ impl ParseDeclarator for VecDeque<Token> {
         context: &mut ParseContext,
     ) -> Result<Declarator, Box<dyn Error>> {
         self.expect(Token::OpenSquareBracket)?;
-        let e = self.parse(context)?;
-        declarator = Declarator::Array(Box::new(declarator), e);
-        self.expect(Token::CloseSquareBracket)?;
+        if context.parsing_param {
+            let mut is_restrict = false;
+            let mut is_const = false;
+            let mut _is_volatile = false;
+            let mut _is_static = false;
+            while !self.is_empty()
+                && matches!(
+                    self.peek()?,
+                    Token::KeywordRestrict
+                        | Token::KeywordConst
+                        | Token::KeywordVolatile
+                        | Token::KeywordStatic
+                )
+            {
+                match self.read()? {
+                    Token::KeywordRestrict if !is_restrict => is_restrict = true,
+                    Token::KeywordConst if !is_const => is_const = true,
+                    Token::KeywordVolatile if !_is_volatile => _is_volatile = true,
+                    Token::KeywordStatic if !_is_static => _is_static = true,
+                    _ => return Err("Invalid specifiers in array declarator in parameter".into()),
+                }
+            }
+            let _e: Option<ExpressionNode> = self.parse(context)?;
+            if is_const {
+                declarator = Declarator::ConstPointer(Box::new(declarator))
+            } else {
+                declarator = Declarator::Pointer(Box::new(declarator), is_restrict)
+            }
+            self.expect(Token::CloseSquareBracket)?;
+        } else {
+            let e = self.parse(context)?;
+            declarator = Declarator::Array(Box::new(declarator), e);
+            self.expect(Token::CloseSquareBracket)?;
+        }
         Ok(declarator)
     }
 }

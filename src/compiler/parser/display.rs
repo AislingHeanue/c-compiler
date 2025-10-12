@@ -88,18 +88,21 @@ impl CodeDisplay for StatementNode {
             StatementNode::If(condition, then, otherwise) => {
                 if let Some(other) = otherwise.borrow() {
                     format!(
-                        "{}if {} {} else {}",
+                        "{}if {} {{{}{}}} else {{{}{}}}",
                         context.new_line_start(),
                         condition.show(&mut context.indent()),
-                        then.show(context),
-                        other.show(context),
+                        then.show(&mut context.indent()),
+                        context.new_line_start(),
+                        other.show(&mut context.indent()),
+                        context.new_line_start()
                     )
                 } else {
                     format!(
-                        "{}if {} {}",
+                        "{}if {} {{{}{}}}",
                         context.new_line_start(),
                         condition.show(&mut context.indent()),
-                        then.show(context),
+                        then.show(&mut context.indent()),
+                        context.new_line_start()
                     )
                 }
             }

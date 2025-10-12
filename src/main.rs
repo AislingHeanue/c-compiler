@@ -44,8 +44,14 @@ fn main() {
     let mut eliminate_dead_code = false;
     let mut eliminate_dead_stores = false;
     let mut ignore_stack_gaps = false;
+    let mut output_path = None;
+    let mut read_output_path_now = false;
     for arg in &args[1..] {
         match arg.as_str() {
+            t if read_output_path_now => {
+                read_output_path_now = false;
+                output_path = Some(t)
+            }
             "--preprocess" => only_preprocess = true,
             "--lex" => only_lex = true,
             "--parse" => only_parse = true,
@@ -68,7 +74,7 @@ fn main() {
                 eliminate_dead_code = true;
                 eliminate_dead_stores = true;
             }
-
+            "-o" => read_output_path_now = true,
             t if t.len() > 1 && matches!(&t[..2], "-l" | "-L") => linker_args.push(arg.clone()),
             t if t.len() > 1 && matches!(&t[..2], "-i" | "-I") => {
                 preprocessor_args.push(arg.clone())
@@ -174,7 +180,12 @@ fn main() {
             args.append(&mut linker_args.iter().map(|s| s.as_str()).collect());
             args
         } else {
-            let mut args = vec!["-o", &stripped_filename];
+            let mut args: Vec<&str>;
+            if let Some(out) = output_path {
+                args = vec!["-o", &out];
+            } else {
+                args = vec!["-o", &stripped_filename];
+            }
             args.append(&mut asm_filenames.iter().map(|s| s.as_str()).collect());
             args.append(&mut asm_input_names.iter().map(|s| s.as_str()).collect());
             args.append(&mut linker_args.iter().map(|s| s.as_str()).collect());

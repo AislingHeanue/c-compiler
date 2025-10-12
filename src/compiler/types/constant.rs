@@ -518,9 +518,15 @@ impl PartialEq for Constant {
         // folding pass loops indefinitely.
         match (self, other) {
             (Self::Integer(a), Self::Integer(b)) => a == b,
-            (Self::Long(a), Self::Long(b)) => a == b,
+            (
+                Constant::Long(a) | Constant::LongLong(a),
+                Constant::Long(b) | Constant::LongLong(b),
+            ) => a == b,
             (Self::UnsignedInteger(a), Self::UnsignedInteger(b)) => a == b,
-            (Self::UnsignedLong(a), Self::UnsignedLong(b)) => a == b,
+            (
+                Constant::UnsignedLong(a) | Constant::UnsignedLongLong(a),
+                Constant::UnsignedLong(b) | Constant::UnsignedLongLong(b),
+            ) => a == b,
             (Self::Float(a), Self::Float(b)) => {
                 // 0.0 does not equal -0.0 !!!
                 if one_float_is_negative_zero(*a, *b) {
@@ -555,8 +561,6 @@ impl PartialEq for Constant {
             (Self::UnsignedChar(a), Self::UnsignedChar(b)) => a == b,
             (Self::Short(a), Self::Short(b)) => a == b,
             (Self::UnsignedShort(a), Self::UnsignedShort(b)) => a == b,
-            (Self::LongLong(a), Self::LongLong(b)) => a == b,
-            (Self::UnsignedLongLong(a), Self::UnsignedLongLong(b)) => a == b,
             _ => false,
         }
     }
@@ -568,11 +572,17 @@ impl Add for Constant {
     fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Constant::Integer(a), Constant::Integer(b)) => Constant::Integer(a + b),
-            (Constant::Long(a), Constant::Long(b)) => Constant::Long(a + b),
+            (
+                Constant::Long(a) | Constant::LongLong(a),
+                Constant::Long(b) | Constant::LongLong(b),
+            ) => Constant::Long(a + b),
             (Constant::UnsignedInteger(a), Constant::UnsignedInteger(b)) => {
                 Constant::UnsignedInteger(a + b)
             }
-            (Constant::UnsignedLong(a), Constant::UnsignedLong(b)) => Constant::UnsignedLong(a + b),
+            (
+                Constant::UnsignedLong(a) | Constant::UnsignedLongLong(a),
+                Constant::UnsignedLong(b) | Constant::UnsignedLongLong(b),
+            ) => Constant::UnsignedLong(a + b),
             (Constant::Double(a), Constant::Double(b)) => Constant::Double(a + b),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a + b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a + b),
@@ -582,10 +592,6 @@ impl Add for Constant {
             }
             (Constant::Float(a), Constant::Float(b)) => Constant::Float(a + b),
             (Constant::LongDouble(a), Constant::LongDouble(b)) => Constant::LongDouble(a + b),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a + b),
-            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
-                Constant::UnsignedLongLong(a + b)
-            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -597,11 +603,17 @@ impl Sub for Constant {
     fn sub(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Constant::Integer(a), Constant::Integer(b)) => Constant::Integer(a - b),
-            (Constant::Long(a), Constant::Long(b)) => Constant::Long(a - b),
+            (
+                Constant::Long(a) | Constant::LongLong(a),
+                Constant::Long(b) | Constant::LongLong(b),
+            ) => Constant::Long(a - b),
             (Constant::UnsignedInteger(a), Constant::UnsignedInteger(b)) => {
                 Constant::UnsignedInteger(a - b)
             }
-            (Constant::UnsignedLong(a), Constant::UnsignedLong(b)) => Constant::UnsignedLong(a - b),
+            (
+                Constant::UnsignedLong(a) | Constant::UnsignedLongLong(a),
+                Constant::UnsignedLong(b) | Constant::UnsignedLongLong(b),
+            ) => Constant::UnsignedLong(a - b),
             (Constant::Double(a), Constant::Double(b)) => Constant::Double(a - b),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a - b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a - b),
@@ -611,10 +623,6 @@ impl Sub for Constant {
             }
             (Constant::Float(a), Constant::Float(b)) => Constant::Float(a - b),
             (Constant::LongDouble(a), Constant::LongDouble(b)) => Constant::LongDouble(a - b),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a - b),
-            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
-                Constant::UnsignedLongLong(a - b)
-            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -626,11 +634,17 @@ impl Mul for Constant {
     fn mul(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Constant::Integer(a), Constant::Integer(b)) => Constant::Integer(a * b),
-            (Constant::Long(a), Constant::Long(b)) => Constant::Long(a * b),
+            (
+                Constant::Long(a) | Constant::LongLong(a),
+                Constant::Long(b) | Constant::LongLong(b),
+            ) => Constant::Long(a * b),
             (Constant::UnsignedInteger(a), Constant::UnsignedInteger(b)) => {
                 Constant::UnsignedInteger(a * b)
             }
-            (Constant::UnsignedLong(a), Constant::UnsignedLong(b)) => Constant::UnsignedLong(a * b),
+            (
+                Constant::UnsignedLong(a) | Constant::UnsignedLongLong(a),
+                Constant::UnsignedLong(b) | Constant::UnsignedLongLong(b),
+            ) => Constant::UnsignedLong(a * b),
             (Constant::Double(a), Constant::Double(b)) => Constant::Double(a * b),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a * b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a * b),
@@ -640,10 +654,6 @@ impl Mul for Constant {
             }
             (Constant::Float(a), Constant::Float(b)) => Constant::Float(a * b),
             (Constant::LongDouble(a), Constant::LongDouble(b)) => Constant::LongDouble(a * b),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a * b),
-            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
-                Constant::UnsignedLongLong(a * b)
-            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -659,11 +669,17 @@ impl Div for Constant {
         }
         match (self, rhs) {
             (Constant::Integer(a), Constant::Integer(b)) => Constant::Integer(a / b),
-            (Constant::Long(a), Constant::Long(b)) => Constant::Long(a / b),
+            (
+                Constant::Long(a) | Constant::LongLong(a),
+                Constant::Long(b) | Constant::LongLong(b),
+            ) => Constant::Long(a / b),
             (Constant::UnsignedInteger(a), Constant::UnsignedInteger(b)) => {
                 Constant::UnsignedInteger(a / b)
             }
-            (Constant::UnsignedLong(a), Constant::UnsignedLong(b)) => Constant::UnsignedLong(a / b),
+            (
+                Constant::UnsignedLong(a) | Constant::UnsignedLongLong(a),
+                Constant::UnsignedLong(b) | Constant::UnsignedLongLong(b),
+            ) => Constant::UnsignedLong(a / b),
             (Constant::Double(a), Constant::Double(b)) => {
                 // double check the value is not -0.0 (0.0 matches -0.0 in Rust)
                 // if a == 0.0 {
@@ -680,10 +696,6 @@ impl Div for Constant {
             }
             (Constant::Float(a), Constant::Float(b)) => Constant::Float(a / b),
             (Constant::LongDouble(a), Constant::LongDouble(b)) => Constant::LongDouble(a / b),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a / b),
-            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
-                Constant::UnsignedLongLong(a / b)
-            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -699,11 +711,17 @@ impl Rem for Constant {
         }
         match (self, rhs) {
             (Constant::Integer(a), Constant::Integer(b)) => Constant::Integer(a % b),
-            (Constant::Long(a), Constant::Long(b)) => Constant::Long(a % b),
+            (
+                Constant::Long(a) | Constant::LongLong(a),
+                Constant::Long(b) | Constant::LongLong(b),
+            ) => Constant::Long(a % b),
             (Constant::UnsignedInteger(a), Constant::UnsignedInteger(b)) => {
                 Constant::UnsignedInteger(a % b)
             }
-            (Constant::UnsignedLong(a), Constant::UnsignedLong(b)) => Constant::UnsignedLong(a % b),
+            (
+                Constant::UnsignedLong(a) | Constant::UnsignedLongLong(a),
+                Constant::UnsignedLong(b) | Constant::UnsignedLongLong(b),
+            ) => Constant::UnsignedLong(a % b),
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a % b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a % b),
@@ -713,10 +731,6 @@ impl Rem for Constant {
             }
             (Constant::Float(a), Constant::Float(b)) => Constant::Float(a % b),
             (Constant::LongDouble(a), Constant::LongDouble(b)) => Constant::LongDouble(a % b),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a % b),
-            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
-                Constant::UnsignedLongLong(a % b)
-            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -726,9 +740,15 @@ impl PartialOrd for Constant {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
             (Constant::Integer(a), Constant::Integer(b)) => Some(a.cmp(b)),
-            (Constant::Long(a), Constant::Long(b)) => Some(a.cmp(b)),
+            (
+                Constant::Long(a) | Constant::LongLong(a),
+                Constant::Long(b) | Constant::LongLong(b),
+            ) => Some(a.cmp(b)),
             (Constant::UnsignedInteger(a), Constant::UnsignedInteger(b)) => Some(a.cmp(b)),
-            (Constant::UnsignedLong(a), Constant::UnsignedLong(b)) => Some(a.cmp(b)),
+            (
+                Constant::UnsignedLong(a) | Constant::UnsignedLongLong(a),
+                Constant::UnsignedLong(b) | Constant::UnsignedLongLong(b),
+            ) => Some(a.cmp(b)),
             // unordered results return None here, neat!
             (Constant::Double(a), Constant::Double(b)) => a.partial_cmp(b),
             (Constant::Char(a), Constant::Char(b)) => Some(a.cmp(b)),
@@ -737,9 +757,9 @@ impl PartialOrd for Constant {
             (Constant::UnsignedShort(a), Constant::UnsignedShort(b)) => Some(a.cmp(b)),
             (Constant::Float(a), Constant::Float(b)) => a.partial_cmp(b),
             (Constant::LongDouble(a), Constant::LongDouble(b)) => a.partial_cmp(b),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Some(a.cmp(b)),
-            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => Some(a.cmp(b)),
-            _ => unreachable!(), // can only operate on 2 constants of the same type
+            _ => {
+                unreachable!()
+            } // can only operate on 2 constants of the same type
         }
     }
 }
@@ -750,11 +770,17 @@ impl BitAnd for Constant {
     fn bitand(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Constant::Integer(a), Constant::Integer(b)) => Constant::Integer(a & b),
-            (Constant::Long(a), Constant::Long(b)) => Constant::Long(a & b),
+            (
+                Constant::Long(a) | Constant::LongLong(a),
+                Constant::Long(b) | Constant::LongLong(b),
+            ) => Constant::Long(a & b),
             (Constant::UnsignedInteger(a), Constant::UnsignedInteger(b)) => {
                 Constant::UnsignedInteger(a & b)
             }
-            (Constant::UnsignedLong(a), Constant::UnsignedLong(b)) => Constant::UnsignedLong(a & b),
+            (
+                Constant::UnsignedLong(a) | Constant::UnsignedLongLong(a),
+                Constant::UnsignedLong(b) | Constant::UnsignedLongLong(b),
+            ) => Constant::UnsignedLong(a & b),
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a & b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a & b),
@@ -764,10 +790,6 @@ impl BitAnd for Constant {
             }
             (Constant::Float(_a), Constant::Float(_b)) => unreachable!(),
             (Constant::LongDouble(_a), Constant::LongDouble(_b)) => unreachable!(),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a & b),
-            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
-                Constant::UnsignedLongLong(a & b)
-            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -779,11 +801,17 @@ impl BitOr for Constant {
     fn bitor(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Constant::Integer(a), Constant::Integer(b)) => Constant::Integer(a | b),
-            (Constant::Long(a), Constant::Long(b)) => Constant::Long(a | b),
+            (
+                Constant::Long(a) | Constant::LongLong(a),
+                Constant::Long(b) | Constant::LongLong(b),
+            ) => Constant::Long(a | b),
             (Constant::UnsignedInteger(a), Constant::UnsignedInteger(b)) => {
                 Constant::UnsignedInteger(a | b)
             }
-            (Constant::UnsignedLong(a), Constant::UnsignedLong(b)) => Constant::UnsignedLong(a | b),
+            (
+                Constant::UnsignedLong(a) | Constant::UnsignedLongLong(a),
+                Constant::UnsignedLong(b) | Constant::UnsignedLongLong(b),
+            ) => Constant::UnsignedLong(a | b),
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a | b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a | b),
@@ -793,10 +821,6 @@ impl BitOr for Constant {
             }
             (Constant::Float(_a), Constant::Float(_b)) => unreachable!(),
             (Constant::LongDouble(_a), Constant::LongDouble(_b)) => unreachable!(),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a | b),
-            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
-                Constant::UnsignedLongLong(a | b)
-            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -808,11 +832,17 @@ impl BitXor for Constant {
     fn bitxor(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Constant::Integer(a), Constant::Integer(b)) => Constant::Integer(a ^ b),
-            (Constant::Long(a), Constant::Long(b)) => Constant::Long(a ^ b),
+            (
+                Constant::Long(a) | Constant::LongLong(a),
+                Constant::Long(b) | Constant::LongLong(b),
+            ) => Constant::Long(a ^ b),
             (Constant::UnsignedInteger(a), Constant::UnsignedInteger(b)) => {
                 Constant::UnsignedInteger(a ^ b)
             }
-            (Constant::UnsignedLong(a), Constant::UnsignedLong(b)) => Constant::UnsignedLong(a ^ b),
+            (
+                Constant::UnsignedLong(a) | Constant::UnsignedLongLong(a),
+                Constant::UnsignedLong(b) | Constant::UnsignedLongLong(b),
+            ) => Constant::UnsignedLong(a ^ b),
             (Constant::Double(_a), Constant::Double(_b)) => unreachable!(),
             (Constant::Char(a), Constant::Char(b)) => Constant::Char(a ^ b),
             (Constant::UnsignedChar(a), Constant::UnsignedChar(b)) => Constant::UnsignedChar(a ^ b),
@@ -822,10 +852,6 @@ impl BitXor for Constant {
             }
             (Constant::Float(_a), Constant::Float(_b)) => unreachable!(),
             (Constant::LongDouble(_a), Constant::LongDouble(_b)) => unreachable!(),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a ^ b),
-            (Constant::UnsignedLongLong(a), Constant::UnsignedLongLong(b)) => {
-                Constant::UnsignedLongLong(a ^ b)
-            }
             _ => unreachable!(), // can only operate on 2 constants of the same type
         }
     }
@@ -862,7 +888,7 @@ impl Shl for Constant {
             (Constant::UnsignedShort(a), Constant::Integer(b)) => Constant::UnsignedShort(a << b),
             (Constant::Float(_a), Constant::Integer(_b)) => unreachable!(),
             (Constant::LongDouble(_a), Constant::Integer(_b)) => unreachable!(),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a << b),
+            (Constant::LongLong(a), Constant::Integer(b)) => Constant::LongLong(a << b),
             (Constant::UnsignedLongLong(a), Constant::Integer(b)) => {
                 Constant::UnsignedLongLong(a << b)
             }
@@ -902,7 +928,7 @@ impl Shr for Constant {
             (Constant::UnsignedShort(a), Constant::Integer(b)) => Constant::UnsignedShort(a >> b),
             (Constant::Float(_a), Constant::Integer(_b)) => unreachable!(),
             (Constant::LongDouble(_a), Constant::Integer(_b)) => unreachable!(),
-            (Constant::LongLong(a), Constant::LongLong(b)) => Constant::LongLong(a >> b),
+            (Constant::LongLong(a), Constant::Integer(b)) => Constant::LongLong(a >> b),
             (Constant::UnsignedLongLong(a), Constant::Integer(b)) => {
                 Constant::UnsignedLongLong(a >> b)
             }
