@@ -103,7 +103,7 @@ impl Parse<Vec<DeclarationNode>> for VecDeque<Token> {
                 //   struct my_struct val;
                 let is_explicit = struct_has_body
                     || (matches!(self.peek()?, Token::SemiColon)
-                        && struct_declaration_tokens.len() == 1);
+                        && struct_declaration_tokens.len() == 2);
 
                 let struct_declaration: InlineDeclaration =
                     struct_declaration_tokens.parse_struct(!is_explicit, context)?;

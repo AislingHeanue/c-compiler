@@ -3,10 +3,7 @@ use itertools::{process_results, Itertools};
 use super::{expression_node::PopForExpression, Declarator, Parse, ParseContext, Type};
 use crate::compiler::{
     lexer::{Token, TokenVector},
-    parser::{
-        BlockItemNode, DeclaratorsWithAssignment, DeclaratorsWithInline, ExpressionNode,
-        InlineDeclaration,
-    },
+    parser::{BlockItemNode, DeclaratorsWithAssignment, DeclaratorsWithInline, InlineDeclaration},
 };
 use std::{collections::VecDeque, error::Error};
 
@@ -289,18 +286,18 @@ impl ParseDeclarator for VecDeque<Token> {
                     _ => return Err("Invalid specifiers in array declarator in parameter".into()),
                 }
             }
-            let _e: Option<ExpressionNode> = self.parse(context)?;
-            if is_const {
-                declarator = Declarator::ConstPointer(Box::new(declarator))
-            } else {
-                declarator = Declarator::Pointer(Box::new(declarator), is_restrict)
-            }
-            self.expect(Token::CloseSquareBracket)?;
-        } else {
-            let e = self.parse(context)?;
-            declarator = Declarator::Array(Box::new(declarator), e);
-            self.expect(Token::CloseSquareBracket)?;
+            // let _e: Option<ExpressionNode> = self.parse(context)?;
+            // if is_const {
+            //     declarator = Declarator::ConstPointer(Box::new(declarator))
+            // } else {
+            //     declarator = Declarator::Pointer(Box::new(declarator), is_restrict)
+            // }
+            // self.expect(Token::CloseSquareBracket)?;
+            // } else {
         }
+        let e = self.parse(context)?;
+        declarator = Declarator::Array(Box::new(declarator), e);
+        self.expect(Token::CloseSquareBracket)?;
         Ok(declarator)
     }
 }
