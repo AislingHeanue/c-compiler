@@ -399,7 +399,11 @@ impl CodeDisplay for Type {
             Type::UnsignedShort => "uint16".to_string(),
             Type::LongLong => "longer_int64".to_string(),
             Type::UnsignedLongLong => "longer_uint64".to_string(),
-            Type::Enum(v) => format!("enum {{{}}}", v.show(context)),
+            Type::Enum(v) => format!(
+                "enum {{{}{}}}",
+                v.show(&mut context.indent()),
+                context.new_line_start()
+            ),
         }
     }
 }
@@ -434,11 +438,17 @@ impl CodeDisplay for Vec<EnumMember> {
                 format!(
                     "{}{} = {},",
                     context.new_line_start(),
-                    member.name,
+                    if let Some(internal) = &member.internal_name {
+                        internal
+                    } else {
+                        &member.name
+                    },
                     member.init
                 )
             })
             .join("")
+            .trim_end_matches(",")
+            .to_string()
     }
 }
 

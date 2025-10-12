@@ -6,7 +6,7 @@ use crate::compiler::{
         EnumDeclaration, InlineDeclaration, MemberEntry, StructDeclaration, StructInfo,
         StructMember,
     },
-    types::{ComparableStatic, StaticInitialiser, StorageInfo, SymbolInfo, Type},
+    types::{ComparableStatic, EnumMember, StaticInitialiser, StorageInfo, SymbolInfo, Type},
 };
 
 use super::{CheckTypes, ValidateContext};
@@ -155,22 +155,29 @@ impl CheckTypes for StructMember {
 impl CheckTypes for EnumDeclaration {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         for m in self.members.iter_mut() {
-            context.symbols.insert(
-                // if an enum was specified as part of an enum declaration, then it was given an
-                // internal name for this purpose
-                m.internal_name.clone().unwrap(),
-                SymbolInfo {
-                    symbol_type: Type::Integer,
-                    storage: StorageInfo::Constant(StaticInitialiser::Comparable(if m.init == 0 {
-                        ComparableStatic::ZeroBytes(4)
-                    } else {
-                        ComparableStatic::Integer(m.init)
-                    })),
-                    constant: true,
-                    volatile: false,
-                },
-            );
+            m.check_types(context)?;
         }
+        Ok(())
+    }
+}
+
+impl CheckTypes for EnumMember {
+    fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
+        context.symbols.insert(
+            // if an enum was specified as part of an enum declaration, then it was given an
+            // internal name for this purpose
+            self.internal_name.clone().unwrap(),
+            SymbolInfo {
+                symbol_type: Type::Integer,
+                storage: StorageInfo::Constant(StaticInitialiser::Comparable(if self.init == 0 {
+                    ComparableStatic::ZeroBytes(4)
+                } else {
+                    ComparableStatic::Integer(self.init)
+                })),
+                constant: true,
+                volatile: false,
+            },
+        );
         Ok(())
     }
 }

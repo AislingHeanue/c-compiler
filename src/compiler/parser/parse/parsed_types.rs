@@ -1,7 +1,8 @@
 use itertools::Itertools;
 
 use super::{
-    expression_node::PopForExpression, Parse, ParseContext, StructKind, StructMember, Type,
+    expression_node::PopForExpression, Identity, Parse, ParseContext, StructKind, StructMember,
+    Type,
 };
 use crate::compiler::{
     lexer::{Token, TokenVector},
@@ -267,6 +268,16 @@ impl ParseStructDeclaration for VecDeque<Token> {
                     self.expect(Token::CloseBrace)?;
 
                     BlockItemNode::leave_scope(scopes, context);
+
+                    // drag all sub-enums' members into scope here
+                    members.iter().for_each(|m| {
+                        m.get_all_enum_members().iter().for_each(|e| {
+                            context.current_scope_identifiers.insert(
+                                e.name.clone(),
+                                Identity::Variable(e.internal_name.clone().unwrap(), false),
+                            );
+                        })
+                    });
 
                     if members.is_empty() {
                         return Err(
@@ -549,6 +560,25 @@ impl PopForType for VecDeque<Token> {
             }
         }
         Ok((types_deque, specifier_locations, struct_has_body))
+    }
+}
+
+impl StructMember {
+    fn get_all_enum_members(&self) -> Vec<EnumMember> {
+        let mut out = Vec::new();
+        for i in self.inline_declarations.iter() {
+            match i {
+                InlineDeclaration::Enum(e) => out.append(&mut e.members.to_vec()),
+                InlineDeclaration::Struct(s) => {
+                    if let Some(members) = &s.members {
+                        for s_member in members.iter() {
+                            out.append(&mut s_member.get_all_enum_members())
+                        }
+                    }
+                }
+            };
+        }
+        out
     }
 }
 

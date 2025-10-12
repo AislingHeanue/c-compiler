@@ -55,6 +55,7 @@ pub enum StructKind {
 
 #[derive(Clone, Debug)]
 pub enum Identity {
+    // internal name, is_linked
     Variable(String, bool),
     TypeAlias(Type),
 }
