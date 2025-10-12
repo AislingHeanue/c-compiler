@@ -235,6 +235,8 @@ impl Token {
                     Token::IntegerConstant(
                         u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
                     )
+                } else if text.starts_with("0") {
+                    Token::IntegerConstant(u64::from_str_radix(text, 8).unwrap())
                 } else {
                     Token::IntegerConstant(text.parse::<u64>().unwrap())
                 }
@@ -245,6 +247,8 @@ impl Token {
                     Token::LongConstant(
                         u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
                     )
+                } else if text.starts_with("0") {
+                    Token::LongConstant(u64::from_str_radix(text, 8).unwrap())
                 } else {
                     Token::LongConstant(text.parse::<u64>().unwrap())
                 }
@@ -255,6 +259,8 @@ impl Token {
                     Token::LongLongConstant(
                         u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
                     )
+                } else if text.starts_with("0") {
+                    Token::LongLongConstant(u64::from_str_radix(text, 8).unwrap())
                 } else {
                     Token::LongLongConstant(text.parse::<u64>().unwrap())
                 }
@@ -265,6 +271,8 @@ impl Token {
                     Token::UnsignedIntegerConstant(
                         u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
                     )
+                } else if text.starts_with("0") {
+                    Token::UnsignedIntegerConstant(u64::from_str_radix(text, 8).unwrap())
                 } else {
                     Token::UnsignedIntegerConstant(text.parse::<u64>().unwrap())
                 }
@@ -275,6 +283,8 @@ impl Token {
                     Token::UnsignedLongConstant(
                         u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
                     )
+                } else if text.starts_with("0") {
+                    Token::UnsignedLongConstant(u64::from_str_radix(text, 8).unwrap())
                 } else {
                     Token::UnsignedLongConstant(text.parse::<u64>().unwrap())
                 }
@@ -285,6 +295,8 @@ impl Token {
                     Token::UnsignedLongLongConstant(
                         u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
                     )
+                } else if text.starts_with("0") {
+                    Token::UnsignedLongLongConstant(u64::from_str_radix(text, 8).unwrap())
                 } else {
                     Token::UnsignedLongLongConstant(text.parse::<u64>().unwrap())
                 }

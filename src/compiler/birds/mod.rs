@@ -51,9 +51,14 @@ pub enum BirdsInstructionNode {
         String,
     ),
     Label(String),
-    // name, args, dst
-    FunctionCall(String, Vec<BirdsValueNode>, Option<BirdsValueNode>),
-    IndirectFunctionCall(BirdsValueNode, Vec<BirdsValueNode>, Option<BirdsValueNode>),
+    // name, args, dst, is_variadic
+    FunctionCall(String, Vec<BirdsValueNode>, Option<BirdsValueNode>, bool),
+    IndirectFunctionCall(
+        BirdsValueNode,
+        Vec<BirdsValueNode>,
+        Option<BirdsValueNode>,
+        bool,
+    ),
     // src (32 bits) to dst (64 bits)
     SignedExtend(BirdsValueNode, BirdsValueNode),
     // src (64 bits) to dst (32 bits)

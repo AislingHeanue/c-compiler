@@ -144,6 +144,18 @@ impl Type {
         }
     }
 
+    pub fn promote_for_variadic(&self) -> &Type {
+        match self {
+            Type::Char => &Type::Integer,
+            Type::SignedChar => &Type::Integer,
+            Type::UnsignedChar => &Type::Integer,
+            Type::Short => &Type::Integer,
+            Type::UnsignedShort => &Type::Integer,
+            Type::Float => &Type::Double,
+            _ => self,
+        }
+    }
+
     pub fn class(&self) -> Class {
         match self {
             Type::Float => Class::Sse,

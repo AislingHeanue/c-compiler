@@ -517,10 +517,27 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
             }
             ExpressionWithoutType::FunctionCall(name, args) => {
                 let (mut instructions, values): Ve = args.convert(context)?;
+                let type_info = context
+                    .symbols
+                    .get(&name)
+                    .clone()
+                    .unwrap()
+                    .symbol_type
+                    .clone();
+                let is_variadic = if let Type::Function(_, _, is_variadic) = type_info {
+                    is_variadic
+                } else {
+                    unreachable!()
+                };
 
                 let new_dst_type = self.1.as_ref().unwrap();
                 if *new_dst_type == Type::Void {
-                    instructions.push(BirdsInstructionNode::FunctionCall(name, values, None));
+                    instructions.push(BirdsInstructionNode::FunctionCall(
+                        name,
+                        values,
+                        None,
+                        is_variadic,
+                    ));
                     Ok((instructions, BirdsValueNode::Var("!".to_string()).into()))
                 } else {
                     let new_dst = new_temp_variable(self.1.as_ref().unwrap(), context);
@@ -528,6 +545,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         name,
                         values,
                         Some(new_dst.clone()),
+                        is_variadic,
                     ));
                     Ok((instructions, new_dst.into()))
                 }
@@ -631,6 +649,17 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 }
             },
             ExpressionWithoutType::IndirectFunctionCall(left, args) => {
+                let type_info = if let Some(Type::Pointer(ref inner, _)) = left.1 {
+                    *inner.clone()
+                } else {
+                    unreachable!()
+                };
+                let is_variadic = if let Type::Function(_, _, is_variadic) = type_info {
+                    is_variadic
+                } else {
+                    unreachable!()
+                };
+
                 let (mut instructions, left_ptr): E = left.convert(context)?;
                 let (mut instructions_from_args, values): Ve = args.convert(context)?;
                 instructions.append(&mut instructions_from_args);
@@ -638,7 +667,10 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                 let new_dst_type = self.1.as_ref().unwrap();
                 if *new_dst_type == Type::Void {
                     instructions.push(BirdsInstructionNode::IndirectFunctionCall(
-                        left_ptr, values, None,
+                        left_ptr,
+                        values,
+                        None,
+                        is_variadic,
                     ));
                     Ok((instructions, BirdsValueNode::Var("!".to_string()).into()))
                 } else {
@@ -647,6 +679,7 @@ impl Convert<(Vec<BirdsInstructionNode>, Destination)> for ExpressionNode {
                         left_ptr,
                         values,
                         Some(new_dst.clone()),
+                        is_variadic,
                     ));
                     Ok((instructions, new_dst.into()))
                 }

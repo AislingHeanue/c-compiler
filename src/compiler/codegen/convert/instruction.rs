@@ -469,11 +469,17 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
                 ]
             }
             BirdsInstructionNode::Label(s) => vec![Instruction::Label(s)],
-            BirdsInstructionNode::FunctionCall(name, args, dst) => {
+            BirdsInstructionNode::FunctionCall(name, args, dst, is_variadic) => {
                 let mut instructions = Vec::new();
 
                 let (len_stack_args, stack_padding, returns) =
-                    Instruction::setup_for_function_call(&mut instructions, args, &dst, context)?;
+                    Instruction::setup_for_function_call(
+                        &mut instructions,
+                        args,
+                        &dst,
+                        is_variadic,
+                        context,
+                    )?;
 
                 instructions.push(Instruction::Call(name));
 
@@ -487,12 +493,18 @@ impl Convert<Vec<Instruction>> for BirdsInstructionNode {
 
                 instructions
             }
-            BirdsInstructionNode::IndirectFunctionCall(ptr, args, dst) => {
+            BirdsInstructionNode::IndirectFunctionCall(ptr, args, dst, is_variadic) => {
                 let mut instructions = Vec::new();
                 let left_ptr = ptr.convert(context)?;
 
                 let (len_stack_args, stack_padding, returns) =
-                    Instruction::setup_for_function_call(&mut instructions, args, &dst, context)?;
+                    Instruction::setup_for_function_call(
+                        &mut instructions,
+                        args,
+                        &dst,
+                        is_variadic,
+                        context,
+                    )?;
 
                 // instructions.push(Instruction::Mov(
                 //     AssemblyType::Quadword,
@@ -1077,6 +1089,7 @@ impl Instruction {
         instructions: &mut Vec<Instruction>,
         args: Vec<BirdsValueNode>,
         dst: &Option<BirdsValueNode>,
+        is_variadic: bool,
         context: &mut ConvertContext,
     ) -> Result<(usize, i64, ReturnInfo), Box<dyn Error>> {
         let returns = if let Some(ref d) = dst {
@@ -1177,6 +1190,8 @@ impl Instruction {
             }
         }
 
+        let args_len = args.double.len() as u64;
+
         for (i, (arg, arg_type)) in args.double.into_iter().enumerate() {
             match arg_type {
                 AssemblyType::Float => {
@@ -1203,6 +1218,14 @@ impl Instruction {
                 }
                 _ => return Err("Invalid type stored in SSE register".into()),
             }
+        }
+
+        if is_variadic {
+            instructions.push(Instruction::Mov(
+                AssemblyType::Byte,
+                Operand::Imm(ImmediateValue::Unsigned(args_len)),
+                Operand::Reg(Register::AX),
+            ))
         }
 
         for (arg, _is_signed, arg_type) in args.stack.into_iter().rev() {

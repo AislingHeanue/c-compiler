@@ -115,7 +115,10 @@ impl CheckTypes for ExpressionNode {
                                     arg.convert_type_by_assignment(param, context)?;
                                 }
                                 EitherOrBoth::Left(arg) => {
-                                    arg.check_types_and_convert(context)?; // args is always longed
+                                    arg.check_types_and_convert(context)?; // args is always longer
+                                    if *is_variadic {
+                                        arg.promote_for_variadic(context)?;
+                                    }
                                 }
                                 EitherOrBoth::Right(_) => unreachable!(),
                             }
@@ -728,6 +731,16 @@ impl ExpressionNode {
     // promote char and unsigned char to signed int for all unary, binary and switch expressions
     pub fn promote(&mut self, _context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
         let t = self.1.as_ref().unwrap().promote().clone();
+        self.convert_type(&t);
+
+        Ok(())
+    }
+
+    pub fn promote_for_variadic(
+        &mut self,
+        _context: &mut ValidateContext,
+    ) -> Result<(), Box<dyn Error>> {
+        let t = self.1.as_ref().unwrap().promote_for_variadic().clone();
         self.convert_type(&t);
 
         Ok(())

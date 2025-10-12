@@ -74,8 +74,8 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 Self::replace_value(right, &reaching_copies);
                 Some(instruction)
             }
-            BirdsInstructionNode::IndirectFunctionCall(_, ref mut args, _)
-            | BirdsInstructionNode::FunctionCall(_, ref mut args, _) => {
+            BirdsInstructionNode::IndirectFunctionCall(_, ref mut args, _, _)
+            | BirdsInstructionNode::FunctionCall(_, ref mut args, _, _) => {
                 for arg in args.iter_mut() {
                     Self::replace_value(arg, &reaching_copies);
                 }
@@ -157,8 +157,8 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                         reaching_copies.push((src.clone(), dst.clone()));
                     }
                 }
-                BirdsInstructionNode::FunctionCall(_, _, maybe_dst)
-                | BirdsInstructionNode::IndirectFunctionCall(_, _, maybe_dst) => {
+                BirdsInstructionNode::FunctionCall(_, _, maybe_dst, _)
+                | BirdsInstructionNode::IndirectFunctionCall(_, _, maybe_dst ,_) => {
                     for (i, copy) in reaching_copies.clone().iter().enumerate().rev() {
                         if let Some(ref dst) = maybe_dst {
                             if copy.0 == *dst || copy.1 == *dst {

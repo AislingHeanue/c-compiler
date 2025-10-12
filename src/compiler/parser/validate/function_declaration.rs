@@ -76,11 +76,12 @@ impl CheckTypes for FunctionDeclaration {
 
         // now that the type has been updated, drop the mutable reference to function_type
         let this_type = &self.function_type;
-        let arg_types = if let Type::Function(_, ref arg_types, _) = this_type {
-            arg_types
-        } else {
-            unreachable!()
-        };
+        let (arg_types, is_variadic) =
+            if let Type::Function(_, ref arg_types, ref is_variadic) = this_type {
+                (arg_types, is_variadic)
+            } else {
+                unreachable!()
+            };
 
         if let Some(old_symbol_info) = context.symbols.get(&self.name) {
             if *this_type != old_symbol_info.symbol_type {
@@ -130,6 +131,7 @@ impl CheckTypes for FunctionDeclaration {
             for (param, arg) in self.params.iter().zip(arg_types.iter()) {
                 let converted_arg = match arg {
                     Type::Array(t, _size) => Type::Pointer(t.clone(), false),
+                    Type::Float if *is_variadic => Type::Double,
                     _ => arg.clone(),
                 };
                 context.symbols.insert(

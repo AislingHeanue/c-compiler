@@ -67,9 +67,9 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                     Some(instruction)
                 }
             }
-            BirdsInstructionNode::FunctionCall(_, _, _)
+            BirdsInstructionNode::FunctionCall(_, _, _, _)
             // | BirdsInstructionNode::VaArg(_, _) // never kill a VaArg
-            | BirdsInstructionNode::IndirectFunctionCall(_, _, _)
+            | BirdsInstructionNode::IndirectFunctionCall(_, _, _, _)
             | BirdsInstructionNode::Return(_)
             | BirdsInstructionNode::Jump(_)
             | BirdsInstructionNode::JumpZero(_, _)
@@ -108,8 +108,8 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 | BirdsInstructionNode::CopyFromOffset(_, _, dst)
                 | BirdsInstructionNode::Copy(_, dst)
                 | BirdsInstructionNode::VaStart(dst)
-                | BirdsInstructionNode::FunctionCall(_, _, Some(dst))
-                | BirdsInstructionNode::IndirectFunctionCall(_, _, Some(dst))
+                | BirdsInstructionNode::FunctionCall(_, _, Some(dst), _)
+                | BirdsInstructionNode::IndirectFunctionCall(_, _, Some(dst), _)
                 | BirdsInstructionNode::Binary(_, _, _, dst) => {
                     for (i, value) in live_variables.clone().iter().enumerate().rev() {
                         if value == dst {
@@ -126,8 +126,8 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                 | BirdsInstructionNode::JumpNotZero(_, _)
                 | BirdsInstructionNode::JumpCondition(_, _, _, _)
                 | BirdsInstructionNode::Label(_)
-                | BirdsInstructionNode::FunctionCall(_, _, None)
-                | BirdsInstructionNode::IndirectFunctionCall(_, _, None)
+                | BirdsInstructionNode::FunctionCall(_, _, None, _)
+                | BirdsInstructionNode::IndirectFunctionCall(_, _, None, _)
                 | BirdsInstructionNode::CopyToOffset(_, _, _) => {}
             }
             match &instruction.0 {
@@ -179,7 +179,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                         live_variables.push(right.clone())
                     }
                 }
-                BirdsInstructionNode::FunctionCall(_, args, _) => {
+                BirdsInstructionNode::FunctionCall(_, args, _, _) => {
                     for arg in args.iter() {
                         if matches!(arg, BirdsValueNode::Var(_)) && !live_variables.contains(arg) {
                             live_variables.push(arg.clone())
@@ -196,7 +196,7 @@ impl FlowGraph<BirdsInstructionNode, BirdsInstructionInfo> {
                         }
                     }
                 }
-                BirdsInstructionNode::IndirectFunctionCall(src, args, _) => {
+                BirdsInstructionNode::IndirectFunctionCall(src, args, _, _) => {
                     if matches!(src, BirdsValueNode::Var(_)) && !live_variables.contains(src) {
                         live_variables.push(src.clone())
                     }
