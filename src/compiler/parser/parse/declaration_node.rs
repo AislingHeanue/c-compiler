@@ -96,46 +96,44 @@ impl Parse<Vec<DeclarationNode>> for VecDeque<Token> {
                 // let struct_declaration = self.parse(context)?;
                 let mut struct_declaration_tokens = self.pop_tokens_for_type(context)?.0;
 
-                match self.peek()? {
-                    Token::SemiColon => {
-                        let struct_declaration =
-                            struct_declaration_tokens.parse_struct(false, context)?;
-                        if !struct_declaration_tokens.is_empty() {
-                            return Err(
-                                "Leftover tokens parsing an explicit struct declaration".into()
-                            );
-                        }
+                // formats which are explicit declarations of a new struct tag:
+                //   struct my_struct {...} val;
+                //   struct my_struct;
+                //  not
+                //   struct my_struct val;
+                let is_explicit = struct_has_body
+                    || (matches!(self.peek()?, Token::SemiColon)
+                        && struct_declaration_tokens.len() == 1);
 
-                        self.expect(Token::SemiColon)?;
-                        return Ok(vec![struct_declaration.into_declaration()]);
-                    }
-                    _ => {
-                        // this is a variable declaration, so continue to parse the declarator and
-                        // the init
+                let struct_declaration: InlineDeclaration =
+                    struct_declaration_tokens.parse_struct(!is_explicit, context)?;
+                if !struct_declaration_tokens.is_empty()
+                    || !matches!(self.peek()?, Token::SemiColon)
+                {
+                    struct_declaration_tokens.append(self);
+                    *self = struct_declaration_tokens;
 
-                        let struct_declaration =
-                            struct_declaration_tokens.parse_struct(!struct_has_body, context)?;
-                        if !struct_declaration_tokens.is_empty() {
-                            return Err("Leftover tokens parsing a struct declaration".into());
-                        }
-                        let mut all_declarations = vec![struct_declaration.clone()];
+                    // duplicates the logic below
+                    let mut all_declarations = vec![struct_declaration.clone()];
 
-                        let (declarators, mut variable_structs): DeclaratorsWithInline =
-                            self.parse(context)?;
+                    let (declarators, mut variable_structs): DeclaratorsWithInline =
+                        self.parse(context)?;
 
-                        all_declarations.append(&mut variable_structs);
+                    all_declarations.append(&mut variable_structs);
 
-                        match struct_declaration {
-                            InlineDeclaration::Struct(s) => (
-                                Type::Struct(s.name.clone(), s.is_union),
-                                declarators,
-                                all_declarations,
-                            ),
-                            InlineDeclaration::Enum(m) => {
-                                (Type::Enum(m.members.clone()), declarators, all_declarations)
-                            }
+                    match struct_declaration {
+                        InlineDeclaration::Struct(s) => (
+                            Type::Struct(s.name.clone(), s.is_union),
+                            declarators,
+                            all_declarations,
+                        ),
+                        InlineDeclaration::Enum(m) => {
+                            (Type::Enum(m.members.clone()), declarators, all_declarations)
                         }
                     }
+                } else {
+                    self.expect(Token::SemiColon)?;
+                    return Ok(vec![struct_declaration.into_declaration()]);
                 }
             }
             _ => self.parse(context)?,

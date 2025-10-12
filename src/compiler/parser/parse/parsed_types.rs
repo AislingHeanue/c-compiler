@@ -304,10 +304,11 @@ impl Parse<Vec<StructMember>> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<Vec<StructMember>, Box<dyn Error>> {
         let mut type_tokens = self.pop_tokens_for_type(context)?.0;
         let mut out = Vec::new();
-        match (type_tokens.front(), self.peek()?) {
+        match (type_tokens.front(), type_tokens.back(), self.peek()?) {
             // this deals with anonymous/inline structs which don't have a field name
             (
                 Some(Token::KeywordStruct | Token::KeywordUnion | Token::KeywordEnum),
+                Some(Token::CloseBrace),
                 Token::SemiColon,
             ) => {
                 let embedded_struct_declaration: InlineDeclaration =
@@ -339,20 +340,6 @@ impl Parse<Vec<StructMember>> for VecDeque<Token> {
                     DeclaratorsWithAssignment,
                     Vec<InlineDeclaration>,
                 ) = self.parse(context)?;
-
-                // bitfield specifiers
-                // we don't support these (at least not for the time being), so they are
-                // silently ignored.
-                // let num_bits = if let Token::Colon = self.peek()? {
-                //     self.expect(Token::Colon)?;
-                //     if let Token::IntegerConstant(num) = self.read()? {
-                //         Some(num as u32)
-                //     } else {
-                //         return Err("Bitfield specifier in a struct member must be followed by an integer constant".into());
-                //     }
-                // } else {
-                //     None
-                // };
 
                 self.expect(Token::SemiColon)?;
                 let declarator_output = declarators.apply_to_type(base_type, context)?;
@@ -428,10 +415,12 @@ impl Parse<OutputWithInline> for VecDeque<Token> {
             false
         };
 
-        let mut declarator_deque =
-            self.pop_tokens_for_expression(context.parsing_param, context.parsing_param, context)?;
-
         while !types_deque.is_empty() {
+            let mut declarator_deque = self.pop_tokens_for_expression(
+                context.parsing_param,
+                context.parsing_param,
+                context,
+            )?;
             // try and get a valid type and declarator for the given expression
             let mut new_types_deque = types_deque.clone();
             let mut new_declarator_deque = declarator_deque.clone();
@@ -455,14 +444,16 @@ impl Parse<OutputWithInline> for VecDeque<Token> {
             // declarator, so try again with a different split
 
             println!(
-                "Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?} and {:?}",
+                "WARNING: Parsing failure, trying another combination, type: {:?} => {:?} declarator: {:?} => {:?} and {:?}",
                 types_deque,type_result, declarator_deque, declarator_result, new_declarator_deque
             );
             let move_this_to_the_declarator = types_deque.pop_back().unwrap();
             declarator_deque.push_front(move_this_to_the_declarator);
+            declarator_deque.append(self);
+            *self = declarator_deque;
         }
 
-        Err(format!("Declaration could not be reconciled to match both a type and a declarator, types: {:?}", declarator_deque).into())
+        Err(format!("Declaration could not be reconciled to match both a type and a declarator, types: {:?}", self).into())
         // Ok((this_type, storage, declarator))
     }
 }

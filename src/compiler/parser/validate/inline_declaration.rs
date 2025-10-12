@@ -32,6 +32,7 @@ impl CheckTypes for StructDeclaration {
         } else {
             return Ok(());
         };
+        // println!("STRUCT MEMBERS {:#?}", members);
 
         if context.structs.contains_key(&self.name) {
             return Err(format!(
