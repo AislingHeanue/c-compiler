@@ -54,8 +54,8 @@ lazy_static! {
             let entry:&str = match token {
                 PreprocessorToken::Identifier(_) => r"^[a-zA-Z_]\w*\b",
                 PreprocessorToken::Number(_) => r#"\.?[0-9](?:[0-9a-zA-Z_\.]|[eEpP][\+\-])*(?:[lL]?[lL]?[uU]?|[uU][lL]?[lL]?)"#,
-                PreprocessorToken::CharacterConstant(_) => r#"'(?:[^'\\\n]|\\['"?\\abfnrtv0-9]+)'"#,
-                PreprocessorToken::StringLiteral(_) => r#""(?:[^"\\\n]|\\['"?\\abfnrtv])*""#,
+                PreprocessorToken::CharacterConstant(_) => r#"'(?:[^'\\\n]|\\['"?\\xabfnrtv0-9a-fA-F]+)'"#,
+                PreprocessorToken::StringLiteral(_) => r#""(?:[^"\\\n]|\\['"?\\abfnrtv]|\\x[0-9]+)*""#,
                 PreprocessorToken::KeywordDefined => r"defined\b",
 
                 // every punctuation character in ASCII except `, \, $ and @
@@ -141,10 +141,16 @@ impl PreprocessorToken {
             r"\t" => '\t'.into(),
             r"\v" => 11, //vertical tab
             _ => {
-                if let Ok(num) = text[1..].parse::<i8>() {
-                    num.try_into().unwrap()
+                if text[1..].starts_with("x") {
+                    i8::from_str_radix(&text[2..], 16)
+                        .unwrap()
+                        .try_into()
+                        .unwrap()
                 } else {
-                    panic!("Char must be a valid ASCII 7-bit value")
+                    i8::from_str_radix(&text[1..], 8)
+                        .unwrap()
+                        .try_into()
+                        .expect("Char must be a valid ASCII 7-bit value")
                 }
             }
         };
@@ -174,8 +180,14 @@ impl PreprocessorToken {
 
     pub fn parse_string(mut text: String) -> Vec<i8> {
         let mut out = Vec::new();
+        let number_re = Regex::new(r"(\d+)").unwrap();
         while !text.is_empty() {
-            if text.starts_with(r"\") {
+            if text.starts_with(r"\x") {
+                let m = number_re.find(&text[2..]).unwrap();
+                let (substring, new_text) = text.split_at(2 + m.len());
+                out.push(Self::parse_character(substring));
+                text = new_text.to_string();
+            } else if text.starts_with(r"\") {
                 let (substring, new_text) = text.split_at(2);
                 out.push(Self::parse_character(substring));
                 text = new_text.to_string();
