@@ -307,13 +307,13 @@ impl Parse<Vec<StructMember>> for VecDeque<Token> {
                         member_type: Type::Struct(s.name.clone(), s.is_union),
                         name: None,
                         inline_declarations: vec![embedded_struct_declaration],
-                        _num_bits: None,
+                        // _num_bits: None,
                     }),
                     InlineDeclaration::Enum(ref m) => out.push(StructMember {
                         member_type: Type::Enum(m.members.clone()),
                         name: None,
                         inline_declarations: vec![embedded_struct_declaration],
-                        _num_bits: None,
+                        // _num_bits: None,
                     }),
                 }
                 Ok(out)
@@ -332,16 +332,16 @@ impl Parse<Vec<StructMember>> for VecDeque<Token> {
                 // bitfield specifiers
                 // we don't support these (at least not for the time being), so they are
                 // silently ignored.
-                let num_bits = if let Token::Colon = self.peek()? {
-                    self.expect(Token::Colon)?;
-                    if let Token::IntegerConstant(num) = self.read()? {
-                        Some(num as u32)
-                    } else {
-                        return Err("Bitfield specifier in a struct member must be followed by an integer constant".into());
-                    }
-                } else {
-                    None
-                };
+                // let num_bits = if let Token::Colon = self.peek()? {
+                //     self.expect(Token::Colon)?;
+                //     if let Token::IntegerConstant(num) = self.read()? {
+                //         Some(num as u32)
+                //     } else {
+                //         return Err("Bitfield specifier in a struct member must be followed by an integer constant".into());
+                //     }
+                // } else {
+                //     None
+                // };
 
                 self.expect(Token::SemiColon)?;
                 let declarator_output = declarators.apply_to_type(base_type, context)?;
@@ -357,7 +357,7 @@ impl Parse<Vec<StructMember>> for VecDeque<Token> {
                             member_type: declarator_output_member.out_type,
                             name: declarator_output_member.name,
                             inline_declarations: inline_declarations.clone(),
-                            _num_bits: num_bits,
+                            // _num_bits: num_bits,
                         });
                     }
                 }
@@ -418,7 +418,7 @@ impl Parse<OutputWithInline> for VecDeque<Token> {
         };
 
         let mut declarator_deque =
-            self.pop_tokens_for_expression(context.parsing_param, context)?;
+            self.pop_tokens_for_expression(context.parsing_param, context.parsing_param, context)?;
 
         while !types_deque.is_empty() {
             // try and get a valid type and declarator for the given expression

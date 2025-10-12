@@ -78,7 +78,7 @@ pub struct StructMember {
     pub member_type: Type,
     pub name: Option<String>,
     pub inline_declarations: Vec<InlineDeclaration>,
-    pub _num_bits: Option<u32>,
+    // pub _num_bits: Option<u32>,
 }
 
 #[derive(Debug, Clone)]

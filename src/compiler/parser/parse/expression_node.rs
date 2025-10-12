@@ -703,7 +703,8 @@ impl ExpressionWithoutType {
 pub trait PopForExpression {
     fn pop_tokens_for_expression(
         &mut self,
-        is_param: bool,
+        allow_empty: bool,
+        split_on_comma: bool,
         context: &mut ParseContext,
         // type tokens and storage class tokens
     ) -> Result<VecDeque<Token>, Box<dyn Error>>;
@@ -711,10 +712,12 @@ pub trait PopForExpression {
 impl PopForExpression for VecDeque<Token> {
     fn pop_tokens_for_expression(
         &mut self,
-        is_param: bool,
+        allow_empty: bool,
+        split_on_comma: bool,
         _context: &mut ParseContext,
         // type tokens and storage class tokens
     ) -> Result<VecDeque<Token>, Box<dyn Error>> {
+        // println!("{:?} {}", self, is_param);
         let mut out = VecDeque::new();
         let mut paren_nesting = 0;
         let mut brace_nesting = 0;
@@ -726,14 +729,14 @@ impl PopForExpression for VecDeque<Token> {
                 && square_nesting == 0
                 && brace_nesting == 0
                 && out.back() != Some(&Token::Assignment)
-                && (is_param || !out.is_empty())
+                && (allow_empty || !out.is_empty())
                 && (matches!(
                     self.peek()?,
                     Token::CloseParen
                         | Token::CloseSquareBracket
                         | Token::OpenBrace
                         | Token::SemiColon
-                ) || (is_param && matches!(self.peek()?, Token::Comma)))))
+                ) || (split_on_comma && matches!(self.peek()?, Token::Comma)))))
         {
             match self.peek()? {
                 Token::OpenParen => paren_nesting += 1,
@@ -746,6 +749,7 @@ impl PopForExpression for VecDeque<Token> {
             }
             out.push_back(self.read()?);
         }
+        // println!("GOT {:?}", out);
         Ok(out)
     }
 }

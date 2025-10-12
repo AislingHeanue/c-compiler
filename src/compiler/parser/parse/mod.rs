@@ -167,18 +167,28 @@ impl From<InitialiserWithoutType> for InitialiserNode {
 impl Parse<Constant> for VecDeque<Token> {
     fn parse(&mut self, _context: &mut ParseContext) -> Result<Constant, Box<dyn Error>> {
         match self.read()? {
-            Token::IntegerConstant(v) => Ok(if v <= i32::MAX.into() {
+            Token::IntegerConstant(v) => Ok(if v <= i32::MAX.try_into().unwrap() {
                 Constant::Integer(v.try_into().unwrap())
+            } else if v <= i64::MAX.try_into().unwrap() {
+                Constant::Long(v.try_into().unwrap())
             } else {
-                Constant::Long(v)
+                Constant::UnsignedLong(v)
             }),
             Token::UnsignedIntegerConstant(v) => Ok(if v <= u32::MAX.into() {
                 Constant::UnsignedInteger(v.try_into().unwrap())
             } else {
                 Constant::UnsignedLong(v)
             }),
-            Token::LongConstant(v) => Ok(Constant::Long(v)),
-            Token::LongLongConstant(v) => Ok(Constant::LongLong(v)),
+            Token::LongConstant(v) => Ok(if v <= i64::MAX.try_into().unwrap() {
+                Constant::Long(v.try_into().unwrap())
+            } else {
+                Constant::UnsignedLong(v)
+            }),
+            Token::LongLongConstant(v) => Ok(if v <= i64::MAX.try_into().unwrap() {
+                Constant::LongLong(v.try_into().unwrap())
+            } else {
+                Constant::UnsignedLongLong(v)
+            }),
             Token::UnsignedLongConstant(v) => Ok(Constant::UnsignedLong(v)),
             Token::UnsignedLongLongConstant(v) => Ok(Constant::UnsignedLongLong(v)),
             Token::FloatConstant(v) => Ok(Constant::Float(v)),

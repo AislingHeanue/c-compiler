@@ -188,8 +188,8 @@ impl ConditionNode {
             BinaryOp::ShiftRight => left >> right,
             BinaryOp::And => (left != 0 && right != 0) as i64,
             BinaryOp::Or => (left != 0 || right != 0) as i64,
-            BinaryOp::BitwiseAnd => left ^ right,
-            BinaryOp::BitwiseOr => left ^ right,
+            BinaryOp::BitwiseAnd => left & right,
+            BinaryOp::BitwiseOr => left | right,
             BinaryOp::BitwiseXor => left ^ right,
             BinaryOp::Greater => (left > right) as i64,
             BinaryOp::Less => (left < right) as i64,
@@ -407,6 +407,10 @@ fn parse_primary(
             expression
         }
         PreprocessorToken::CharacterConstant(i) => ConditionNode::Number(i.into()),
+        PreprocessorToken::Number(i) if i.starts_with("0x") => {
+            let raw = i.trim_start_matches("0x");
+            ConditionNode::Number(i64::from_str_radix(raw, 16)?)
+        }
         PreprocessorToken::Number(i) => {
             ConditionNode::Number(i.trim_end_matches(['l', 'L', 'u', 'U']).parse::<i64>()?)
         }

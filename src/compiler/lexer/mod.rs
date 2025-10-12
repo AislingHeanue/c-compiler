@@ -56,9 +56,10 @@ pub enum Token {
     ShiftRightAssign,
 
     Identifier(String),
-    IntegerConstant(i64),
-    LongConstant(i64),
-    LongLongConstant(i64),
+    // u64 value and sign
+    IntegerConstant(u64),
+    LongConstant(u64),
+    LongLongConstant(u64),
     FloatConstant(f32),
     DoubleConstant(f64),
     LongDoubleConstant(f64),
@@ -232,30 +233,30 @@ impl Token {
             Token::IntegerConstant(_) => {
                 if text.starts_with("0x") {
                     Token::IntegerConstant(
-                        i64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
+                        u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
                     )
                 } else {
-                    Token::IntegerConstant(text.parse::<i64>().unwrap())
+                    Token::IntegerConstant(text.parse::<u64>().unwrap())
                 }
             }
             Token::LongConstant(_) => {
                 let text = text.trim_end_matches(['l', 'L']);
                 if text.starts_with("0x") {
                     Token::LongConstant(
-                        i64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
+                        u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
                     )
                 } else {
-                    Token::LongConstant(text.parse::<i64>().unwrap())
+                    Token::LongConstant(text.parse::<u64>().unwrap())
                 }
             }
             Token::LongLongConstant(_) => {
                 let text = text.trim_end_matches(['l', 'L']);
                 if text.starts_with("0x") {
                     Token::LongLongConstant(
-                        i64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
+                        u64::from_str_radix(text.strip_prefix("0x").unwrap(), 16).unwrap(),
                     )
                 } else {
-                    Token::LongLongConstant(text.parse::<i64>().unwrap())
+                    Token::LongLongConstant(text.parse::<u64>().unwrap())
                 }
             }
             Token::UnsignedIntegerConstant(_) => {

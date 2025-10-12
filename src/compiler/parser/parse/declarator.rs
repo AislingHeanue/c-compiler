@@ -30,7 +30,7 @@ impl Parse<DeclaratorsWithInline> for VecDeque<Token> {
                 }
                 Token::Assignment if declarators.0.last().unwrap().1.is_empty() => {
                     self.expect(Token::Assignment)?;
-                    let init_tokens = self.pop_tokens_for_expression(false, context)?;
+                    let init_tokens = self.pop_tokens_for_expression(false, true, context)?;
                     declarators.0.last_mut().unwrap().1 = init_tokens;
                 }
                 // ignore bit fields
@@ -241,7 +241,7 @@ impl ParseDeclarator for VecDeque<Token> {
     ) -> Result<(Type, DeclaratorsWithAssignment, Vec<InlineDeclaration>), Box<dyn Error>> {
         context.parsing_param = true;
         let out = self.parse(context);
-        context.parsing_param = true;
+        context.parsing_param = false;
         out
     }
 
