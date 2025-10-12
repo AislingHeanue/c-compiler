@@ -57,6 +57,7 @@ pub enum Constant {
     LongDouble(f64),
     Char(i8),
     UnsignedChar(u8),
+    AddressOf(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -148,6 +149,7 @@ pub enum ComparableStatic {
     ZeroBytes(u64),
     String(Vec<i8>, bool),
     Pointer(String),
+    StaticPointer(String),
 }
 
 #[derive(Debug, Clone)]

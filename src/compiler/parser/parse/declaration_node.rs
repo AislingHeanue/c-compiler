@@ -21,7 +21,8 @@ impl Parse<Vec<DeclarationNode>> for VecDeque<Token> {
     ) -> Result<Vec<DeclarationNode>, Box<dyn Error>> {
         // take the storage class out of the type definition (assuming there is only one, since
         // otherwise that's an error)
-        let (_, specifier_locations) = self.clone().pop_tokens_for_type(context)?;
+        let (_, specifier_locations, struct_has_body) =
+            self.clone().pop_tokens_for_type(context)?;
 
         let mut is_inline = false;
         let mut is_constant = false;
@@ -82,7 +83,6 @@ impl Parse<Vec<DeclarationNode>> for VecDeque<Token> {
                         inline_declarations: struct_declarations.clone(),
                     }));
                 }
-                self.expect(Token::SemiColon)?;
                 return Ok(all_out);
             }
             Token::KeywordStruct | Token::KeywordUnion | Token::KeywordEnum => {
@@ -114,7 +114,7 @@ impl Parse<Vec<DeclarationNode>> for VecDeque<Token> {
                         // the init
 
                         let struct_declaration =
-                            struct_declaration_tokens.parse_struct(true, context)?;
+                            struct_declaration_tokens.parse_struct(!struct_has_body, context)?;
                         if !struct_declaration_tokens.is_empty() {
                             return Err("Leftover tokens parsing a struct declaration".into());
                         }

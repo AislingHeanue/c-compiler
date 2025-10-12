@@ -106,6 +106,7 @@ impl BirdsValueNode {
                 Constant::UnsignedShort(c) => Some((*c).into()),
                 Constant::LongLong(c) => Some((*c).try_into().unwrap()),
                 Constant::UnsignedLongLong(c) => Some((*c).try_into().unwrap()),
+                Constant::AddressOf(_) => unreachable!(),
             },
             BirdsValueNode::Var(_) => None,
         }

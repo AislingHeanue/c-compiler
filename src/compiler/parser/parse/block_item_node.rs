@@ -79,7 +79,7 @@ impl BlockItemNode {
     pub fn enter_scope(context: &mut ParseContext) -> Scopes {
         // println!(
         //     "enter {:?} {:?}",
-        //     context.outer_scope_identifiers, context.current_scope_identifiers
+        //     context.outer_struct_names, context.current_struct_names
         // );
         let original_current_scope_variables = context.current_scope_identifiers.clone();
         let original_outer_scope_variables = context.outer_scope_identifiers.clone();

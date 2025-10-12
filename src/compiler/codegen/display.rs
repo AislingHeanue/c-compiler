@@ -331,6 +331,10 @@ impl CodeDisplay for StaticInitialiser {
                 let label_start = if context.is_mac { "L" } else { ".L" };
                 format!(".quad {}{}", label_start, l)
             }
+            StaticInitialiser::Comparable(ComparableStatic::StaticPointer(l)) => {
+                let label_start = if context.is_mac { "_" } else { "" };
+                format!(".quad {}{}", label_start, l)
+            }
 
             StaticInitialiser::Float(f) => {
                 let mut ryu_buffer = Buffer::new();

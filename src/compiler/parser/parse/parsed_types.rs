@@ -377,7 +377,7 @@ impl Parse<EnumMember> for VecDeque<Token> {
         let value = if let Token::Assignment = self.peek()? {
             self.expect(Token::Assignment)?;
             let c: ExpressionWithoutType = self.parse(context)?;
-            c.fold_to_constant()?.value_int()
+            c.fold_to_constant(&None)?.value_int()
         } else {
             context.last_enum_number + 1
         };
@@ -398,7 +398,8 @@ impl Parse<EnumMember> for VecDeque<Token> {
 pub type OutputWithInline = (Type, DeclaratorsWithAssignment, Vec<InlineDeclaration>);
 impl Parse<OutputWithInline> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<OutputWithInline, Box<dyn Error>> {
-        let (mut types_deque, specifier_locations) = self.pop_tokens_for_type(context)?;
+        let (mut types_deque, specifier_locations, _struct_has_body) =
+            self.pop_tokens_for_type(context)?;
 
         // DeclarationNode should already filter out any instances of static and extern from this
         // list. Otherwise thrown an error here since that means there are either too many
@@ -416,7 +417,8 @@ impl Parse<OutputWithInline> for VecDeque<Token> {
             false
         };
 
-        let mut declarator_deque = self.pop_tokens_for_expression(context)?;
+        let mut declarator_deque =
+            self.pop_tokens_for_expression(context.parsing_param, context)?;
 
         while !types_deque.is_empty() {
             // try and get a valid type and declarator for the given expression
@@ -454,7 +456,8 @@ impl Parse<OutputWithInline> for VecDeque<Token> {
     }
 }
 
-pub type TypeResults = (VecDeque<Token>, HashMap<SpecifierKind, usize>);
+// third arg is has-struct-body
+pub type TypeResults = (VecDeque<Token>, HashMap<SpecifierKind, usize>, bool);
 #[derive(PartialEq, Eq, Hash)]
 pub enum SpecifierKind {
     Const,
@@ -478,6 +481,7 @@ impl PopForType for VecDeque<Token> {
     ) -> Result<TypeResults, Box<dyn Error>> {
         let mut types_deque = VecDeque::new();
         let mut specifier_locations = HashMap::new();
+        let mut struct_has_body = false;
         while self.peek()?.is_start_of_declaration(context) {
             match self.peek()? {
                 Token::KeywordStruct | Token::KeywordUnion | Token::KeywordEnum => {
@@ -492,6 +496,7 @@ impl PopForType for VecDeque<Token> {
                         types_deque.push_back(self.read()?); // read the name
                     }
                     if self.peek()? == Token::OpenBrace {
+                        struct_has_body = true;
                         types_deque.push_back(self.read()?);
                         let mut nesting_count = 1;
                         while nesting_count != 0 {
@@ -543,7 +548,7 @@ impl PopForType for VecDeque<Token> {
                 }
             }
         }
-        Ok((types_deque, specifier_locations))
+        Ok((types_deque, specifier_locations, struct_has_body))
     }
 }
 

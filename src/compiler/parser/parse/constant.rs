@@ -1,16 +1,21 @@
 use std::{collections::HashMap, error::Error};
 
 use crate::compiler::{
-    parser::{BinaryOperatorNode, ExpressionWithoutType, UnaryOperatorNode},
-    types::{Constant, Type},
+    parser::{
+        validate::ValidateContext, BinaryOperatorNode, ExpressionWithoutType, UnaryOperatorNode,
+    },
+    types::{Constant, StorageInfo, Type},
 };
 
 impl ExpressionWithoutType {
-    pub fn fold_to_constant(&self) -> Result<Constant, Box<dyn Error>> {
+    pub fn fold_to_constant(
+        &self,
+        context: &Option<&mut ValidateContext>,
+    ) -> Result<Constant, Box<dyn Error>> {
         let c = match self {
             ExpressionWithoutType::Constant(c) => c.clone(),
             ExpressionWithoutType::Unary(op, e) => {
-                let c = e.0.fold_to_constant()?;
+                let c = e.0.fold_to_constant(context)?;
                 match &op {
                     UnaryOperatorNode::Complement => c.complement(),
                     UnaryOperatorNode::Negate => -c,
@@ -31,8 +36,8 @@ impl ExpressionWithoutType {
                 }
             }
             ExpressionWithoutType::Binary(op, left, right) => {
-                let mut left = left.0.fold_to_constant()?;
-                let mut right = right.0.fold_to_constant()?;
+                let mut left = left.0.fold_to_constant(context)?;
+                let mut right = right.0.fold_to_constant(context)?;
 
                 let original_left = left.clone();
                 let original_right = right.clone();
@@ -77,11 +82,11 @@ impl ExpressionWithoutType {
             }
 
             ExpressionWithoutType::Ternary(cond, left, right) => {
-                let cond = cond.0.fold_to_constant()?;
+                let cond = cond.0.fold_to_constant(context)?;
                 if cond.is_zero() {
-                    right.0.fold_to_constant()?
+                    right.0.fold_to_constant(context)?
                 } else {
-                    left.0.fold_to_constant()?
+                    left.0.fold_to_constant(context)?
                 }
             }
 
@@ -99,7 +104,7 @@ impl ExpressionWithoutType {
                 if !t.is_integer() {
                     return Err("Cannot cast to a non-integer type in a constant".into());
                 }
-                let e = e.0.fold_to_constant()?;
+                let e = e.0.fold_to_constant(context)?;
                 e.convert_to(t)
             }
 
@@ -107,10 +112,27 @@ impl ExpressionWithoutType {
                 return Err("Cannot dereference in a constant".into())
             }
 
-            ExpressionWithoutType::AddressOf(_) => {
+            ExpressionWithoutType::AddressOf(e) => {
                 // not strictly following the spec here, taking addresses of static variables may
                 // be allowed in some contexts
-                return Err("Cannot use take address of another variable in a constant".into());
+                if let (ExpressionWithoutType::Var(name), Some(c)) = (&e.0, context) {
+                    let info = c
+                        .symbols
+                        .get(name)
+                        .ok_or::<Box<dyn Error>>("Cannot find symbol".into())?;
+                    if !matches!(
+                        info.storage,
+                        StorageInfo::Static(_, _) | StorageInfo::Constant(_)
+                    ) {
+                        return Err(
+                            "Can only take the address of static or constant variables".into()
+                        );
+                    }
+
+                    Constant::AddressOf(name.to_string())
+                } else {
+                    return Err("Cannot take address of expression in a constant".into());
+                }
             }
 
             ExpressionWithoutType::String(_) => {

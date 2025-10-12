@@ -114,7 +114,8 @@ impl CodeDisplay for StatementNode {
             StatementNode::Goto(s) => format!("{}goto {}", context.new_line_start(), s),
             StatementNode::Compound(block) => {
                 format!(
-                    "{{{}{}}}",
+                    "{}{{{}{}}}",
+                    context.new_line_start(),
                     block.show(&mut context.indent()),
                     context.new_line_start()
                 )
@@ -610,6 +611,7 @@ impl CodeDisplay for Constant {
             Constant::LongDouble(c) => format!("longer_float64({})", c),
             Constant::Char(c) => format!("rune({})", c.show(context)),
             Constant::UnsignedChar(c) => format!("unsigned_rune({})", (*c as i8).show(context)),
+            Constant::AddressOf(name) => format!("&{}", name),
         }
     }
 }

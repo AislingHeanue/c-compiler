@@ -38,6 +38,7 @@ impl Constant {
             Constant::LongDouble(i) => StaticInitialiser::from_double(*i, target),
             Constant::LongLong(i) => StaticInitialiser::from_number(*i, target),
             Constant::UnsignedLongLong(i) => StaticInitialiser::from_number(*i, target),
+            Constant::AddressOf(_) => unreachable!(),
         }
     }
 
@@ -50,6 +51,9 @@ impl Constant {
             | Constant::UnsignedLong(0)
             | Constant::UnsignedLongLong(0) => {
                 StaticInitialiser::Comparable(ComparableStatic::ZeroBytes(8))
+            }
+            Constant::AddressOf(name) => {
+                StaticInitialiser::Comparable(ComparableStatic::StaticPointer(name.to_string()))
             }
             _ => unreachable!(),
         }
@@ -138,6 +142,7 @@ impl Constant {
             Constant::UnsignedChar(i) => Constant::UnsignedChar(!i),
             Constant::Short(i) => Constant::Short(!i),
             Constant::UnsignedShort(i) => Constant::UnsignedShort(!i),
+            Constant::AddressOf(_) => unreachable!(),
         }
     }
 
@@ -181,6 +186,7 @@ impl Constant {
             Constant::LongDouble(_) => unreachable!(),
             Constant::Char(i) => i.try_into().unwrap(),
             Constant::UnsignedChar(i) => i.into(),
+            Constant::AddressOf(_) => unreachable!(),
         }
     }
 
@@ -199,6 +205,7 @@ impl Constant {
             Constant::LongDouble(_) => unreachable!(),
             Constant::Char(i) => i.into(),
             Constant::UnsignedChar(i) => i.into(),
+            Constant::AddressOf(_) => unreachable!(),
         }
     }
 
@@ -241,6 +248,7 @@ impl Constant {
             Constant::LongDouble(_) => Type::LongDouble,
             Constant::Char(_) => Type::Char,
             Constant::UnsignedChar(_) => Type::UnsignedChar,
+            Constant::AddressOf(_) => unreachable!(),
         }
     }
 
@@ -259,6 +267,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as i32,
             Constant::LongLong(i) => *i as i32,
             Constant::UnsignedLongLong(i) => *i as i32,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::Integer(val)
     }
@@ -277,6 +286,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as u32,
             Constant::LongLong(i) => *i as u32,
             Constant::UnsignedLongLong(i) => *i as u32,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::UnsignedInteger(val)
     }
@@ -295,6 +305,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as i64,
             Constant::LongLong(i) => *i,
             Constant::UnsignedLongLong(i) => *i as i64,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::Long(val)
     }
@@ -313,6 +324,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as u64,
             Constant::LongLong(i) => *i as u64,
             Constant::UnsignedLongLong(i) => *i,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::UnsignedLong(val)
     }
@@ -332,6 +344,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as f32,
             Constant::LongLong(i) => *i as f32,
             Constant::UnsignedLongLong(i) => *i as f32,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::Float(val)
     }
@@ -350,6 +363,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as f64,
             Constant::LongLong(i) => *i as f64,
             Constant::UnsignedLongLong(i) => *i as f64,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::Double(val)
     }
@@ -368,6 +382,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as f64,
             Constant::LongLong(i) => *i as f64,
             Constant::UnsignedLongLong(i) => *i as f64,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::LongDouble(val)
     }
@@ -386,6 +401,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as i8,
             Constant::LongLong(i) => *i as i8,
             Constant::UnsignedLongLong(i) => *i as i8,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::Char(val)
     }
@@ -404,6 +420,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as u8,
             Constant::LongLong(i) => *i as u8,
             Constant::UnsignedLongLong(i) => *i as u8,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::UnsignedChar(val)
     }
@@ -422,6 +439,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as i16,
             Constant::LongLong(i) => *i as i16,
             Constant::UnsignedLongLong(i) => *i as i16,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::Short(val)
     }
@@ -440,6 +458,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i,
             Constant::LongLong(i) => *i as u16,
             Constant::UnsignedLongLong(i) => *i as u16,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::UnsignedShort(val)
     }
@@ -458,6 +477,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as i64,
             Constant::LongLong(i) => *i,
             Constant::UnsignedLongLong(i) => *i as i64,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::LongLong(val)
     }
@@ -476,6 +496,7 @@ impl Constant {
             Constant::UnsignedShort(i) => *i as u64,
             Constant::LongLong(i) => *i as u64,
             Constant::UnsignedLongLong(i) => *i,
+            Constant::AddressOf(_) => unreachable!(),
         };
         Constant::UnsignedLongLong(val)
     }
@@ -916,6 +937,7 @@ impl Neg for Constant {
             Constant::UnsignedShort(i) => Constant::UnsignedShort(!i + 1), // undefined behaviour
             Constant::LongLong(i) => Constant::LongLong(!i),
             Constant::UnsignedLongLong(i) => Constant::UnsignedLongLong(!i + 1), // undefined behaviour
+            Constant::AddressOf(_) => unreachable!(),
         }
     }
 }

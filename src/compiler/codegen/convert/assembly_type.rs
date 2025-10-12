@@ -56,9 +56,9 @@ impl AssemblyType {
             BirdsValueNode::Constant(Constant::UnsignedInteger(_)) => {
                 (AssemblyType::Longword, false, true)
             }
-            BirdsValueNode::Constant(Constant::UnsignedLong(_) | Constant::UnsignedLongLong(_)) => {
-                (AssemblyType::Quadword, false, true)
-            }
+            BirdsValueNode::Constant(
+                Constant::UnsignedLong(_) | Constant::UnsignedLongLong(_) | Constant::AddressOf(_),
+            ) => (AssemblyType::Quadword, false, true),
             BirdsValueNode::Constant(Constant::Float(_)) => (AssemblyType::Float, true, true),
             BirdsValueNode::Constant(Constant::Double(_) | Constant::LongDouble(_)) => {
                 (AssemblyType::Double, true, true)

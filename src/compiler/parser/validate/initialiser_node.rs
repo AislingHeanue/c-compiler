@@ -120,10 +120,13 @@ impl InitialiserNode {
                         }
                     }
                 }
-                if matches!(target_type, Type::Pointer(_, _)) && !i.equals_null_pointer() {
-                    return Err("Cannot initialise a static pointer with a non-pointer type".into());
-                }
-                vec![i.0.fold_to_constant()?.static_convert_to(target_type)]
+                // if matches!(target_type, Type::Pointer(_, _)) && !i.equals_null_pointer() {
+                //     return Err("Cannot initialise a static pointer with a non-pointer type".into());
+                // }
+                vec![i
+                    .0
+                    .fold_to_constant(&Some(context))?
+                    .static_convert_to(target_type)]
             }
             (Type::Array(t, size), InitialiserWithoutType::Compound(ref mut initialisers)) => {
                 let size =

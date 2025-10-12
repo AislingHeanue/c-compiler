@@ -629,8 +629,8 @@ impl ExpressionWithoutType {
         context: &mut ParseContext,
     ) -> Result<String, Box<dyn Error>> {
         // println!(
-        //     "resolve {:?} {:?}",
-        //     context.outer_struct_names, context.current_struct_names
+        //     "resolve {} {:?} {:?}",
+        //     name, context.outer_struct_names, context.current_struct_names
         // );
         if let Some(info) = context.current_struct_names.get(name) {
             if info.1 != *expecting_kind {
@@ -703,6 +703,7 @@ impl ExpressionWithoutType {
 pub trait PopForExpression {
     fn pop_tokens_for_expression(
         &mut self,
+        is_param: bool,
         context: &mut ParseContext,
         // type tokens and storage class tokens
     ) -> Result<VecDeque<Token>, Box<dyn Error>>;
@@ -710,7 +711,8 @@ pub trait PopForExpression {
 impl PopForExpression for VecDeque<Token> {
     fn pop_tokens_for_expression(
         &mut self,
-        context: &mut ParseContext,
+        is_param: bool,
+        _context: &mut ParseContext,
         // type tokens and storage class tokens
     ) -> Result<VecDeque<Token>, Box<dyn Error>> {
         let mut out = VecDeque::new();
@@ -724,15 +726,14 @@ impl PopForExpression for VecDeque<Token> {
                 && square_nesting == 0
                 && brace_nesting == 0
                 && out.back() != Some(&Token::Assignment)
-                && !out.is_empty()
-                && matches!(
+                && (is_param || !out.is_empty())
+                && (matches!(
                     self.peek()?,
                     Token::CloseParen
                         | Token::CloseSquareBracket
                         | Token::OpenBrace
                         | Token::SemiColon
-                )
-                || (context.parsing_param && matches!(self.peek()?, Token::Comma))))
+                ) || (is_param && matches!(self.peek()?, Token::Comma)))))
         {
             match self.peek()? {
                 Token::OpenParen => paren_nesting += 1,

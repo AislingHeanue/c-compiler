@@ -15,7 +15,12 @@ impl Parse<DeclaratorsWithInline> for VecDeque<Token> {
         let (declarator, mut inlines) = self.parse_full_declarator(context)?;
         let mut declarators = DeclaratorsWithAssignment(vec![(declarator, VecDeque::new())]);
 
-        while !self.is_empty() && matches!(self.peek()?, Token::Comma | Token::Assignment) {
+        while !self.is_empty()
+            && matches!(
+                self.peek()?,
+                Token::Comma | Token::Assignment | Token::Colon
+            )
+        {
             match self.peek()? {
                 Token::Comma => {
                     self.expect(Token::Comma)?;
@@ -25,8 +30,13 @@ impl Parse<DeclaratorsWithInline> for VecDeque<Token> {
                 }
                 Token::Assignment if declarators.0.last().unwrap().1.is_empty() => {
                     self.expect(Token::Assignment)?;
-                    let init_tokens = self.pop_tokens_for_expression(context)?;
+                    let init_tokens = self.pop_tokens_for_expression(false, context)?;
                     declarators.0.last_mut().unwrap().1 = init_tokens;
+                }
+                // ignore bit fields
+                Token::Colon => {
+                    self.expect(Token::Colon)?;
+                    self.expect(Token::IntegerConstant(0))?;
                 }
                 _ => unreachable!(),
             }
@@ -231,7 +241,7 @@ impl ParseDeclarator for VecDeque<Token> {
     ) -> Result<(Type, DeclaratorsWithAssignment, Vec<InlineDeclaration>), Box<dyn Error>> {
         context.parsing_param = true;
         let out = self.parse(context);
-        context.parsing_param = false;
+        context.parsing_param = true;
         out
     }
 
@@ -321,7 +331,7 @@ impl Declarator {
             }
             Declarator::Array(declarator, size_expression) => {
                 if let Some(expression) = size_expression {
-                    let size = expression.0.fold_to_constant()?.value_unsigned();
+                    let size = expression.0.fold_to_constant(&None)?.value_unsigned();
                     declarator.apply_to_type(
                         Type::Array(Box::new(base_type), Some(size)),
                         init,

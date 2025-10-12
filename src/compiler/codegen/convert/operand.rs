@@ -48,6 +48,7 @@ impl Convert<Operand> for BirdsValueNode {
                 StaticInitialiser::LongDouble(c),
                 context,
             )),
+            BirdsValueNode::Constant(Constant::AddressOf(_)) => unreachable!(),
             BirdsValueNode::Var(s) => {
                 let var_type = &context.symbols.get(&s).unwrap().symbol_type;
                 if var_type.is_scalar() {

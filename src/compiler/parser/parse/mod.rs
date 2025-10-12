@@ -46,7 +46,7 @@ pub struct ParseContext {
     parsing_param: bool,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum StructKind {
     Struct,
     Union,
@@ -136,7 +136,6 @@ impl Parse<ForInitialiserNode> for VecDeque<Token> {
 
 impl Parse<InitialiserNode> for VecDeque<Token> {
     fn parse(&mut self, context: &mut ParseContext) -> Result<InitialiserNode, Box<dyn Error>> {
-        println!("{:?}", self);
         let init = match self.peek()? {
             Token::OpenBrace => {
                 self.expect(Token::OpenBrace)?;

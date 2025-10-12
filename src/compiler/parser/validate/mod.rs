@@ -66,7 +66,7 @@ pub struct ValidateContext {
     current_switch_type: Option<Type>,
     current_struct_members: HashSet<String>,
     checking_embedded_struct: bool,
-    symbols: HashMap<String, SymbolInfo>,
+    pub symbols: HashMap<String, SymbolInfo>,
     structs: HashMap<String, StructInfo>,
     enum_names_in_scope: Vec<EnumMember>,
 }

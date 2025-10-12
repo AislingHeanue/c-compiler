@@ -46,7 +46,9 @@ impl Parse<StatementNode> for VecDeque<Token> {
                 Ok(StatementNode::Goto(s))
             }
             Token::OpenBrace => {
+                let outer_scope = BlockItemNode::enter_scope(context);
                 let block = self.parse(context)?;
+                BlockItemNode::leave_scope(outer_scope, context);
                 Ok(StatementNode::Compound(block))
             }
             Token::KeywordFor => {

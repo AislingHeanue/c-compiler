@@ -443,6 +443,7 @@ pub trait TokenVector {
 
 impl TokenVector for VecDeque<Token> {
     fn expect(&mut self, expected: Token) -> Result<(), Box<dyn Error>> {
+        // println!("expecting {:?}", self.front());
         let token = self.read()?;
         if discriminant(&expected) != discriminant(&token) {
             return Err(format!(
