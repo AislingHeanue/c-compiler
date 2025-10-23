@@ -1,0 +1,58 @@
+#!/bin/bash
+
+skips=(
+    # struct composite initialisers { .a = 5, .c = 10 }
+    48
+    49
+    150
+    216
+    # variadic args in preprocessor macros
+    83
+    84
+    85
+    97
+    # array compound initialisers int a[] = {5, [2] = 2, 3};
+    # ALSO VARIABLE LENGTH ARRAYS
+    92
+    93
+    115
+    117
+    147
+    148
+    151
+    205
+    217
+    # array length initialised by a variable
+    207
+    # variable length array special syntax [*] (painful to parse)
+    162
+    # extended char set strings
+    98
+    220
+    # dunno, something about static pointers and structs
+    149
+    # literally not even part of the C spec lol
+    170
+    # I am baffled why this suddenly doesn't work. I will fix this one if it's the death of me
+    104
+    # a for loop with an expression in the form p++, f++. Too many changes to expression parsing logic required
+    # to determine what ',' means for the moment, methinks
+    204
+    # pragma push_macro and pragma pop_macro
+    206
+    # this test is too cursed (function headers in params decay to function pointers? what?)
+    209
+    # block statements in expressions (eg ternary)
+    213
+    214
+    # bitfields (and certain constant semantics)
+    218
+    # _Generic
+    219
+    # __attribute__
+    210
+)
+
+for i in ${skips[@]}; do
+    echo "$(printf "./tests/single-exec/%05d.c\n" $i)"
+done

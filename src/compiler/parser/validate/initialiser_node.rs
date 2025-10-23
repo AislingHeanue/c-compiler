@@ -103,8 +103,11 @@ impl InitialiserNode {
                         Type::Function(r2, args2, is_variadic2),
                     ) = (*target_p.clone(), *p.clone())
                     {
-                        // NOTE: var args might break this check (among other things)
-                        if r1 != r2 || args1 != args2 || is_variadic1 != is_variadic2 {
+                        if r1 != r2
+                            || args1.len() != args2.len()
+                            || args1.iter().enumerate().any(|(i, t)| !t.soft_eq(&args2[i]))
+                            || is_variadic1 != is_variadic2
+                        {
                             return Err("Incompatible types assigning a function pointer to a static variable".into());
                         }
                         if let ExpressionWithoutType::AddressOf(v) = &i.0 {

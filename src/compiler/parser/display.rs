@@ -479,6 +479,15 @@ impl CodeDisplay for Option<ExpressionNode> {
     }
 }
 
+impl CodeDisplay for Option<Vec<EnumMember>> {
+    fn show(&self, context: &mut DisplayContext) -> String {
+        match self {
+            None => "".to_string(),
+            Some(e) => e.show(context),
+        }
+    }
+}
+
 impl CodeDisplay for ExpressionNode {
     fn show(&self, context: &mut DisplayContext) -> String {
         if let Some(t) = &self.1 {

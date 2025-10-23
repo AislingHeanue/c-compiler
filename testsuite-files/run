@@ -1,0 +1,18 @@
+#!/bin/bash
+
+C_COMP_ROOT="/home/aisling/dev/AislingHeanue/c-compiler"
+TEST_ROOT="/home/aisling/dev/c-testsuite/c-testsuite"
+
+cd $C_COMP_ROOT
+cargo build --release --quiet
+
+cd $TEST_ROOT
+
+if [[ -n $1 ]]; then
+	file=$(printf "tests/single-exec/%05d.c" $1)
+	# if a test is specified, print and run it
+	bat $file --paging=never
+	./runners/single-exec/aisling $file -lm --optimize
+else
+	./single-exec aisling -lm
+fi

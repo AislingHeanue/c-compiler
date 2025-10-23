@@ -17,6 +17,7 @@ pub enum PreprocessorToken {
     Punctuator(String),
     WidePunctuator(String),
     WhiteSpace(String),
+    UnspecifiedArg,
 
     KeywordDefined,
 
@@ -79,6 +80,7 @@ lazy_static! {
                 PreprocessorToken::DirectiveError => r"\s*#\s*error\s*",
                 PreprocessorToken::DirectivePragma => r"\s*#\s*pragma\s*",
                 PreprocessorToken::DirectiveWarning => r"\s*#\s*warning\s*",
+                PreprocessorToken::UnspecifiedArg => r"\b\B" // never actually match this one
             };
             if !entry.is_empty() {
                 let entry = "^".to_string() + entry;
@@ -303,6 +305,7 @@ impl Display for PreprocessorToken {
                     cs.iter().map(PreprocessorToken::display_character).join("")
                 )
             }
+            PreprocessorToken::UnspecifiedArg => "".to_string(),
             PreprocessorToken::Punctuator(ref s) => s.to_string(),
             PreprocessorToken::WidePunctuator(ref s) => s.to_string(),
             PreprocessorToken::WhiteSpace(ref s) => s.to_string(),

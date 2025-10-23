@@ -314,7 +314,7 @@ impl CheckTypes for ExpressionNode {
                     return Err("Cannot assign to a constant after initial declaration".into());
                 }
                 let original_enum_names_in_scope = context.enum_names_in_scope.clone();
-                if let Some(Type::Enum(members)) = &dst.1 {
+                if let Some(Type::Enum(Some(members))) = &dst.1 {
                     context.enum_names_in_scope.append(&mut members.clone())
                 }
                 src.check_types_and_convert(context)?;

@@ -254,9 +254,9 @@ impl Parse<Vec<DeclarationNode>> for VecDeque<Token> {
             };
             if must_have_body {
                 match out {
-                    Ok(DeclarationNode::Variable(v)) if v.init.is_none() => {
-                        return Err("Const variable declaration must have a value".into())
-                    }
+                    // Ok(DeclarationNode::Variable(v)) if v.init.is_none() => {
+                    //     return Err("Const variable declaration must have a value".into())
+                    // }
                     Ok(DeclarationNode::Function(f)) if f.body.is_none() => {
                         return Err("Const function declaration must have a value".into())
                     }

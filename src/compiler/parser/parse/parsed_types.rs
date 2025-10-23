@@ -234,19 +234,17 @@ impl ParseStructDeclaration for VecDeque<Token> {
                             "Enum definition (eg. with '{}') must have at least one member".into(),
                         );
                     } else {
-                        members
+                        Some(members)
                     }
                 } else {
                     // NOTE: this gets the enum from the enums map and sandwiches its members into
                     // this declaration. This is the only type that does this in the parser step,
                     // and it needs to do this at the moment because the type-checker lacks the
                     // required scope information to do it there.
-                    let e = context.enums.get(&new_struct_name);
-                    if let Some(found_members) = e {
-                        found_members.to_vec()
-                    } else {
-                        return Err("Could not find a definition for enum options".into());
-                    }
+                    context
+                        .enums
+                        .get(&new_struct_name)
+                        .map(|found_members| found_members.to_vec())
                 };
 
                 Ok(InlineDeclaration::Enum(EnumDeclaration {
@@ -559,7 +557,10 @@ impl StructMember {
         let mut out = Vec::new();
         for i in self.inline_declarations.iter() {
             match i {
-                InlineDeclaration::Enum(e) => out.append(&mut e.members.to_vec()),
+                InlineDeclaration::Enum(e) if e.members.is_some() => {
+                    out.append(&mut e.members.clone().unwrap())
+                }
+                InlineDeclaration::Enum(_) => {}
                 InlineDeclaration::Struct(s) => {
                     if let Some(members) = &s.members {
                         for s_member in members.iter() {

@@ -110,6 +110,7 @@ impl Type {
             Type::Void => false,
             Type::Function(_, _, _) => false,
             Type::Array(_, s) => s.is_some(),
+            Type::Enum(members) => members.is_some(),
             _ => true,
         }
     }

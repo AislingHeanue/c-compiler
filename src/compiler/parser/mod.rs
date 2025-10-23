@@ -70,7 +70,7 @@ pub struct StructDeclaration {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumDeclaration {
     pub name: String,
-    pub members: Vec<EnumMember>,
+    pub members: Option<Vec<EnumMember>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

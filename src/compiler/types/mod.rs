@@ -32,7 +32,16 @@ pub enum Type {
     Void,
     // struct name, is_union
     Struct(String, bool),
-    Enum(Vec<EnumMember>),
+    Enum(Option<Vec<EnumMember>>),
+}
+
+impl Type {
+    pub fn soft_eq(&self, other: &Type) -> bool {
+        match (self, other) {
+            (Type::Pointer(a, _), Type::Pointer(b, _)) => a == b,
+            _ => self == other,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

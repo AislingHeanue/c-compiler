@@ -375,6 +375,7 @@ pub fn interpret(
                 | PreprocessorToken::Punctuator(_)
                 | PreprocessorToken::WidePunctuator(_)
                 | PreprocessorToken::WhiteSpace(_)
+                | PreprocessorToken::UnspecifiedArg
                 | PreprocessorToken::KeywordDefined => line_text += token.to_string().as_str(),
 
                 PreprocessorToken::Identifier(s) => {

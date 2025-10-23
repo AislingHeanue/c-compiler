@@ -155,8 +155,10 @@ impl CheckTypes for StructMember {
 
 impl CheckTypes for EnumDeclaration {
     fn check_types(&mut self, context: &mut ValidateContext) -> Result<(), Box<dyn Error>> {
-        for m in self.members.iter_mut() {
-            m.check_types(context)?;
+        if let Some(ref mut members) = self.members {
+            for m in members.iter_mut() {
+                m.check_types(context)?;
+            }
         }
         Ok(())
     }

@@ -24,7 +24,10 @@ pub fn resolve_identifier<'a, 'b: 'a>(
     mut seen_identifiers: HashSet<String>,
     context: &mut InterpreterContext,
 ) -> Result<ResolveReturn<'a, 'b>, Box<dyn Error>> {
-    // println!("resolving {:?}", tokens);
+    // println!(
+    //     "resolving {:?} but have seen {:?}",
+    //     tokens, seen_identifiers
+    // );
     let mut new_tokens = Vec::new();
     while let Some(token) = tokens.pop_front() {
         let next_is_concatenation = next_token_is_concatenation(&tokens);
@@ -126,6 +129,9 @@ pub fn resolve_identifier<'a, 'b: 'a>(
                                             if paren_nesting != 0 {
                                                 this_arg.push(token)
                                             } else {
+                                                if this_arg.is_empty() {
+                                                    this_arg.push(PreprocessorToken::UnspecifiedArg)
+                                                }
                                                 args.push(this_arg);
                                                 this_arg = Vec::new();
                                             }
@@ -133,6 +139,9 @@ pub fn resolve_identifier<'a, 'b: 'a>(
                                         PreprocessorToken::Punctuator(s)
                                             if s == "," && paren_nesting == 1 =>
                                         {
+                                            if this_arg.is_empty() {
+                                                this_arg.push(PreprocessorToken::UnspecifiedArg)
+                                            }
                                             args.push(this_arg);
                                             this_arg = Vec::new();
                                         }
@@ -146,7 +155,10 @@ pub fn resolve_identifier<'a, 'b: 'a>(
                                         _ => this_arg.push(token),
                                     }
                                 }
-                                if args.len() == 1 && args[0].is_empty() && params.is_empty() {
+                                if args.len() == 1
+                                    && args[0] == vec![PreprocessorToken::UnspecifiedArg]
+                                    && params.is_empty()
+                                {
                                     args = Vec::new();
                                 }
                                 if args.len() != params.len() {
@@ -261,7 +273,7 @@ pub fn resolve_identifier<'a, 'b: 'a>(
                 let mut this_token = t;
                 let mut inner_tokens = VecDeque::new();
                 while concatenate {
-                    let left = this_token.to_string();
+                    let left = this_token;
 
                     let mut next = tokens.pop_front();
                     while let Some(PreprocessorToken::WhiteSpace(_)) = next {
@@ -274,24 +286,27 @@ pub fn resolve_identifier<'a, 'b: 'a>(
                     // if next.is_none() {
                     //     return Err("## cannot be at the end of an expression".into());
                     // }
-                    let right = next
-                        .unwrap_or(PreprocessorToken::WhiteSpace("".to_string()))
-                        .to_string();
+                    let right = next.unwrap_or(PreprocessorToken::WhiteSpace("".to_string()));
 
                     concatenate = next_token_is_concatenation(&tokens);
 
-                    let new_s = format!("{}{}", left, right);
+                    let new_s = if right == PreprocessorToken::UnspecifiedArg {
+                        // add whitespace here so it doesn't concat with the next token
+                        format!("{} ", left)
+                    } else {
+                        format!("{}{}", left, right)
+                    };
                     let lexed = lex(vec![new_s])?;
                     if lexed.0.len() != 1 {
                         unreachable!()
                     }
                     if lexed.0[0].len() == 1 {
                         this_token = lexed.0[0][0].clone()
-                    } else if lexed.0.len() == 2 {
-                        println!(
-                            "WARNING: {} could not be resolved to a single token, returning both",
-                            lexed
-                        );
+                    } else if lexed.0[0].len() == 2 {
+                        // println!(
+                        //     "WARNING {:?} could not be resolved to a single token, returning both",
+                        //     lexed.0[0]
+                        // );
                         inner_tokens.push_back(lexed.0[0][0].clone());
                         this_token = lexed.0[0][1].clone();
                     } else {
@@ -307,7 +322,7 @@ pub fn resolve_identifier<'a, 'b: 'a>(
                     inner_tokens,
                     token_iter,
                     line_iter,
-                    seen_identifiers.clone(),
+                    HashSet::new(),
                     context,
                 )?;
                 // seen_identifiers.remove(identifier);

@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -e
+# set -u
+
+CC=/home/aisling/dev/AislingHeanue/c-compiler/target/release/c-compiler
+# A typical configuration
+CFLAGS="-lm --optimize"
+
+export CC CFLAGS
+exec ./runners/single-exec/posix $1
